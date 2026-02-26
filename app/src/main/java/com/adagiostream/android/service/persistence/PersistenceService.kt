@@ -71,4 +71,23 @@ class PersistenceService(
     suspend fun saveSettings(settings: AppSettings) = mutex.withLock {
         settingsFile.writeText(json.encodeToString(settings))
     }
+
+    suspend fun clearAllFavorites() = mutex.withLock {
+        favoritesFile.delete()
+    }
+
+    private val lastPlayedFile: File
+        get() = File(context.filesDir, "last_played.txt")
+
+    suspend fun saveLastPlayed(channelId: String) = mutex.withLock {
+        lastPlayedFile.writeText(channelId)
+    }
+
+    suspend fun loadLastPlayed(): String? = mutex.withLock {
+        try {
+            if (lastPlayedFile.exists()) lastPlayedFile.readText().ifBlank { null } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
 }

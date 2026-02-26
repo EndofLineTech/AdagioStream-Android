@@ -42,6 +42,7 @@ fun AddProviderScreen(
     val host by viewModel.host.collectAsStateWithLifecycle()
     val username by viewModel.username.collectAsStateWithLifecycle()
     val password by viewModel.password.collectAsStateWithLifecycle()
+    val epgUrl by viewModel.epgUrl.collectAsStateWithLifecycle()
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
     val saveComplete by viewModel.saveComplete.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
@@ -126,6 +127,15 @@ fun AddProviderScreen(
                     onValueChange = { viewModel.setM3uUrl(it) },
                     label = { Text("M3U URL") },
                     placeholder = { Text("http://example.com/playlist.m3u") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = epgUrl,
+                    onValueChange = { viewModel.setEpgUrl(it) },
+                    label = { Text("EPG URL (Optional)") },
+                    placeholder = { Text("http://example.com/epg.xml") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )

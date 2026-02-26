@@ -3,12 +3,12 @@ package com.adagiostream.android.service.player
 import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.service.provider.ProviderManager
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 @UnstableApi
 class VLCForwardingPlayer(
     private val vlcPlayer: VLCPlayerWrapper,
+    private val providerManager: ProviderManager,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -57,6 +58,7 @@ class VLCForwardingPlayer(
                 COMMAND_SEEK_TO_PREVIOUS,
                 COMMAND_GET_CURRENT_MEDIA_ITEM,
                 COMMAND_GET_METADATA,
+                COMMAND_SET_MEDIA_ITEM,
             )
             .build()
 
@@ -84,6 +86,7 @@ class VLCForwardingPlayer(
                     MediaMetadata.Builder()
                         .setTitle(channel.name)
                         .setStation(channel.name)
+                        .setArtist(channel.group)
                         .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
                         .setIsPlayable(true)
                         .build()
@@ -111,6 +114,19 @@ class VLCForwardingPlayer(
 
     override fun handleStop(): ListenableFuture<*> {
         vlcPlayer.stop()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleAddMediaItems(
+        index: Int,
+        mediaItems: List<MediaItem>,
+    ): ListenableFuture<*> {
+        val mediaItem = mediaItems.firstOrNull() ?: return Futures.immediateVoidFuture()
+        val mediaId = mediaItem.mediaId
+        val channel = providerManager.channels.value.find { it.id == mediaId }
+        if (channel != null) {
+            vlcPlayer.play(channel)
+        }
         return Futures.immediateVoidFuture()
     }
 

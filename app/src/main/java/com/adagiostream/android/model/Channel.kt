@@ -11,4 +11,5 @@ data class Channel(
     val group: String,
     val epgChannelID: String? = null,
     val isFavorite: Boolean = false,
+    val xtreamStreamId: Long? = null,
 )

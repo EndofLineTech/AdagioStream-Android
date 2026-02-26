@@ -46,7 +46,10 @@ fun MainScreen(
     val currentChannel by nowPlayingViewModel.currentChannel.collectAsStateWithLifecycle()
     var showNowPlaying by remember { mutableStateOf(false) }
 
-    AdagioStreamTheme(appearanceMode = settings.appearanceMode) {
+    AdagioStreamTheme(
+        appearanceMode = settings.appearanceMode,
+        textSizeMode = settings.textSizeMode,
+    ) {
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination

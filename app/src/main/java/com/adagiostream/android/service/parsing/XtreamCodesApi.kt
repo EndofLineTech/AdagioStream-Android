@@ -1,9 +1,12 @@
 package com.adagiostream.android.service.parsing
 
+import android.util.Base64
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.ProviderType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -17,6 +20,17 @@ class XtreamCodesApi(private val client: OkHttpClient) {
     suspend fun getChannels(config: ProviderType.XtreamCodes): List<Channel> =
         withContext(Dispatchers.IO) {
             val baseUrl = config.host.trimEnd('/')
+
+            // Authenticate first to get allowed output formats
+            val authResponse = authenticate(baseUrl, config.username, config.password)
+            val allowedFormats = authResponse?.userInfo?.allowedOutputFormats ?: emptyList()
+            val preferredExt = when {
+                allowedFormats.contains("m3u8") -> "m3u8"
+                allowedFormats.contains("ts") -> "ts"
+                allowedFormats.isNotEmpty() -> allowedFormats.first()
+                else -> "ts"
+            }
+
             val categories = fetchCategories(baseUrl, config.username, config.password)
             val streams = fetchLiveStreams(baseUrl, config.username, config.password)
 
@@ -24,7 +38,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
 
             streams.map { stream ->
                 val group = categoryMap[stream.categoryId] ?: "Uncategorized"
-                val ext = if (stream.containerExtension.isNullOrBlank()) "ts" else stream.containerExtension
+                val ext = if (stream.containerExtension.isNullOrBlank()) preferredExt else stream.containerExtension
                 val streamUrl = "$baseUrl/live/${config.username}/${config.password}/${stream.streamId}.$ext"
 
                 Channel(
@@ -34,9 +48,58 @@ class XtreamCodesApi(private val client: OkHttpClient) {
                     logoURL = stream.streamIcon?.ifBlank { null },
                     group = group,
                     epgChannelID = stream.epgChannelId?.ifBlank { null },
+                    xtreamStreamId = stream.streamId,
                 )
             }
         }
+
+    suspend fun getShortEPG(
+        streamId: Long,
+        config: ProviderType.XtreamCodes,
+    ): List<EPGEntry> = withContext(Dispatchers.IO) {
+        try {
+            val baseUrl = config.host.trimEnd('/')
+            val url = "$baseUrl/player_api.php?username=${config.username}&password=${config.password}&action=get_short_epg&stream_id=$streamId"
+            val request = Request.Builder().url(url).build()
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: return@withContext emptyList()
+            val epgResponse = json.decodeFromString<XtreamEPGResponse>(body)
+
+            epgResponse.epgListings.mapNotNull { listing ->
+                val title = decodeIfBase64(listing.title)
+                val description = listing.description?.let { decodeIfBase64(it) }
+                val start = listing.startTimestamp ?: return@mapNotNull null
+                val end = listing.stopTimestamp ?: return@mapNotNull null
+                val channelId = listing.epgId ?: return@mapNotNull null
+
+                EPGEntry(
+                    channelID = channelId,
+                    title = title,
+                    description = description?.ifBlank { null },
+                    start = start * 1000L, // API returns seconds, EPGEntry uses millis
+                    end = end * 1000L,
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun authenticate(
+        baseUrl: String,
+        username: String,
+        password: String,
+    ): AuthResponse? {
+        return try {
+            val url = "$baseUrl/player_api.php?username=$username&password=$password"
+            val request = Request.Builder().url(url).build()
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: return null
+            json.decodeFromString<AuthResponse>(body)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun fetchCategories(
         baseUrl: String,
@@ -62,19 +125,68 @@ class XtreamCodesApi(private val client: OkHttpClient) {
         return json.decodeFromString<List<XtreamStream>>(body)
     }
 
+    private fun decodeIfBase64(value: String): String {
+        return try {
+            val decoded = Base64.decode(value, Base64.DEFAULT)
+            val result = String(decoded, Charsets.UTF_8)
+            // Heuristic: if decoded string is printable, it was base64
+            if (result.all { it.isLetterOrDigit() || it.isWhitespace() || it in ".,!?;:'-/()&@#" }) {
+                result
+            } else {
+                value
+            }
+        } catch (_: Exception) {
+            value
+        }
+    }
+
+    @Serializable
+    private data class AuthResponse(
+        @SerialName("user_info") val userInfo: UserInfo? = null,
+        @SerialName("server_info") val serverInfo: ServerInfo? = null,
+    )
+
+    @Serializable
+    private data class UserInfo(
+        @SerialName("username") val username: String? = null,
+        @SerialName("status") val status: String? = null,
+        @SerialName("allowed_output_formats") val allowedOutputFormats: List<String> = emptyList(),
+    )
+
+    @Serializable
+    private data class ServerInfo(
+        @SerialName("url") val url: String? = null,
+        @SerialName("port") val port: String? = null,
+        @SerialName("server_protocol") val serverProtocol: String? = null,
+    )
+
     @Serializable
     private data class XtreamCategory(
-        @kotlinx.serialization.SerialName("category_id") val categoryId: String,
-        @kotlinx.serialization.SerialName("category_name") val categoryName: String,
+        @SerialName("category_id") val categoryId: String,
+        @SerialName("category_name") val categoryName: String,
     )
 
     @Serializable
     private data class XtreamStream(
-        @kotlinx.serialization.SerialName("stream_id") val streamId: Long,
-        @kotlinx.serialization.SerialName("name") val name: String,
-        @kotlinx.serialization.SerialName("stream_icon") val streamIcon: String? = null,
-        @kotlinx.serialization.SerialName("epg_channel_id") val epgChannelId: String? = null,
-        @kotlinx.serialization.SerialName("category_id") val categoryId: String? = null,
-        @kotlinx.serialization.SerialName("container_extension") val containerExtension: String? = null,
+        @SerialName("stream_id") val streamId: Long,
+        @SerialName("name") val name: String,
+        @SerialName("stream_icon") val streamIcon: String? = null,
+        @SerialName("epg_channel_id") val epgChannelId: String? = null,
+        @SerialName("category_id") val categoryId: String? = null,
+        @SerialName("container_extension") val containerExtension: String? = null,
+    )
+
+    @Serializable
+    private data class XtreamEPGResponse(
+        @SerialName("epg_listings") val epgListings: List<XtreamEPGListing> = emptyList(),
+    )
+
+    @Serializable
+    private data class XtreamEPGListing(
+        @SerialName("title") val title: String,
+        @SerialName("description") val description: String? = null,
+        @SerialName("epg_id") val epgId: String? = null,
+        @SerialName("start_timestamp") val startTimestamp: Long? = null,
+        @SerialName("stop_timestamp") val stopTimestamp: Long? = null,
     )
 }

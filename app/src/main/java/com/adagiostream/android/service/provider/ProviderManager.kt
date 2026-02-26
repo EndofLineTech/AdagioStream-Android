@@ -2,8 +2,10 @@ package com.adagiostream.android.service.provider
 
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
+import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.Provider
 import com.adagiostream.android.model.ProviderType
+import com.adagiostream.android.service.parsing.EPGParser
 import com.adagiostream.android.service.parsing.M3UParser
 import com.adagiostream.android.service.parsing.XtreamCodesApi
 import com.adagiostream.android.service.persistence.PersistenceService
@@ -26,6 +28,7 @@ class ProviderManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val m3uParser = M3UParser(client)
     private val xtreamApi = XtreamCodesApi(client)
+    private val epgParser = EPGParser(client)
 
     private val _providers = MutableStateFlow<List<Provider>>(emptyList())
     val providers: StateFlow<List<Provider>> = _providers.asStateFlow()
@@ -42,10 +45,17 @@ class ProviderManager @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    private val _epgEntries = MutableStateFlow<Map<String, List<EPGEntry>>>(emptyMap())
+    val epgEntries: StateFlow<Map<String, List<EPGEntry>>> = _epgEntries.asStateFlow()
+
     private var favoriteIds = mutableSetOf<String>()
+    var sortPrefixes: List<String> = listOf("Radio: ", "TV: ")
+        private set
 
     init {
         scope.launch {
+            val settings = persistenceService.loadSettings()
+            sortPrefixes = settings.sortPrefixes
             _providers.value = persistenceService.loadProviders()
             favoriteIds = persistenceService.loadFavoriteIds().toMutableSet()
             loadAllChannels()
@@ -90,10 +100,8 @@ class ProviderManager @Inject constructor(
             }
 
             _channels.value = withFavorites
-            _groups.value = withFavorites
-                .groupBy { it.group }
-                .map { (name, channels) -> ChannelGroup(name, channels.sortedBy { it.name }) }
-                .sortedBy { it.name }
+            rebuildGroups()
+            loadEPG()
         } catch (e: Exception) {
             _error.value = e.message ?: "Unknown error"
         } finally {
@@ -113,10 +121,84 @@ class ProviderManager @Inject constructor(
         _channels.value = _channels.value.map {
             if (favoriteKey(it) == key) it.copy(isFavorite = key in favoriteIds) else it
         }
+        rebuildGroups()
+    }
+
+    suspend fun clearAllFavorites() {
+        favoriteIds.clear()
+        persistenceService.clearAllFavorites()
+        _channels.value = _channels.value.map { it.copy(isFavorite = false) }
+        rebuildGroups()
+    }
+
+    fun updateSortPrefixes(prefixes: List<String>) {
+        sortPrefixes = prefixes
+        rebuildGroups()
+    }
+
+    suspend fun loadXtreamEPGForChannel(channel: Channel) {
+        val streamId = channel.xtreamStreamId ?: return
+        val provider = _providers.value.find {
+            it.type is ProviderType.XtreamCodes
+        } ?: return
+        val config = provider.type as ProviderType.XtreamCodes
+
+        try {
+            val entries = xtreamApi.getShortEPG(streamId, config)
+            if (entries.isNotEmpty()) {
+                val updated = _epgEntries.value.toMutableMap()
+                val channelId = channel.epgChannelID ?: channel.id
+                updated[channelId] = entries
+                _epgEntries.value = updated
+            }
+        } catch (_: Exception) {
+            // Silently fail — EPG is best-effort
+        }
+    }
+
+    private suspend fun loadEPG() {
+        val allEntries = mutableMapOf<String, List<EPGEntry>>()
+
+        for (provider in _providers.value) {
+            when (val type = provider.type) {
+                is ProviderType.M3U -> {
+                    val epgUrl = type.epgUrl
+                    if (!epgUrl.isNullOrBlank()) {
+                        try {
+                            val entries = epgParser.parse(epgUrl)
+                            allEntries.putAll(entries)
+                        } catch (_: Exception) {
+                            // EPG loading is best-effort
+                        }
+                    }
+                }
+                is ProviderType.XtreamCodes -> {
+                    // Xtream EPG is loaded on-demand per channel via loadXtreamEPGForChannel
+                }
+            }
+        }
+
+        _epgEntries.value = allEntries
+    }
+
+    private fun rebuildGroups() {
         _groups.value = _channels.value
             .groupBy { it.group }
-            .map { (name, channels) -> ChannelGroup(name, channels.sortedBy { it.name }) }
+            .map { (name, channels) ->
+                ChannelGroup(name, channels.sortedBy { strippedName(it.name) })
+            }
             .sortedBy { it.name }
+    }
+
+    private fun strippedName(name: String): String {
+        var result = name
+        for (prefix in sortPrefixes) {
+            if (result.startsWith(prefix, ignoreCase = true)) {
+                result = result.removePrefix(prefix)
+                break
+            }
+        }
+        return result.lowercase()
     }
 
     private fun favoriteKey(channel: Channel): String =

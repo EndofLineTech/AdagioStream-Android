@@ -1,6 +1,9 @@
 package com.adagiostream.android.service.player
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
@@ -39,6 +42,44 @@ class VLCPlayerWrapper(private val context: Context) {
 
     var bufferDurationSeconds: Int = 10
 
+    // Audio focus
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var pausedByTransientLoss = false
+    private val audioFocusRequest: AudioFocusRequest by lazy {
+        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            .setOnAudioFocusChangeListener(audioFocusListener)
+            .build()
+    }
+
+    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        scope.launch {
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    pausedByTransientLoss = false
+                    stop()
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    if (_playbackState.value is PlaybackState.Playing) {
+                        pausedByTransientLoss = true
+                        pause()
+                    }
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    if (pausedByTransientLoss) {
+                        pausedByTransientLoss = false
+                        resume()
+                    }
+                }
+            }
+        }
+    }
+
     fun setChannelList(channels: List<Channel>) {
         channelList = channels
     }
@@ -46,8 +87,12 @@ class VLCPlayerWrapper(private val context: Context) {
     fun play(channel: Channel) {
         stop()
 
+        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
+        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return
+
         _currentChannel.value = channel
         _playbackState.value = PlaybackState.Buffering
+        pausedByTransientLoss = false
 
         try {
             val vlcOptions = arrayListOf(
@@ -120,6 +165,9 @@ class VLCPlayerWrapper(private val context: Context) {
 
         _playbackState.value = PlaybackState.Idle
         _bitrateKbps.value = 0f
+        pausedByTransientLoss = false
+
+        audioManager.abandonAudioFocusRequest(audioFocusRequest)
     }
 
     fun playNext() {

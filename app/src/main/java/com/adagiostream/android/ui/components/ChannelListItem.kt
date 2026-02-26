@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import com.adagiostream.android.model.Channel
 
 @Composable
@@ -41,7 +40,7 @@ fun ChannelListItem(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (channel.logoURL != null) {
-            AsyncImage(
+            RetryableAsyncImage(
                 model = channel.logoURL,
                 contentDescription = channel.name,
                 modifier = Modifier

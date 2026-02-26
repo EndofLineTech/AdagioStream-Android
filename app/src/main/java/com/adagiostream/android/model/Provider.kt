@@ -17,6 +17,7 @@ sealed interface ProviderType {
     @SerialName("m3u")
     data class M3U(
         val url: String,
+        val epgUrl: String? = null,
     ) : ProviderType
 
     @Serializable

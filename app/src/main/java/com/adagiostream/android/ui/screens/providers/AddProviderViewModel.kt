@@ -36,6 +36,9 @@ class AddProviderViewModel @Inject constructor(
     private val _password = MutableStateFlow("")
     val password: StateFlow<String> = _password.asStateFlow()
 
+    private val _epgUrl = MutableStateFlow("")
+    val epgUrl: StateFlow<String> = _epgUrl.asStateFlow()
+
     private val _isSaving = MutableStateFlow(false)
     val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
 
@@ -51,6 +54,7 @@ class AddProviderViewModel @Inject constructor(
     fun setHost(value: String) { _host.value = value }
     fun setUsername(value: String) { _username.value = value }
     fun setPassword(value: String) { _password.value = value }
+    fun setEpgUrl(value: String) { _epgUrl.value = value }
 
     fun isValid(): Boolean {
         if (_name.value.isBlank()) return false
@@ -79,7 +83,10 @@ class AddProviderViewModel @Inject constructor(
                         password = _password.value.trim(),
                     )
                 } else {
-                    ProviderType.M3U(url = _m3uUrl.value.trim())
+                    ProviderType.M3U(
+                        url = _m3uUrl.value.trim(),
+                        epgUrl = _epgUrl.value.trim().ifBlank { null },
+                    )
                 }
 
                 val provider = Provider(

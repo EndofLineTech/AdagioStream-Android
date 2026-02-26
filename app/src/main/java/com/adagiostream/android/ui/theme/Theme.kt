@@ -10,6 +10,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.TextSizeMode
 
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
@@ -26,6 +27,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun AdagioStreamTheme(
     appearanceMode: AppearanceMode = AppearanceMode.SYSTEM,
+    textSizeMode: TextSizeMode = TextSizeMode.M,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (appearanceMode) {
@@ -45,7 +47,7 @@ fun AdagioStreamTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
+        typography = scaledTypography(textSizeMode.scaleFactor),
         content = content,
     )
 }

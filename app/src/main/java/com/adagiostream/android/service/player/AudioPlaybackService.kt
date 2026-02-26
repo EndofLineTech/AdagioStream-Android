@@ -4,6 +4,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -11,12 +13,20 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.provider.ProviderManager
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -24,13 +34,16 @@ class AudioPlaybackService : MediaLibraryService() {
 
     @Inject lateinit var vlcPlayer: VLCPlayerWrapper
     @Inject lateinit var providerManager: ProviderManager
+    @Inject lateinit var persistenceService: PersistenceService
 
     private var mediaLibrarySession: MediaLibrarySession? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
         private const val ROOT_ID = "root"
         private const val FAVORITES_ID = "favorites"
+        private val TOGGLE_FAVORITE_COMMAND = SessionCommand("TOGGLE_FAVORITE", Bundle.EMPTY)
     }
 
     @OptIn(UnstableApi::class)
@@ -38,9 +51,31 @@ class AudioPlaybackService : MediaLibraryService() {
         super.onCreate()
         createNotificationChannel()
 
-        val forwardingPlayer = VLCForwardingPlayer(vlcPlayer)
+        val forwardingPlayer = VLCForwardingPlayer(vlcPlayer, providerManager)
         mediaLibrarySession = MediaLibrarySession.Builder(this, forwardingPlayer, LibraryCallback())
             .build()
+
+        // Reactive browse tree updates
+        serviceScope.launch {
+            combine(
+                providerManager.groups,
+                providerManager.channels,
+            ) { _, _ -> Unit }.collect {
+                mediaLibrarySession?.connectedControllers?.forEach { controller ->
+                    mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, 0, null)
+                    mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, 0, null)
+                }
+            }
+        }
+
+        // Persist last played channel
+        serviceScope.launch {
+            vlcPlayer.currentChannel.collect { channel ->
+                if (channel != null) {
+                    persistenceService.saveLastPlayed(channel.id)
+                }
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -80,6 +115,53 @@ class AudioPlaybackService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     private inner class LibraryCallback : MediaLibrarySession.Callback {
 
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                .buildUpon()
+                .add(TOGGLE_FAVORITE_COMMAND)
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == TOGGLE_FAVORITE_COMMAND.customAction) {
+                val channel = vlcPlayer.currentChannel.value
+                if (channel != null) {
+                    serviceScope.launch {
+                        providerManager.toggleFavorite(channel)
+                    }
+                }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
+        }
+
+        override fun onPlaybackResumption(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val lastPlayedId = kotlinx.coroutines.runBlocking {
+                persistenceService.loadLastPlayed()
+            }
+            val channel = lastPlayedId?.let { id ->
+                providerManager.channels.value.find { it.id == id }
+            }
+            val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
+            return Futures.immediateFuture(
+                MediaSession.MediaItemsWithStartPosition(items, 0, 0L)
+            )
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -115,9 +197,21 @@ class AudioPlaybackService : MediaLibraryService() {
                 ROOT_ID -> {
                     val result = mutableListOf<MediaItem>()
                     if (favorites.isNotEmpty()) {
-                        result.add(buildBrowsableItem(FAVORITES_ID, "Favorites"))
+                        result.add(
+                            buildBrowsableItem(
+                                FAVORITES_ID,
+                                "Favorites",
+                                "${favorites.size} channels",
+                            )
+                        )
                     }
-                    result.addAll(groups.map { buildBrowsableItem(it.name, it.name) })
+                    result.addAll(groups.map {
+                        buildBrowsableItem(
+                            it.name,
+                            it.name,
+                            "${it.channels.size} channels",
+                        )
+                    })
                     result
                 }
                 FAVORITES_ID -> favorites.map { buildPlayableItem(it) }
@@ -166,35 +260,40 @@ class AudioPlaybackService : MediaLibraryService() {
                 LibraryResult.ofItemList(ImmutableList.copyOf(results), params)
             )
         }
+    }
 
-        private fun buildBrowsableItem(id: String, title: String): MediaItem {
-            return MediaItem.Builder()
-                .setMediaId(id)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(title)
-                        .setIsBrowsable(true)
-                        .setIsPlayable(false)
-                        .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
-                        .build()
-                )
-                .build()
+    private fun buildBrowsableItem(id: String, title: String, subtitle: String? = null): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .apply { if (subtitle != null) setSubtitle(subtitle) }
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                    .build()
+            )
+            .build()
+    }
+
+    private fun buildPlayableItem(channel: Channel): MediaItem {
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle(channel.name)
+            .setStation(channel.name)
+            .setArtist(channel.group)
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+
+        channel.logoURL?.let { url ->
+            metadataBuilder.setArtworkUri(Uri.parse(url))
         }
 
-        private fun buildPlayableItem(channel: Channel): MediaItem {
-            return MediaItem.Builder()
-                .setMediaId(channel.id)
-                .setUri(channel.streamURL)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(channel.name)
-                        .setStation(channel.name)
-                        .setIsPlayable(true)
-                        .setIsBrowsable(false)
-                        .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
-                        .build()
-                )
-                .build()
-        }
+        return MediaItem.Builder()
+            .setMediaId(channel.id)
+            .setUri(channel.streamURL)
+            .setMediaMetadata(metadataBuilder.build())
+            .build()
     }
 }

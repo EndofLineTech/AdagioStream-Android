@@ -28,3 +28,29 @@ val Typography = Typography(
         letterSpacing = 0.5.sp,
     ),
 )
+
+fun scaledTypography(scaleFactor: Float): Typography {
+    if (scaleFactor == 1.0f) return Typography
+    return Typography(
+        displayLarge = Typography.displayLarge.scaled(scaleFactor),
+        displayMedium = Typography.displayMedium.scaled(scaleFactor),
+        displaySmall = Typography.displaySmall.scaled(scaleFactor),
+        headlineLarge = Typography.headlineLarge.scaled(scaleFactor),
+        headlineMedium = Typography.headlineMedium.scaled(scaleFactor),
+        headlineSmall = Typography.headlineSmall.scaled(scaleFactor),
+        titleLarge = Typography.titleLarge.scaled(scaleFactor),
+        titleMedium = Typography.titleMedium.scaled(scaleFactor),
+        titleSmall = Typography.titleSmall.scaled(scaleFactor),
+        bodyLarge = Typography.bodyLarge.scaled(scaleFactor),
+        bodyMedium = Typography.bodyMedium.scaled(scaleFactor),
+        bodySmall = Typography.bodySmall.scaled(scaleFactor),
+        labelLarge = Typography.labelLarge.scaled(scaleFactor),
+        labelMedium = Typography.labelMedium.scaled(scaleFactor),
+        labelSmall = Typography.labelSmall.scaled(scaleFactor),
+    )
+}
+
+private fun TextStyle.scaled(factor: Float): TextStyle = copy(
+    fontSize = fontSize * factor,
+    lineHeight = lineHeight * factor,
+)
