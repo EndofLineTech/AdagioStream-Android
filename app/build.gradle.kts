@@ -79,8 +79,9 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
-    // libVLC
-    implementation(libs.libvlc)
+    // ExoPlayer
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.exoplayer.hls)
 
     // Coil
     implementation(libs.coil.compose)

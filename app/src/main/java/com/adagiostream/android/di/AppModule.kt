@@ -2,7 +2,7 @@ package com.adagiostream.android.di
 
 import android.content.Context
 import com.adagiostream.android.service.persistence.PersistenceService
-import com.adagiostream.android.service.player.VLCPlayerWrapper
+import com.adagiostream.android.service.player.ExoPlayerWrapper
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -32,7 +32,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideVLCPlayerWrapper(
+    fun provideExoPlayerWrapper(
         @ApplicationContext context: Context,
-    ): VLCPlayerWrapper = VLCPlayerWrapper(context)
+    ): ExoPlayerWrapper = ExoPlayerWrapper(context)
 }

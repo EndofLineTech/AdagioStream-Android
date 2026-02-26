@@ -40,12 +40,15 @@ class SettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            _settings.value = persistenceService.loadSettings()
+            val loaded = persistenceService.loadSettings()
+            _settings.value = loaded.copy(
+                bufferDurationSeconds = loaded.bufferDurationSeconds.coerceIn(5, 15),
+            )
         }
     }
 
     fun updateBufferDuration(seconds: Int) {
-        _settings.value = _settings.value.copy(bufferDurationSeconds = seconds)
+        _settings.value = _settings.value.copy(bufferDurationSeconds = seconds.coerceIn(5, 15))
         save()
     }
 

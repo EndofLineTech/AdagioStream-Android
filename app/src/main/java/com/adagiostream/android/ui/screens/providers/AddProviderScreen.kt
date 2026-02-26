@@ -53,7 +53,7 @@ fun AddProviderScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Add Provider") },
+            title = { Text(if (viewModel.isEditing) "Edit Provider" else "Add Provider") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -67,24 +67,26 @@ fun AddProviderScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                SegmentedButton(
-                    selected = !isXtream,
-                    onClick = { viewModel.setIsXtream(false) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                ) {
-                    Text("M3U Playlist")
+            if (!viewModel.isEditing) {
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = !isXtream,
+                        onClick = { viewModel.setIsXtream(false) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    ) {
+                        Text("M3U Playlist")
+                    }
+                    SegmentedButton(
+                        selected = isXtream,
+                        onClick = { viewModel.setIsXtream(true) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    ) {
+                        Text("Xtream Codes")
+                    }
                 }
-                SegmentedButton(
-                    selected = isXtream,
-                    onClick = { viewModel.setIsXtream(true) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                ) {
-                    Text("Xtream Codes")
-                }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             OutlinedTextField(
                 value = name,

@@ -7,8 +7,10 @@ import android.os.Build
 import android.os.Bundle
 import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -32,7 +34,7 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class AudioPlaybackService : MediaLibraryService() {
 
-    @Inject lateinit var vlcPlayer: VLCPlayerWrapper
+    @Inject lateinit var exoPlayerWrapper: ExoPlayerWrapper
     @Inject lateinit var providerManager: ProviderManager
     @Inject lateinit var persistenceService: PersistenceService
 
@@ -51,7 +53,25 @@ class AudioPlaybackService : MediaLibraryService() {
         super.onCreate()
         createNotificationChannel()
 
-        val forwardingPlayer = VLCForwardingPlayer(vlcPlayer, providerManager)
+        val forwardingPlayer = object : ForwardingPlayer(exoPlayerWrapper.player) {
+            override fun seekToNext() {
+                exoPlayerWrapper.playNext()
+            }
+
+            override fun seekToPrevious() {
+                exoPlayerWrapper.playPrevious()
+            }
+
+            override fun getAvailableCommands(): Player.Commands {
+                return super.getAvailableCommands().buildUpon()
+                    .addAll(
+                        Player.COMMAND_SEEK_TO_NEXT,
+                        Player.COMMAND_SEEK_TO_PREVIOUS,
+                    )
+                    .build()
+            }
+        }
+
         mediaLibrarySession = MediaLibrarySession.Builder(this, forwardingPlayer, LibraryCallback())
             .build()
 
@@ -70,7 +90,7 @@ class AudioPlaybackService : MediaLibraryService() {
 
         // Persist last played channel
         serviceScope.launch {
-            vlcPlayer.currentChannel.collect { channel ->
+            exoPlayerWrapper.currentChannel.collect { channel ->
                 if (channel != null) {
                     persistenceService.saveLastPlayed(channel.id)
                 }
@@ -135,7 +155,7 @@ class AudioPlaybackService : MediaLibraryService() {
             args: Bundle,
         ): ListenableFuture<SessionResult> {
             if (customCommand.customAction == TOGGLE_FAVORITE_COMMAND.customAction) {
-                val channel = vlcPlayer.currentChannel.value
+                val channel = exoPlayerWrapper.currentChannel.value
                 if (channel != null) {
                     serviceScope.launch {
                         providerManager.toggleFavorite(channel)
@@ -144,6 +164,35 @@ class AudioPlaybackService : MediaLibraryService() {
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
+        }
+
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: List<MediaItem>,
+        ): ListenableFuture<List<MediaItem>> {
+            val resolved = mediaItems.map { item ->
+                val channel = providerManager.channels.value.find { it.id == item.mediaId }
+                if (channel != null) {
+                    exoPlayerWrapper.prepareFromMediaId(channel)
+                    item.buildUpon()
+                        .setUri(channel.streamURL)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(channel.name)
+                                .setStation(channel.name)
+                                .setArtist(channel.group)
+                                .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                                .setIsPlayable(true)
+                                .apply { channel.logoURL?.let { setArtworkUri(Uri.parse(it)) } }
+                                .build()
+                        )
+                        .build()
+                } else {
+                    item
+                }
+            }
+            return Futures.immediateFuture(resolved)
         }
 
         override fun onPlaybackResumption(

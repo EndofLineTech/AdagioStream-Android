@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.FloatingActionButton
@@ -35,6 +36,7 @@ import com.adagiostream.android.model.ProviderType
 @Composable
 fun ProvidersScreen(
     onAddProvider: () -> Unit,
+    onEditProvider: (String) -> Unit,
     viewModel: ProvidersViewModel = hiltViewModel(),
 ) {
     val providers by viewModel.providers.collectAsStateWithLifecycle()
@@ -91,6 +93,7 @@ fun ProvidersScreen(
                     items(providers, key = { it.id }) { provider ->
                         ProviderCard(
                             provider = provider,
+                            onEdit = { onEditProvider(provider.id) },
                             onDelete = { viewModel.deleteProvider(provider.id) },
                         )
                     }
@@ -103,6 +106,7 @@ fun ProvidersScreen(
 @Composable
 private fun ProviderCard(
     provider: Provider,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(
@@ -128,6 +132,12 @@ private fun ProviderCard(
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onEdit) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Edit",
                 )
             }
             IconButton(onClick = onDelete) {

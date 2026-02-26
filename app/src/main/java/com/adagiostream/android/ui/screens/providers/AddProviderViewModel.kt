@@ -1,5 +1,6 @@
 package com.adagiostream.android.ui.screens.providers
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Provider
@@ -16,7 +17,11 @@ import javax.inject.Inject
 @HiltViewModel
 class AddProviderViewModel @Inject constructor(
     private val providerManager: ProviderManager,
+    savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
+
+    private val editProviderId: String? = savedStateHandle.get<String>("providerId")
+    val isEditing: Boolean = editProviderId != null
 
     private val _isXtream = MutableStateFlow(false)
     val isXtream: StateFlow<Boolean> = _isXtream.asStateFlow()
@@ -47,6 +52,28 @@ class AddProviderViewModel @Inject constructor(
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    init {
+        if (editProviderId != null) {
+            val provider = providerManager.providers.value.find { it.id == editProviderId }
+            if (provider != null) {
+                _name.value = provider.name
+                when (val type = provider.type) {
+                    is ProviderType.XtreamCodes -> {
+                        _isXtream.value = true
+                        _host.value = type.host
+                        _username.value = type.username
+                        _password.value = type.password
+                    }
+                    is ProviderType.M3U -> {
+                        _isXtream.value = false
+                        _m3uUrl.value = type.url
+                        _epgUrl.value = type.epgUrl ?: ""
+                    }
+                }
+            }
+        }
+    }
 
     fun setIsXtream(value: Boolean) { _isXtream.value = value }
     fun setName(value: String) { _name.value = value }
@@ -90,12 +117,16 @@ class AddProviderViewModel @Inject constructor(
                 }
 
                 val provider = Provider(
-                    id = UUID.randomUUID().toString(),
+                    id = editProviderId ?: UUID.randomUUID().toString(),
                     name = _name.value.trim(),
                     type = type,
                 )
 
-                providerManager.addProvider(provider)
+                if (isEditing) {
+                    providerManager.updateProvider(provider)
+                } else {
+                    providerManager.addProvider(provider)
+                }
                 _saveComplete.value = true
             } catch (e: Exception) {
                 _errorMessage.value = e.message ?: "Failed to save provider"

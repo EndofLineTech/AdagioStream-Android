@@ -88,8 +88,8 @@ fun SettingsScreen(
             Slider(
                 value = settings.bufferDurationSeconds.toFloat(),
                 onValueChange = { viewModel.updateBufferDuration(it.roundToInt()) },
-                valueRange = 2f..60f,
-                steps = 57,
+                valueRange = 5f..15f,
+                steps = 9,
                 modifier = Modifier.weight(1f),
             )
             Text(

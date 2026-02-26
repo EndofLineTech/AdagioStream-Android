@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
-import com.adagiostream.android.service.player.VLCPlayerWrapper
+import com.adagiostream.android.service.player.ExoPlayerWrapper
 import com.adagiostream.android.service.provider.ProviderManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +19,7 @@ import javax.inject.Inject
 @HiltViewModel
 class ChannelsViewModel @Inject constructor(
     private val providerManager: ProviderManager,
-    private val vlcPlayer: VLCPlayerWrapper,
+    private val exoPlayer: ExoPlayerWrapper,
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -55,8 +55,8 @@ class ChannelsViewModel @Inject constructor(
     }
 
     fun playChannel(channel: Channel) {
-        vlcPlayer.setChannelList(providerManager.channels.value)
-        vlcPlayer.play(channel)
+        exoPlayer.setChannelList(providerManager.channels.value)
+        exoPlayer.play(channel)
     }
 
     fun toggleFavorite(channel: Channel) {

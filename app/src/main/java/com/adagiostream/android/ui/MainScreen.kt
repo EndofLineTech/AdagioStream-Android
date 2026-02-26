@@ -18,10 +18,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.ui.components.MiniPlayerBar
 import com.adagiostream.android.ui.navigation.Screen
@@ -104,14 +106,26 @@ fun MainScreen(
                 composable(Screen.Providers.route) {
                     ProvidersScreen(
                         onAddProvider = {
-                            navController.navigate(Screen.AddProvider.route)
+                            navController.navigate(Screen.AddProvider.createRoute())
+                        },
+                        onEditProvider = { providerId ->
+                            navController.navigate(Screen.AddProvider.createRoute(providerId))
                         },
                     )
                 }
                 composable(Screen.Settings.route) {
-                    SettingsScreen()
+                    SettingsScreen(viewModel = settingsViewModel)
                 }
-                composable(Screen.AddProvider.route) {
+                composable(
+                    route = Screen.AddProvider.route,
+                    arguments = listOf(
+                        navArgument("providerId") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                    ),
+                ) {
                     AddProviderScreen(
                         onBack = { navController.popBackStack() },
                     )

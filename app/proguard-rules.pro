@@ -15,6 +15,3 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
-# libVLC
--keep class org.videolan.libvlc.** { *; }
--dontwarn org.videolan.libvlc.**

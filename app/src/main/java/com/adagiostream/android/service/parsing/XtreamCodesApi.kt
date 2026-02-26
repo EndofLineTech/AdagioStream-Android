@@ -23,7 +23,14 @@ class XtreamCodesApi(private val client: OkHttpClient) {
 
             // Authenticate first to get allowed output formats
             val authResponse = authenticate(baseUrl, config.username, config.password)
-            val allowedFormats = authResponse?.userInfo?.allowedOutputFormats ?: emptyList()
+                ?: throw Exception("Authentication failed: could not connect to server")
+            if (authResponse.error != null) {
+                throw Exception("Authentication failed: ${authResponse.error}")
+            }
+            if (authResponse.userInfo?.status != null && authResponse.userInfo.status != "Active") {
+                throw Exception("Authentication failed: account status is ${authResponse.userInfo.status}")
+            }
+            val allowedFormats = authResponse.userInfo?.allowedOutputFormats ?: emptyList()
             val preferredExt = when {
                 allowedFormats.contains("m3u8") -> "m3u8"
                 allowedFormats.contains("ts") -> "ts"
@@ -144,6 +151,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
     private data class AuthResponse(
         @SerialName("user_info") val userInfo: UserInfo? = null,
         @SerialName("server_info") val serverInfo: ServerInfo? = null,
+        @SerialName("error") val error: String? = null,
     )
 
     @Serializable

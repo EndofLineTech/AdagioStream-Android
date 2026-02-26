@@ -69,6 +69,13 @@ class ProviderManager @Inject constructor(
         loadAllChannels()
     }
 
+    suspend fun updateProvider(provider: Provider) {
+        val updated = _providers.value.map { if (it.id == provider.id) provider else it }
+        _providers.value = updated
+        persistenceService.saveProviders(updated)
+        loadAllChannels()
+    }
+
     suspend fun deleteProvider(providerId: String) {
         val updated = _providers.value.filter { it.id != providerId }
         _providers.value = updated
