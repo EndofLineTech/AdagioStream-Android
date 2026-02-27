@@ -5,6 +5,7 @@ import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.Provider
 import com.adagiostream.android.model.ProviderType
+import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.service.parsing.EPGParser
 import com.adagiostream.android.service.parsing.M3UParser
 import com.adagiostream.android.service.parsing.XtreamCodesApi
@@ -51,11 +52,14 @@ class ProviderManager @Inject constructor(
     private var favoriteIds = mutableSetOf<String>()
     var sortPrefixes: List<String> = listOf("Radio: ", "TV: ")
         private set
+    var sortMode: SortMode = SortMode.ALPHABETICAL
+        private set
 
     init {
         scope.launch {
             val settings = persistenceService.loadSettings()
             sortPrefixes = settings.sortPrefixes
+            sortMode = settings.sortMode
             _providers.value = persistenceService.loadProviders()
             favoriteIds = persistenceService.loadFavoriteIds().toMutableSet()
             loadAllChannels()
@@ -143,6 +147,11 @@ class ProviderManager @Inject constructor(
         rebuildGroups()
     }
 
+    fun updateSortMode(mode: SortMode) {
+        sortMode = mode
+        rebuildGroups()
+    }
+
     suspend fun loadXtreamEPGForChannel(channel: Channel) {
         val streamId = channel.xtreamStreamId ?: return
         val provider = _providers.value.find {
@@ -192,7 +201,14 @@ class ProviderManager @Inject constructor(
         _groups.value = _channels.value
             .groupBy { it.group }
             .map { (name, channels) ->
-                ChannelGroup(name, channels.sortedBy { strippedName(it.name) })
+                val sorted = when (sortMode) {
+                    SortMode.PROVIDER_ORDER -> channels
+                    SortMode.NATURAL -> channels.sortedWith(
+                        Comparator { a, b -> naturalCompare(strippedName(a.name), strippedName(b.name)) },
+                    )
+                    SortMode.ALPHABETICAL -> channels.sortedBy { strippedName(it.name) }
+                }
+                ChannelGroup(name, sorted)
             }
             .sortedBy { it.name }
     }
@@ -206,6 +222,41 @@ class ProviderManager @Inject constructor(
             }
         }
         return result.lowercase()
+    }
+
+    private fun naturalCompare(a: String, b: String): Int {
+        val chunksA = naturalChunks(a)
+        val chunksB = naturalChunks(b)
+        for (i in 0 until minOf(chunksA.size, chunksB.size)) {
+            val ca = chunksA[i]
+            val cb = chunksB[i]
+            val numA = ca.toBigIntegerOrNull()
+            val numB = cb.toBigIntegerOrNull()
+            val cmp = if (numA != null && numB != null) {
+                numA.compareTo(numB)
+            } else {
+                ca.compareTo(cb)
+            }
+            if (cmp != 0) return cmp
+        }
+        return chunksA.size - chunksB.size
+    }
+
+    private fun naturalChunks(s: String): List<String> {
+        val chunks = mutableListOf<String>()
+        val current = StringBuilder()
+        var inDigit = false
+        for (c in s) {
+            val isDigit = c.isDigit()
+            if (current.isNotEmpty() && isDigit != inDigit) {
+                chunks.add(current.toString())
+                current.clear()
+            }
+            current.append(c)
+            inDigit = isDigit
+        }
+        if (current.isNotEmpty()) chunks.add(current.toString())
+        return chunks
     }
 
     private fun favoriteKey(channel: Channel): String =

@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.player.ExoPlayerWrapper
 import com.adagiostream.android.service.provider.ProviderManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +23,7 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val persistenceService: PersistenceService,
     private val providerManager: ProviderManager,
+    private val exoPlayerWrapper: ExoPlayerWrapper,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(AppSettings())
@@ -48,7 +51,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun updateBufferDuration(seconds: Int) {
-        _settings.value = _settings.value.copy(bufferDurationSeconds = seconds.coerceIn(5, 15))
+        val clamped = seconds.coerceIn(5, 15)
+        _settings.value = _settings.value.copy(bufferDurationSeconds = clamped)
+        exoPlayerWrapper.bufferDurationSeconds = clamped
         save()
     }
 
@@ -59,6 +64,12 @@ class SettingsViewModel @Inject constructor(
 
     fun updateTextSizeMode(mode: TextSizeMode) {
         _settings.value = _settings.value.copy(textSizeMode = mode)
+        save()
+    }
+
+    fun updateSortMode(mode: SortMode) {
+        _settings.value = _settings.value.copy(sortMode = mode)
+        providerManager.updateSortMode(mode)
         save()
     }
 

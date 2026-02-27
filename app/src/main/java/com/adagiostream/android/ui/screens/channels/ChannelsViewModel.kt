@@ -55,7 +55,11 @@ class ChannelsViewModel @Inject constructor(
     }
 
     fun playChannel(channel: Channel) {
-        exoPlayer.setChannelList(providerManager.channels.value)
+        val groupChannels = providerManager.groups.value
+            .find { it.name == channel.group }
+            ?.channels
+            ?: emptyList()
+        exoPlayer.setChannelList(groupChannels)
         exoPlayer.play(channel)
     }
 

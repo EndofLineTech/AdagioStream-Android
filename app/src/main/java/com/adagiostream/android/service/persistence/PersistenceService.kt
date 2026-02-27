@@ -56,8 +56,8 @@ class PersistenceService(
         favoritesFile.writeText(json.encodeToString(ids))
     }
 
-    suspend fun loadSettings(): AppSettings = mutex.withLock {
-        try {
+    fun loadSettingsSync(): AppSettings {
+        return try {
             if (settingsFile.exists()) {
                 json.decodeFromString<AppSettings>(settingsFile.readText())
             } else {
@@ -66,6 +66,10 @@ class PersistenceService(
         } catch (_: Exception) {
             AppSettings()
         }
+    }
+
+    suspend fun loadSettings(): AppSettings = mutex.withLock {
+        loadSettingsSync()
     }
 
     suspend fun saveSettings(settings: AppSettings) = mutex.withLock {

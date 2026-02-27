@@ -24,7 +24,7 @@ class FavoritesViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun playChannel(channel: Channel) {
-        exoPlayer.setChannelList(providerManager.channels.value)
+        exoPlayer.setChannelList(providerManager.channels.value.filter { it.isFavorite })
         exoPlayer.play(channel)
     }
 

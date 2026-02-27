@@ -7,8 +7,16 @@ data class AppSettings(
     val bufferDurationSeconds: Int = 10,
     val appearanceMode: AppearanceMode = AppearanceMode.SYSTEM,
     val textSizeMode: TextSizeMode = TextSizeMode.M,
+    val sortMode: SortMode = SortMode.ALPHABETICAL,
     val sortPrefixes: List<String> = listOf("Radio: ", "TV: "),
 )
+
+@Serializable
+enum class SortMode(val displayName: String) {
+    PROVIDER_ORDER("Provider Order"),
+    NATURAL("Natural"),
+    ALPHABETICAL("A-Z"),
+}
 
 @Serializable
 enum class AppearanceMode {

@@ -40,6 +40,7 @@ class AudioPlaybackService : MediaLibraryService() {
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var lastBrowsedParentId: String? = null
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
@@ -118,6 +119,18 @@ class AudioPlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    private fun channelListForContext(channel: Channel): List<Channel> {
+        val channels = providerManager.channels.value
+        return when (lastBrowsedParentId) {
+            FAVORITES_ID -> channels.filter { it.isFavorite }
+            null -> channels.filter { it.group == channel.group }
+            else -> providerManager.groups.value
+                .find { it.name == lastBrowsedParentId }
+                ?.channels
+                ?: channels.filter { it.group == channel.group }
+        }
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -174,7 +187,8 @@ class AudioPlaybackService : MediaLibraryService() {
             val resolved = mediaItems.map { item ->
                 val channel = providerManager.channels.value.find { it.id == item.mediaId }
                 if (channel != null) {
-                    exoPlayerWrapper.prepareFromMediaId(channel)
+                    exoPlayerWrapper.setChannelList(channelListForContext(channel))
+                    exoPlayerWrapper.play(channel)
                     item.buildUpon()
                         .setUri(channel.streamURL)
                         .setMediaMetadata(
@@ -204,6 +218,9 @@ class AudioPlaybackService : MediaLibraryService() {
             }
             val channel = lastPlayedId?.let { id ->
                 providerManager.channels.value.find { it.id == id }
+            }
+            if (channel != null) {
+                exoPlayerWrapper.setChannelList(channelListForContext(channel))
             }
             val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
             return Futures.immediateFuture(
@@ -241,6 +258,10 @@ class AudioPlaybackService : MediaLibraryService() {
             val groups = providerManager.groups.value
             val channels = providerManager.channels.value
             val favorites = channels.filter { it.isFavorite }
+
+            if (parentId != ROOT_ID) {
+                lastBrowsedParentId = parentId
+            }
 
             val items: List<MediaItem> = when (parentId) {
                 ROOT_ID -> {

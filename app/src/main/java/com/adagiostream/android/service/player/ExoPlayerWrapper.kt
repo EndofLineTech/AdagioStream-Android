@@ -18,12 +18,13 @@ import com.adagiostream.android.model.PlaybackState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class ExoPlayerWrapper(context: Context) {
+class ExoPlayerWrapper(context: Context, initialBufferSeconds: Int = 10) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -37,12 +38,10 @@ class ExoPlayerWrapper(context: Context) {
     val bitrateKbps: StateFlow<Float> = _bitrateKbps.asStateFlow()
 
     private var channelList: List<Channel> = emptyList()
+    private var retryCount = 0
+    private val maxRetries = 5
 
-    var bufferDurationSeconds: Int = 10
-        set(value) {
-            field = value
-            rebuildPlayer(context)
-        }
+    var bufferDurationSeconds: Int = initialBufferSeconds
 
     private var context: Context = context
 
@@ -53,12 +52,13 @@ class ExoPlayerWrapper(context: Context) {
 
     @OptIn(UnstableApi::class)
     private fun buildPlayer(context: Context): ExoPlayer {
+        val bufferMs = bufferDurationSeconds * 1000
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                bufferDurationSeconds * 1000,
-                bufferDurationSeconds * 2 * 1000,
-                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
-                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+                bufferMs,                // min buffer
+                bufferMs * 2,            // max buffer
+                bufferMs / 2,            // buffer for playback start
+                bufferMs,                // buffer for playback after rebuffer
             )
             .build()
 
@@ -70,6 +70,7 @@ class ExoPlayerWrapper(context: Context) {
         return ExoPlayer.Builder(context)
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             .also { player ->
                 player.addListener(object : Player.Listener {
@@ -78,14 +79,29 @@ class ExoPlayerWrapper(context: Context) {
                     }
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (isPlaying) retryCount = 0
                         scope.launch { syncPlaybackState() }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
                         scope.launch {
-                            _playbackState.value = PlaybackState.Error(
-                                error.message ?: "Playback failed"
-                            )
+                            val isSourceError = error.errorCode in
+                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED..
+                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+                                error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
+                                error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW
+                            if (isSourceError && retryCount < maxRetries) {
+                                retryCount++
+                                val delayMs = (1000L * retryCount).coerceAtMost(5000L)
+                                _playbackState.value = PlaybackState.Buffering
+                                delay(delayMs)
+                                exoPlayer.prepare()
+                                exoPlayer.play()
+                            } else {
+                                _playbackState.value = PlaybackState.Error(
+                                    error.message ?: "Playback failed"
+                                )
+                            }
                         }
                     }
                 })
@@ -106,17 +122,6 @@ class ExoPlayerWrapper(context: Context) {
                     }
                 })
             }
-    }
-
-    @OptIn(UnstableApi::class)
-    private fun rebuildPlayer(context: Context) {
-        val wasPlaying = _currentChannel.value
-        exoPlayer.stop()
-        exoPlayer.release()
-        exoPlayer = buildPlayer(context)
-        if (wasPlaying != null) {
-            play(wasPlaying)
-        }
     }
 
     private fun syncPlaybackState() {

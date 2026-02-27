@@ -34,5 +34,9 @@ object AppModule {
     @Singleton
     fun provideExoPlayerWrapper(
         @ApplicationContext context: Context,
-    ): ExoPlayerWrapper = ExoPlayerWrapper(context)
+        persistenceService: PersistenceService,
+    ): ExoPlayerWrapper {
+        val settings = persistenceService.loadSettingsSync()
+        return ExoPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15))
+    }
 }

@@ -47,6 +47,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.BuildConfig
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
 import kotlin.math.roundToInt
 
@@ -176,13 +177,37 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // Channel Sort
+        Text(
+            text = "Channel Sort",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SortMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = settings.sortMode == mode,
+                    onClick = { viewModel.updateSortMode(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = SortMode.entries.size,
+                    ),
+                ) {
+                    Text(text = mode.displayName)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         // Sort Prefixes
         Text(
             text = "Sort Prefixes",
             style = MaterialTheme.typography.titleMedium,
         )
         Text(
-            text = "Prefixes stripped when sorting channels alphabetically",
+            text = "Prefixes stripped when sorting channels",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
