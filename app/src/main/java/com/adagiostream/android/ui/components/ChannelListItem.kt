@@ -31,6 +31,7 @@ fun ChannelListItem(
     onClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    leadingContent: @Composable (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -39,6 +40,10 @@ fun ChannelListItem(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (leadingContent != null) {
+            leadingContent()
+        }
+
         if (channel.logoURL != null) {
             RetryableAsyncImage(
                 model = channel.logoURL,

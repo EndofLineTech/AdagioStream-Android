@@ -50,7 +50,7 @@ class AccountManager @Inject constructor(
     private val _epgEntries = MutableStateFlow<Map<String, List<EPGEntry>>>(emptyMap())
     val epgEntries: StateFlow<Map<String, List<EPGEntry>>> = _epgEntries.asStateFlow()
 
-    private var favoriteIds = mutableSetOf<String>()
+    private var favoriteIds = mutableListOf<String>()
     var sortPrefixes: List<String> = listOf("Radio: ", "TV: ")
         private set
     var sortMode: SortMode = SortMode.ALPHABETICAL
@@ -65,7 +65,7 @@ class AccountManager @Inject constructor(
             sortMode = settings.sortMode
             groupSortMode = settings.groupSortMode
             _accounts.value = persistenceService.loadAccounts()
-            favoriteIds = persistenceService.loadFavoriteIds().toMutableSet()
+            favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
             loadAllChannels()
         }
     }
@@ -131,12 +131,23 @@ class AccountManager @Inject constructor(
         } else {
             favoriteIds.add(key)
         }
-        persistenceService.saveFavoriteIds(favoriteIds.toSet())
+        persistenceService.saveFavoriteIds(favoriteIds.toList())
 
         _channels.value = _channels.value.map {
             if (favoriteKey(it) == key) it.copy(isFavorite = key in favoriteIds) else it
         }
         rebuildGroups()
+    }
+
+    suspend fun reorderFavorites(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val item = favoriteIds.removeAt(fromIndex)
+        favoriteIds.add(toIndex, item)
+        persistenceService.saveFavoriteIds(favoriteIds.toList())
+    }
+
+    fun favoriteIndexOf(channel: Channel): Int {
+        return favoriteIds.indexOf(favoriteKey(channel))
     }
 
     suspend fun clearAllFavorites() {

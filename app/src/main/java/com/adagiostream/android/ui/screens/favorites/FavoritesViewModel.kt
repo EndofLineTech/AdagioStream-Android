@@ -20,17 +20,27 @@ class FavoritesViewModel @Inject constructor(
 ) : ViewModel() {
 
     val favorites: StateFlow<List<Channel>> = accountManager.channels
-        .map { channels -> channels.filter { it.isFavorite }.sortedBy { it.name } }
+        .map { channels ->
+            channels
+                .filter { it.isFavorite }
+                .sortedBy { accountManager.favoriteIndexOf(it) }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun playChannel(channel: Channel) {
-        exoPlayer.setChannelList(accountManager.channels.value.filter { it.isFavorite })
+        exoPlayer.setChannelList(favorites.value)
         exoPlayer.play(channel)
     }
 
     fun toggleFavorite(channel: Channel) {
         viewModelScope.launch {
             accountManager.toggleFavorite(channel)
+        }
+    }
+
+    fun onReorder(fromIndex: Int, toIndex: Int) {
+        viewModelScope.launch {
+            accountManager.reorderFavorites(fromIndex, toIndex)
         }
     }
 }

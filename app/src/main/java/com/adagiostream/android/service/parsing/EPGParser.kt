@@ -2,6 +2,7 @@ package com.adagiostream.android.service.parsing
 
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.util.DateUtils
+import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -13,8 +14,10 @@ import java.io.StringReader
 class EPGParser(private val client: OkHttpClient) {
 
     suspend fun parse(url: String): Map<String, List<EPGEntry>> = withContext(Dispatchers.IO) {
+        UrlSanitizer.requireHttpUrl(url)
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
+        if (!response.isSuccessful) return@withContext emptyMap()
         val body = response.body?.string() ?: return@withContext emptyMap()
         parseContent(body)
     }

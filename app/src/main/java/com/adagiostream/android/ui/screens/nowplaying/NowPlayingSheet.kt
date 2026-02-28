@@ -44,6 +44,7 @@ import com.adagiostream.android.ui.components.EPGInfoCard
 import com.adagiostream.android.ui.components.RetryableAsyncImage
 import com.adagiostream.android.ui.screens.epg.EPGBottomSheet
 import com.adagiostream.android.util.BitrateFormatter
+import com.adagiostream.android.util.rememberElapsedTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,6 +55,7 @@ fun NowPlayingSheet(
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val currentChannel by viewModel.currentChannel.collectAsStateWithLifecycle()
     val bitrateKbps by viewModel.bitrateKbps.collectAsStateWithLifecycle()
+    val streamStartedAt by viewModel.streamStartedAt.collectAsStateWithLifecycle()
     val epgEntries by viewModel.currentEPGEntries.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showEPGSheet by remember { mutableStateOf(false) }
@@ -103,14 +105,16 @@ fun NowPlayingSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            val elapsed = rememberElapsedTime(streamStartedAt)
+            val statusText = when (playbackState) {
+                is PlaybackState.Buffering -> "Buffering..."
+                is PlaybackState.Playing -> if (elapsed != null) "Playing \u00B7 $elapsed" else "Playing"
+                is PlaybackState.Paused -> if (elapsed != null) "Paused \u00B7 $elapsed" else "Paused"
+                is PlaybackState.Error -> (playbackState as PlaybackState.Error).message
+                else -> ""
+            }
             Text(
-                text = when (playbackState) {
-                    is PlaybackState.Buffering -> "Buffering..."
-                    is PlaybackState.Playing -> "Playing"
-                    is PlaybackState.Paused -> "Paused"
-                    is PlaybackState.Error -> (playbackState as PlaybackState.Error).message
-                    else -> ""
-                },
+                text = statusText,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

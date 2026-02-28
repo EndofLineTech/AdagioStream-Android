@@ -50,19 +50,19 @@ class PersistenceService(
         accountsFile.writeText(json.encodeToString(accounts))
     }
 
-    suspend fun loadFavoriteIds(): Set<String> = mutex.withLock {
+    suspend fun loadFavoriteIds(): List<String> = mutex.withLock {
         try {
             if (favoritesFile.exists()) {
-                json.decodeFromString<Set<String>>(favoritesFile.readText())
+                json.decodeFromString<List<String>>(favoritesFile.readText())
             } else {
-                emptySet()
+                emptyList()
             }
         } catch (_: Exception) {
-            emptySet()
+            emptyList()
         }
     }
 
-    suspend fun saveFavoriteIds(ids: Set<String>) = mutex.withLock {
+    suspend fun saveFavoriteIds(ids: List<String>) = mutex.withLock {
         favoritesFile.writeText(json.encodeToString(ids))
     }
 

@@ -29,11 +29,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.util.rememberElapsedTime
 
 @Composable
 fun MiniPlayerBar(
     channel: Channel,
     playbackState: PlaybackState,
+    streamStartedAt: Long?,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onClick: () -> Unit,
@@ -82,14 +84,16 @@ fun MiniPlayerBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    val elapsed = rememberElapsedTime(streamStartedAt)
+                    val statusText = when (playbackState) {
+                        is PlaybackState.Buffering -> "Buffering..."
+                        is PlaybackState.Playing -> if (elapsed != null) "Playing \u00B7 $elapsed" else "Playing"
+                        is PlaybackState.Paused -> if (elapsed != null) "Paused \u00B7 $elapsed" else "Paused"
+                        is PlaybackState.Error -> "Error"
+                        else -> ""
+                    }
                     Text(
-                        text = when (playbackState) {
-                            is PlaybackState.Buffering -> "Buffering..."
-                            is PlaybackState.Playing -> "Playing"
-                            is PlaybackState.Paused -> "Paused"
-                            is PlaybackState.Error -> "Error"
-                            else -> ""
-                        },
+                        text = statusText,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

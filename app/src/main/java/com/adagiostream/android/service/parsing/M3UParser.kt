@@ -1,6 +1,7 @@
 package com.adagiostream.android.service.parsing
 
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -10,9 +11,11 @@ import java.util.UUID
 class M3UParser(private val client: OkHttpClient) {
 
     suspend fun parse(url: String): List<Channel> = withContext(Dispatchers.IO) {
+        UrlSanitizer.requireHttpUrl(url)
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
-        val body = response.body?.string() ?: throw IllegalStateException("Empty response from $url")
+        if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code} from ${UrlSanitizer.redact(url)}")
+        val body = response.body?.string() ?: throw IllegalStateException("Empty response from ${UrlSanitizer.redact(url)}")
         parseContent(body)
     }
 

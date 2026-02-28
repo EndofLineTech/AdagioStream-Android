@@ -9,6 +9,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
 @Module
@@ -35,8 +36,9 @@ object AppModule {
     fun provideExoPlayerWrapper(
         @ApplicationContext context: Context,
         persistenceService: PersistenceService,
+        okHttpClient: OkHttpClient,
     ): ExoPlayerWrapper {
         val settings = persistenceService.loadSettingsSync()
-        return ExoPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15))
+        return ExoPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15), okHttpClient)
     }
 }
