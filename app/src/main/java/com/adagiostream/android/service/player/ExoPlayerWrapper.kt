@@ -2,6 +2,7 @@ package com.adagiostream.android.service.player
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
@@ -16,6 +17,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
@@ -36,6 +38,9 @@ class ExoPlayerWrapper(
     initialBufferSeconds: Int = 10,
     private val okHttpClient: OkHttpClient? = null,
 ) {
+    companion object {
+        private const val TAG = "AdagioPlayer"
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -58,6 +63,7 @@ class ExoPlayerWrapper(
     private val maxReconnects = 5
     private var retryResetJob: Job? = null
     private var stallDetectorJob: Job? = null
+    private var bufferingTimeoutJob: Job? = null
 
     var bufferDurationSeconds: Int = initialBufferSeconds
         private set
@@ -112,15 +118,33 @@ class ExoPlayerWrapper(
             .also { player ->
                 player.addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(state: Int) {
+                        val stateName = when (state) {
+                            Player.STATE_IDLE -> "IDLE"
+                            Player.STATE_BUFFERING -> "BUFFERING"
+                            Player.STATE_READY -> "READY"
+                            Player.STATE_ENDED -> "ENDED"
+                            else -> "UNKNOWN($state)"
+                        }
+                        Log.i(TAG, "onPlaybackStateChanged: $stateName, channel=${_currentChannel.value?.name}")
+
+                        if (state == Player.STATE_BUFFERING && _currentChannel.value != null) {
+                            startBufferingTimeout()
+                        } else {
+                            bufferingTimeoutJob?.cancel()
+                        }
+
                         if (state == Player.STATE_ENDED && _currentChannel.value != null) {
                             reconnectCount++
+                            Log.w(TAG, "STATE_ENDED with active channel — reconnect attempt $reconnectCount/$maxReconnects")
                             if (reconnectCount > maxReconnects) {
+                                Log.e(TAG, "Max reconnects exceeded, giving up")
                                 _playbackState.value = PlaybackState.Error("Stream ended — could not reconnect")
                                 return
                             }
                             val delayMs = (1000L * reconnectCount).coerceAtMost(5_000L)
                             scope.launch {
                                 delay(delayMs)
+                                Log.i(TAG, "STATE_ENDED reconnect: seekToDefault + prepare + play")
                                 exoPlayer.seekToDefaultPosition()
                                 exoPlayer.prepare()
                                 exoPlayer.play()
@@ -131,6 +155,7 @@ class ExoPlayerWrapper(
                     }
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        Log.i(TAG, "onIsPlayingChanged: isPlaying=$isPlaying, exoState=${exoPlayer.playbackState}")
                         if (isPlaying) {
                             reconnectCount = 0
                             retryResetJob?.cancel()
@@ -146,10 +171,12 @@ class ExoPlayerWrapper(
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
+                        Log.e(TAG, "onPlayerError: code=${error.errorCode}, message=${error.message}", error)
                         scope.launch {
                             retryResetJob?.cancel()
 
                             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                                Log.i(TAG, "BEHIND_LIVE_WINDOW — seeking to default + prepare")
                                 exoPlayer.seekToDefaultPosition()
                                 exoPlayer.prepare()
                                 exoPlayer.play()
@@ -164,11 +191,13 @@ class ExoPlayerWrapper(
                             if (isNetworkError) {
                                 retryCount++
                                 val delayMs = (2000L * retryCount).coerceAtMost(30_000L)
+                                Log.w(TAG, "Network error — retry $retryCount, delay ${delayMs}ms")
                                 _playbackState.value = PlaybackState.Buffering
                                 delay(delayMs)
                                 exoPlayer.prepare()
                                 exoPlayer.play()
                             } else {
+                                Log.e(TAG, "Non-network error — setting error state: code=${error.errorCode}")
                                 _playbackState.value = PlaybackState.Error(
                                     UrlSanitizer.redact(error.message ?: "Playback failed")
                                 )
@@ -191,6 +220,23 @@ class ExoPlayerWrapper(
                             }
                         }
                     }
+
+                    override fun onAudioSinkError(
+                        eventTime: AnalyticsListener.EventTime,
+                        audioSinkError: Exception,
+                    ) {
+                        if (audioSinkError is AudioSink.UnexpectedDiscontinuityException) {
+                            // AudioTrack timestamp reset (hardware bug). DefaultAudioSink's
+                            // self-heal doesn't recover — the pipeline stalls. Seek to the
+                            // current position to flush/recreate the AudioTrack while staying
+                            // at the same point in the stream (no content loss).
+                            val pos = exoPlayer.currentPosition
+                            Log.w(TAG, "onAudioSinkError: timestamp discontinuity — seeking to pos=$pos to reset AudioTrack")
+                            exoPlayer.seekTo(pos)
+                        } else {
+                            Log.w(TAG, "onAudioSinkError: ${audioSinkError.javaClass.simpleName}: ${audioSinkError.message}")
+                        }
+                    }
                 })
             }
     }
@@ -207,12 +253,16 @@ class ExoPlayerWrapper(
             var stallCount = 0
             while (true) {
                 delay(3_000L)
-                if (!exoPlayer.isPlaying) break
+                if (!exoPlayer.isPlaying) {
+                    Log.d(TAG, "StallDetector: exiting — isPlaying=false")
+                    break
+                }
                 val pos = exoPlayer.currentPosition
                 if (pos == lastPosition) {
                     stallCount++
+                    Log.w(TAG, "StallDetector: stall #$stallCount at position $pos")
                     if (stallCount >= 2) {
-                        // Position hasn't moved for ~6 seconds while isPlaying — stalled
+                        Log.w(TAG, "StallDetector: STALL DETECTED — re-preparing player")
                         stallCount = 0
                         _playbackState.value = PlaybackState.Buffering
                         exoPlayer.seekToDefaultPosition()
@@ -224,6 +274,24 @@ class ExoPlayerWrapper(
                     stallCount = 0
                 }
                 lastPosition = pos
+            }
+        }
+    }
+
+    /**
+     * Re-prepares the player if stuck in BUFFERING for more than 20 seconds.
+     * Covers cases where ExoPlayer enters BUFFERING but never transitions to READY
+     * (e.g. network stalls that don't trigger onPlayerError).
+     */
+    private fun startBufferingTimeout() {
+        bufferingTimeoutJob?.cancel()
+        bufferingTimeoutJob = scope.launch {
+            delay(20_000L)
+            if (exoPlayer.playbackState == Player.STATE_BUFFERING) {
+                Log.w(TAG, "BufferingTimeout: stuck in BUFFERING for 20s — re-preparing")
+                exoPlayer.seekToDefaultPosition()
+                exoPlayer.prepare()
+                exoPlayer.play()
             }
         }
     }
@@ -257,6 +325,7 @@ class ExoPlayerWrapper(
     }
 
     fun play(channel: Channel) {
+        Log.i(TAG, "play(): channel=${channel.name}, url=${UrlSanitizer.redact(channel.streamURL)}")
         rebuildPlayerIfNeeded()
 
         _currentChannel.value = channel
@@ -307,7 +376,9 @@ class ExoPlayerWrapper(
     }
 
     fun stop() {
+        Log.i(TAG, "stop(): channel=${_currentChannel.value?.name}")
         stallDetectorJob?.cancel()
+        bufferingTimeoutJob?.cancel()
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
         retryResetJob?.cancel()
@@ -339,6 +410,7 @@ class ExoPlayerWrapper(
 
     fun release() {
         stallDetectorJob?.cancel()
+        bufferingTimeoutJob?.cancel()
         retryResetJob?.cancel()
         exoPlayer.release()
         _playbackState.value = PlaybackState.Idle
