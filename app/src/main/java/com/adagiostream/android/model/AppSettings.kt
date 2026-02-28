@@ -1,5 +1,6 @@
 package com.adagiostream.android.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -8,12 +9,14 @@ data class AppSettings(
     val appearanceMode: AppearanceMode = AppearanceMode.SYSTEM,
     val textSizeMode: TextSizeMode = TextSizeMode.M,
     val sortMode: SortMode = SortMode.ALPHABETICAL,
+    val groupSortMode: SortMode = SortMode.ALPHABETICAL,
     val sortPrefixes: List<String> = listOf("Radio: ", "TV: "),
 )
 
 @Serializable
 enum class SortMode(val displayName: String) {
-    PROVIDER_ORDER("Provider Order"),
+    @SerialName("PROVIDER_ORDER")
+    ACCOUNT_ORDER("Account Order"),
     NATURAL("Natural"),
     ALPHABETICAL("A-Z"),
 }

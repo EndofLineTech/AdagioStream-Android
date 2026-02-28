@@ -5,8 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.player.ExoPlayerWrapper
-import com.adagiostream.android.service.provider.ProviderManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,16 +18,17 @@ import javax.inject.Inject
 @HiltViewModel
 class NowPlayingViewModel @Inject constructor(
     private val exoPlayer: ExoPlayerWrapper,
-    private val providerManager: ProviderManager,
+    private val accountManager: AccountManager,
 ) : ViewModel() {
 
     val playbackState: StateFlow<PlaybackState> = exoPlayer.playbackState
     val currentChannel: StateFlow<Channel?> = exoPlayer.currentChannel
     val bitrateKbps: StateFlow<Float> = exoPlayer.bitrateKbps
+    val streamStartedAt: StateFlow<Long?> = exoPlayer.streamStartedAt
 
     val currentEPGEntries: StateFlow<List<EPGEntry>> = combine(
         exoPlayer.currentChannel,
-        providerManager.epgEntries,
+        accountManager.epgEntries,
     ) { channel, epgMap ->
         if (channel == null) return@combine emptyList()
         val channelId = channel.epgChannelID ?: return@combine emptyList()
@@ -38,7 +39,7 @@ class NowPlayingViewModel @Inject constructor(
         viewModelScope.launch {
             exoPlayer.currentChannel.collect { channel ->
                 if (channel?.xtreamStreamId != null) {
-                    providerManager.loadXtreamEPGForChannel(channel)
+                    accountManager.loadXtreamEPGForChannel(channel)
                 }
             }
         }

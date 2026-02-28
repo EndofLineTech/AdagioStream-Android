@@ -57,7 +57,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val providerCount by viewModel.providerCount.collectAsStateWithLifecycle()
+    val accountCount by viewModel.accountCount.collectAsStateWithLifecycle()
     val channelCount by viewModel.channelCount.collectAsStateWithLifecycle()
     val favoritesCount by viewModel.favoritesCount.collectAsStateWithLifecycle()
     var showClearFavoritesDialog by remember { mutableStateOf(false) }
@@ -177,6 +177,30 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // Group Sort
+        Text(
+            text = "Group Sort",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SortMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = settings.groupSortMode == mode,
+                    onClick = { viewModel.updateGroupSortMode(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = SortMode.entries.size,
+                    ),
+                ) {
+                    Text(text = mode.displayName)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         // Channel Sort
         Text(
             text = "Channel Sort",
@@ -253,7 +277,7 @@ fun SettingsScreen(
             ),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                StatRow("Providers", providerCount.toString())
+                StatRow("Accounts", accountCount.toString())
                 StatRow("Channels", channelCount.toString())
                 StatRow("Favorites", favoritesCount.toString())
             }

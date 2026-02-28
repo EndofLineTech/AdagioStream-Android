@@ -1,4 +1,4 @@
-package com.adagiostream.android.ui.screens.providers
+package com.adagiostream.android.ui.screens.accounts
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -32,9 +32,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddProviderScreen(
+fun AddAccountScreen(
     onBack: () -> Unit,
-    viewModel: AddProviderViewModel = hiltViewModel(),
+    viewModel: AddAccountViewModel = hiltViewModel(),
 ) {
     val isXtream by viewModel.isXtream.collectAsStateWithLifecycle()
     val name by viewModel.name.collectAsStateWithLifecycle()
@@ -53,7 +53,7 @@ fun AddProviderScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text(if (viewModel.isEditing) "Edit Provider" else "Add Provider") },
+            title = { Text(if (viewModel.isEditing) "Edit Account" else "Add Account") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -91,7 +91,7 @@ fun AddProviderScreen(
             OutlinedTextField(
                 value = name,
                 onValueChange = { viewModel.setName(it) },
-                label = { Text("Provider Name") },
+                label = { Text("Account Name") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )

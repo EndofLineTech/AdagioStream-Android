@@ -4,21 +4,21 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class Provider(
+data class Account(
     val id: String,
     val name: String,
-    val type: ProviderType,
+    val type: AccountType,
 )
 
 @Serializable
-sealed interface ProviderType {
+sealed interface AccountType {
 
     @Serializable
     @SerialName("m3u")
     data class M3U(
         val url: String,
         val epgUrl: String? = null,
-    ) : ProviderType
+    ) : AccountType
 
     @Serializable
     @SerialName("xtream")
@@ -26,5 +26,5 @@ sealed interface ProviderType {
         val host: String,
         val username: String,
         val password: String,
-    ) : ProviderType
+    ) : AccountType
 }

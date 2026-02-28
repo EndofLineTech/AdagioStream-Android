@@ -28,12 +28,12 @@ import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.ui.components.MiniPlayerBar
 import com.adagiostream.android.ui.navigation.Screen
 import com.adagiostream.android.ui.navigation.bottomNavItems
+import com.adagiostream.android.ui.screens.accounts.AccountsScreen
+import com.adagiostream.android.ui.screens.accounts.AddAccountScreen
 import com.adagiostream.android.ui.screens.channels.ChannelsScreen
 import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingViewModel
-import com.adagiostream.android.ui.screens.providers.AddProviderScreen
-import com.adagiostream.android.ui.screens.providers.ProvidersScreen
 import com.adagiostream.android.ui.screens.settings.SettingsScreen
 import com.adagiostream.android.ui.screens.settings.SettingsViewModel
 import com.adagiostream.android.ui.theme.AdagioStreamTheme
@@ -46,6 +46,7 @@ fun MainScreen(
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val playbackState by nowPlayingViewModel.playbackState.collectAsStateWithLifecycle()
     val currentChannel by nowPlayingViewModel.currentChannel.collectAsStateWithLifecycle()
+    val streamStartedAt by nowPlayingViewModel.streamStartedAt.collectAsStateWithLifecycle()
     var showNowPlaying by remember { mutableStateOf(false) }
 
     AdagioStreamTheme(
@@ -64,6 +65,7 @@ fun MainScreen(
                         MiniPlayerBar(
                             channel = currentChannel!!,
                             playbackState = playbackState,
+                            streamStartedAt = streamStartedAt,
                             onPlayPause = { nowPlayingViewModel.togglePlayPause() },
                             onStop = { nowPlayingViewModel.stop() },
                             onClick = { showNowPlaying = true },
@@ -103,13 +105,13 @@ fun MainScreen(
                 composable(Screen.Favorites.route) {
                     FavoritesScreen()
                 }
-                composable(Screen.Providers.route) {
-                    ProvidersScreen(
-                        onAddProvider = {
-                            navController.navigate(Screen.AddProvider.createRoute())
+                composable(Screen.Accounts.route) {
+                    AccountsScreen(
+                        onAddAccount = {
+                            navController.navigate(Screen.AddAccount.createRoute())
                         },
-                        onEditProvider = { providerId ->
-                            navController.navigate(Screen.AddProvider.createRoute(providerId))
+                        onEditAccount = { accountId ->
+                            navController.navigate(Screen.AddAccount.createRoute(accountId))
                         },
                     )
                 }
@@ -117,16 +119,16 @@ fun MainScreen(
                     SettingsScreen(viewModel = settingsViewModel)
                 }
                 composable(
-                    route = Screen.AddProvider.route,
+                    route = Screen.AddAccount.route,
                     arguments = listOf(
-                        navArgument("providerId") {
+                        navArgument("accountId") {
                             type = NavType.StringType
                             nullable = true
                             defaultValue = null
                         },
                     ),
                 ) {
-                    AddProviderScreen(
+                    AddAccountScreen(
                         onBack = { navController.popBackStack() },
                     )
                 }

@@ -1,9 +1,11 @@
 package com.adagiostream.android.service.parsing
 
 import android.util.Base64
+import androidx.annotation.VisibleForTesting
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.EPGEntry
-import com.adagiostream.android.model.ProviderType
+import com.adagiostream.android.model.AccountType
+import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -17,9 +19,10 @@ class XtreamCodesApi(private val client: OkHttpClient) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun getChannels(config: ProviderType.XtreamCodes): List<Channel> =
+    suspend fun getChannels(config: AccountType.XtreamCodes): List<Channel> =
         withContext(Dispatchers.IO) {
             val baseUrl = config.host.trimEnd('/')
+            UrlSanitizer.requireHttpUrl(baseUrl)
 
             // Authenticate first to get allowed output formats
             val authResponse = authenticate(baseUrl, config.username, config.password)
@@ -62,13 +65,15 @@ class XtreamCodesApi(private val client: OkHttpClient) {
 
     suspend fun getShortEPG(
         streamId: Long,
-        config: ProviderType.XtreamCodes,
+        config: AccountType.XtreamCodes,
     ): List<EPGEntry> = withContext(Dispatchers.IO) {
         try {
             val baseUrl = config.host.trimEnd('/')
+            UrlSanitizer.requireHttpUrl(baseUrl)
             val url = "$baseUrl/player_api.php?username=${config.username}&password=${config.password}&action=get_short_epg&stream_id=$streamId"
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext emptyList()
             val body = response.body?.string() ?: return@withContext emptyList()
             val epgResponse = json.decodeFromString<XtreamEPGResponse>(body)
 
@@ -101,6 +106,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
             val url = "$baseUrl/player_api.php?username=$username&password=$password"
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return null
             val body = response.body?.string() ?: return null
             json.decodeFromString<AuthResponse>(body)
         } catch (_: Exception) {
@@ -116,6 +122,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
         val url = "$baseUrl/player_api.php?username=$username&password=$password&action=get_live_categories"
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
+        if (!response.isSuccessful) return emptyList()
         val body = response.body?.string() ?: return emptyList()
         return json.decodeFromString<List<XtreamCategory>>(body)
     }
@@ -128,11 +135,13 @@ class XtreamCodesApi(private val client: OkHttpClient) {
         val url = "$baseUrl/player_api.php?username=$username&password=$password&action=get_live_streams"
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
+        if (!response.isSuccessful) return emptyList()
         val body = response.body?.string() ?: return emptyList()
         return json.decodeFromString<List<XtreamStream>>(body)
     }
 
-    private fun decodeIfBase64(value: String): String {
+    @VisibleForTesting
+    internal fun decodeIfBase64(value: String): String {
         return try {
             val decoded = Base64.decode(value, Base64.DEFAULT)
             val result = String(decoded, Charsets.UTF_8)

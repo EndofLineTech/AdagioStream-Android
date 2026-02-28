@@ -1,8 +1,8 @@
 package com.adagiostream.android.service.persistence
 
 import android.content.Context
+import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AppSettings
-import com.adagiostream.android.model.Provider
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -15,7 +15,10 @@ class PersistenceService(
 ) {
     private val mutex = Mutex()
 
-    private val providersFile: File
+    private val accountsFile: File
+        get() = File(context.filesDir, "accounts.json")
+
+    private val legacyProvidersFile: File
         get() = File(context.filesDir, "providers.json")
 
     private val favoritesFile: File
@@ -24,10 +27,17 @@ class PersistenceService(
     private val settingsFile: File
         get() = File(context.filesDir, "settings.json")
 
-    suspend fun loadProviders(): List<Provider> = mutex.withLock {
+    private fun migrateProvidersFile() {
+        if (!accountsFile.exists() && legacyProvidersFile.exists()) {
+            legacyProvidersFile.renameTo(accountsFile)
+        }
+    }
+
+    suspend fun loadAccounts(): List<Account> = mutex.withLock {
         try {
-            if (providersFile.exists()) {
-                json.decodeFromString<List<Provider>>(providersFile.readText())
+            migrateProvidersFile()
+            if (accountsFile.exists()) {
+                json.decodeFromString<List<Account>>(accountsFile.readText())
             } else {
                 emptyList()
             }
@@ -36,8 +46,8 @@ class PersistenceService(
         }
     }
 
-    suspend fun saveProviders(providers: List<Provider>) = mutex.withLock {
-        providersFile.writeText(json.encodeToString(providers))
+    suspend fun saveAccounts(accounts: List<Account>) = mutex.withLock {
+        accountsFile.writeText(json.encodeToString(accounts))
     }
 
     suspend fun loadFavoriteIds(): Set<String> = mutex.withLock {

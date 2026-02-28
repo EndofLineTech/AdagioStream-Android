@@ -1,11 +1,12 @@
-package com.adagiostream.android.ui.screens.providers
+package com.adagiostream.android.ui.screens.accounts
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.adagiostream.android.model.Provider
-import com.adagiostream.android.model.ProviderType
-import com.adagiostream.android.service.provider.ProviderManager
+import com.adagiostream.android.model.Account
+import com.adagiostream.android.model.AccountType
+import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.util.UrlSanitizer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,13 +16,13 @@ import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
-class AddProviderViewModel @Inject constructor(
-    private val providerManager: ProviderManager,
+class AddAccountViewModel @Inject constructor(
+    private val accountManager: AccountManager,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
-    private val editProviderId: String? = savedStateHandle.get<String>("providerId")
-    val isEditing: Boolean = editProviderId != null
+    private val editAccountId: String? = savedStateHandle.get<String>("accountId")
+    val isEditing: Boolean = editAccountId != null
 
     private val _isXtream = MutableStateFlow(false)
     val isXtream: StateFlow<Boolean> = _isXtream.asStateFlow()
@@ -54,18 +55,18 @@ class AddProviderViewModel @Inject constructor(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     init {
-        if (editProviderId != null) {
-            val provider = providerManager.providers.value.find { it.id == editProviderId }
-            if (provider != null) {
-                _name.value = provider.name
-                when (val type = provider.type) {
-                    is ProviderType.XtreamCodes -> {
+        if (editAccountId != null) {
+            val account = accountManager.accounts.value.find { it.id == editAccountId }
+            if (account != null) {
+                _name.value = account.name
+                when (val type = account.type) {
+                    is AccountType.XtreamCodes -> {
                         _isXtream.value = true
                         _host.value = type.host
                         _username.value = type.username
                         _password.value = type.password
                     }
-                    is ProviderType.M3U -> {
+                    is AccountType.M3U -> {
                         _isXtream.value = false
                         _m3uUrl.value = type.url
                         _epgUrl.value = type.epgUrl ?: ""
@@ -104,32 +105,32 @@ class AddProviderViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val type = if (_isXtream.value) {
-                    ProviderType.XtreamCodes(
+                    AccountType.XtreamCodes(
                         host = _host.value.trim(),
                         username = _username.value.trim(),
                         password = _password.value.trim(),
                     )
                 } else {
-                    ProviderType.M3U(
+                    AccountType.M3U(
                         url = _m3uUrl.value.trim(),
                         epgUrl = _epgUrl.value.trim().ifBlank { null },
                     )
                 }
 
-                val provider = Provider(
-                    id = editProviderId ?: UUID.randomUUID().toString(),
+                val account = Account(
+                    id = editAccountId ?: UUID.randomUUID().toString(),
                     name = _name.value.trim(),
                     type = type,
                 )
 
                 if (isEditing) {
-                    providerManager.updateProvider(provider)
+                    accountManager.updateAccount(account)
                 } else {
-                    providerManager.addProvider(provider)
+                    accountManager.addAccount(account)
                 }
                 _saveComplete.value = true
             } catch (e: Exception) {
-                _errorMessage.value = e.message ?: "Failed to save provider"
+                _errorMessage.value = UrlSanitizer.redact(e.message ?: "Failed to save account")
             } finally {
                 _isSaving.value = false
             }

@@ -3,12 +3,12 @@
     <string name="app_name">AdagioStream</string>
     <string name="tab_channels">Channels</string>
     <string name="tab_favorites">Favorites</string>
-    <string name="tab_providers">Providers</string>
+    <string name="tab_accounts">Accounts</string>
     <string name="tab_settings">Settings</string>
     <string name="no_channels">No channels available</string>
     <string name="no_favorites">No favorites yet</string>
-    <string name="no_providers">No providers configured</string>
-    <string name="add_provider">Add Provider</string>
+    <string name="no_accounts">No accounts configured</string>
+    <string name="add_account">Add Account</string>
     <string name="search_channels">Search channels</string>
     <string name="now_playing">Now Playing</string>
     <string name="buffering">Buffering&#8230;</string>

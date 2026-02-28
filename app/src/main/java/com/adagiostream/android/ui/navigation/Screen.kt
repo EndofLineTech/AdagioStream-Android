@@ -14,13 +14,13 @@ sealed class Screen(
 ) {
     data object Channels : Screen("channels", "Channels", Icons.Default.Radio)
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
-    data object Providers : Screen("providers", "Providers", Icons.Default.Storage)
+    data object Accounts : Screen("accounts", "Accounts", Icons.Default.Storage)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
-    data object AddProvider : Screen("add_provider?providerId={providerId}", "Add Provider", Icons.Default.Storage) {
-        fun createRoute(providerId: String? = null): String {
-            return if (providerId != null) "add_provider?providerId=$providerId" else "add_provider"
+    data object AddAccount : Screen("add_account?accountId={accountId}", "Add Account", Icons.Default.Storage) {
+        fun createRoute(accountId: String? = null): String {
+            return if (accountId != null) "add_account?accountId=$accountId" else "add_account"
         }
     }
 }
 
-val bottomNavItems = listOf(Screen.Channels, Screen.Favorites, Screen.Providers, Screen.Settings)
+val bottomNavItems = listOf(Screen.Channels, Screen.Favorites, Screen.Accounts, Screen.Settings)

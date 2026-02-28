@@ -6,9 +6,9 @@ import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.AppearanceMode
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
+import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.ExoPlayerWrapper
-import com.adagiostream.android.service.provider.ProviderManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,22 +22,22 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val persistenceService: PersistenceService,
-    private val providerManager: ProviderManager,
+    private val accountManager: AccountManager,
     private val exoPlayerWrapper: ExoPlayerWrapper,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(AppSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
-    val providerCount: StateFlow<Int> = providerManager.providers
+    val accountCount: StateFlow<Int> = accountManager.accounts
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    val channelCount: StateFlow<Int> = providerManager.channels
+    val channelCount: StateFlow<Int> = accountManager.channels
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    val favoritesCount: StateFlow<Int> = providerManager.channels
+    val favoritesCount: StateFlow<Int> = accountManager.channels
         .map { channels -> channels.count { it.isFavorite } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
@@ -53,7 +53,7 @@ class SettingsViewModel @Inject constructor(
     fun updateBufferDuration(seconds: Int) {
         val clamped = seconds.coerceIn(5, 15)
         _settings.value = _settings.value.copy(bufferDurationSeconds = clamped)
-        exoPlayerWrapper.bufferDurationSeconds = clamped
+        exoPlayerWrapper.updateBufferDuration(clamped)
         save()
     }
 
@@ -69,19 +69,25 @@ class SettingsViewModel @Inject constructor(
 
     fun updateSortMode(mode: SortMode) {
         _settings.value = _settings.value.copy(sortMode = mode)
-        providerManager.updateSortMode(mode)
+        accountManager.updateSortMode(mode)
+        save()
+    }
+
+    fun updateGroupSortMode(mode: SortMode) {
+        _settings.value = _settings.value.copy(groupSortMode = mode)
+        accountManager.updateGroupSortMode(mode)
         save()
     }
 
     fun updateSortPrefixes(prefixes: List<String>) {
         _settings.value = _settings.value.copy(sortPrefixes = prefixes)
-        providerManager.updateSortPrefixes(prefixes)
+        accountManager.updateSortPrefixes(prefixes)
         save()
     }
 
     fun clearAllFavorites() {
         viewModelScope.launch {
-            providerManager.clearAllFavorites()
+            accountManager.clearAllFavorites()
         }
     }
 

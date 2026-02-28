@@ -1,15 +1,16 @@
-package com.adagiostream.android.service.provider
+package com.adagiostream.android.service.account
 
+import com.adagiostream.android.model.Account
+import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
-import com.adagiostream.android.model.Provider
-import com.adagiostream.android.model.ProviderType
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.service.parsing.EPGParser
 import com.adagiostream.android.service.parsing.M3UParser
 import com.adagiostream.android.service.parsing.XtreamCodesApi
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,7 +23,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class ProviderManager @Inject constructor(
+class AccountManager @Inject constructor(
     private val persistenceService: PersistenceService,
     private val client: OkHttpClient,
 ) {
@@ -31,8 +32,8 @@ class ProviderManager @Inject constructor(
     private val xtreamApi = XtreamCodesApi(client)
     private val epgParser = EPGParser(client)
 
-    private val _providers = MutableStateFlow<List<Provider>>(emptyList())
-    val providers: StateFlow<List<Provider>> = _providers.asStateFlow()
+    private val _accounts = MutableStateFlow<List<Account>>(emptyList())
+    val accounts: StateFlow<List<Account>> = _accounts.asStateFlow()
 
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
@@ -54,36 +55,39 @@ class ProviderManager @Inject constructor(
         private set
     var sortMode: SortMode = SortMode.ALPHABETICAL
         private set
+    var groupSortMode: SortMode = SortMode.ALPHABETICAL
+        private set
 
     init {
         scope.launch {
             val settings = persistenceService.loadSettings()
             sortPrefixes = settings.sortPrefixes
             sortMode = settings.sortMode
-            _providers.value = persistenceService.loadProviders()
+            groupSortMode = settings.groupSortMode
+            _accounts.value = persistenceService.loadAccounts()
             favoriteIds = persistenceService.loadFavoriteIds().toMutableSet()
             loadAllChannels()
         }
     }
 
-    suspend fun addProvider(provider: Provider) {
-        val updated = _providers.value + provider
-        _providers.value = updated
-        persistenceService.saveProviders(updated)
+    suspend fun addAccount(account: Account) {
+        val updated = _accounts.value + account
+        _accounts.value = updated
+        persistenceService.saveAccounts(updated)
         loadAllChannels()
     }
 
-    suspend fun updateProvider(provider: Provider) {
-        val updated = _providers.value.map { if (it.id == provider.id) provider else it }
-        _providers.value = updated
-        persistenceService.saveProviders(updated)
+    suspend fun updateAccount(account: Account) {
+        val updated = _accounts.value.map { if (it.id == account.id) account else it }
+        _accounts.value = updated
+        persistenceService.saveAccounts(updated)
         loadAllChannels()
     }
 
-    suspend fun deleteProvider(providerId: String) {
-        val updated = _providers.value.filter { it.id != providerId }
-        _providers.value = updated
-        persistenceService.saveProviders(updated)
+    suspend fun deleteAccount(accountId: String) {
+        val updated = _accounts.value.filter { it.id != accountId }
+        _accounts.value = updated
+        persistenceService.saveAccounts(updated)
         loadAllChannels()
     }
 
@@ -93,15 +97,15 @@ class ProviderManager @Inject constructor(
 
         try {
             val allChannels = mutableListOf<Channel>()
-            for (provider in _providers.value) {
+            for (account in _accounts.value) {
                 try {
-                    val channels = when (provider.type) {
-                        is ProviderType.M3U -> m3uParser.parse(provider.type.url)
-                        is ProviderType.XtreamCodes -> xtreamApi.getChannels(provider.type)
+                    val channels = when (account.type) {
+                        is AccountType.M3U -> m3uParser.parse(account.type.url)
+                        is AccountType.XtreamCodes -> xtreamApi.getChannels(account.type)
                     }
                     allChannels.addAll(channels)
                 } catch (e: Exception) {
-                    _error.value = "Failed to load ${provider.name}: ${e.message}"
+                    _error.value = "Failed to load ${account.name}: ${UrlSanitizer.redact(e.message ?: "Unknown error")}"
                 }
             }
 
@@ -114,7 +118,7 @@ class ProviderManager @Inject constructor(
             rebuildGroups()
             loadEPG()
         } catch (e: Exception) {
-            _error.value = e.message ?: "Unknown error"
+            _error.value = UrlSanitizer.redact(e.message ?: "Unknown error")
         } finally {
             _isLoading.value = false
         }
@@ -152,12 +156,17 @@ class ProviderManager @Inject constructor(
         rebuildGroups()
     }
 
+    fun updateGroupSortMode(mode: SortMode) {
+        groupSortMode = mode
+        rebuildGroups()
+    }
+
     suspend fun loadXtreamEPGForChannel(channel: Channel) {
         val streamId = channel.xtreamStreamId ?: return
-        val provider = _providers.value.find {
-            it.type is ProviderType.XtreamCodes
+        val account = _accounts.value.find {
+            it.type is AccountType.XtreamCodes
         } ?: return
-        val config = provider.type as ProviderType.XtreamCodes
+        val config = account.type as AccountType.XtreamCodes
 
         try {
             val entries = xtreamApi.getShortEPG(streamId, config)
@@ -175,9 +184,9 @@ class ProviderManager @Inject constructor(
     private suspend fun loadEPG() {
         val allEntries = mutableMapOf<String, List<EPGEntry>>()
 
-        for (provider in _providers.value) {
-            when (val type = provider.type) {
-                is ProviderType.M3U -> {
+        for (account in _accounts.value) {
+            when (val type = account.type) {
+                is AccountType.M3U -> {
                     val epgUrl = type.epgUrl
                     if (!epgUrl.isNullOrBlank()) {
                         try {
@@ -188,7 +197,7 @@ class ProviderManager @Inject constructor(
                         }
                     }
                 }
-                is ProviderType.XtreamCodes -> {
+                is AccountType.XtreamCodes -> {
                     // Xtream EPG is loaded on-demand per channel via loadXtreamEPGForChannel
                 }
             }
@@ -202,7 +211,7 @@ class ProviderManager @Inject constructor(
             .groupBy { it.group }
             .map { (name, channels) ->
                 val sorted = when (sortMode) {
-                    SortMode.PROVIDER_ORDER -> channels
+                    SortMode.ACCOUNT_ORDER -> channels
                     SortMode.NATURAL -> channels.sortedWith(
                         Comparator { a, b -> naturalCompare(strippedName(a.name), strippedName(b.name)) },
                     )
@@ -210,7 +219,15 @@ class ProviderManager @Inject constructor(
                 }
                 ChannelGroup(name, sorted)
             }
-            .sortedBy { it.name }
+            .let { groups ->
+                when (groupSortMode) {
+                    SortMode.ACCOUNT_ORDER -> groups
+                    SortMode.NATURAL -> groups.sortedWith(
+                        Comparator { a, b -> naturalCompare(a.name.lowercase(), b.name.lowercase()) },
+                    )
+                    SortMode.ALPHABETICAL -> groups.sortedBy { it.name }
+                }
+            }
     }
 
     private fun strippedName(name: String): String {

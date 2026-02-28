@@ -4,8 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
+import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.player.ExoPlayerWrapper
-import com.adagiostream.android.service.provider.ProviderManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -18,18 +18,18 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ChannelsViewModel @Inject constructor(
-    private val providerManager: ProviderManager,
+    private val accountManager: AccountManager,
     private val exoPlayer: ExoPlayerWrapper,
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    val isLoading: StateFlow<Boolean> = providerManager.isLoading
-    val error: StateFlow<String?> = providerManager.error
+    val isLoading: StateFlow<Boolean> = accountManager.isLoading
+    val error: StateFlow<String?> = accountManager.error
 
     val filteredGroups: StateFlow<List<ChannelGroup>> = combine(
-        providerManager.groups,
+        accountManager.groups,
         _searchQuery,
     ) { groups, query ->
         if (query.isBlank()) {
@@ -50,12 +50,12 @@ class ChannelsViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            providerManager.loadAllChannels()
+            accountManager.loadAllChannels()
         }
     }
 
     fun playChannel(channel: Channel) {
-        val groupChannels = providerManager.groups.value
+        val groupChannels = accountManager.groups.value
             .find { it.name == channel.group }
             ?.channels
             ?: emptyList()
@@ -65,7 +65,7 @@ class ChannelsViewModel @Inject constructor(
 
     fun toggleFavorite(channel: Channel) {
         viewModelScope.launch {
-            providerManager.toggleFavorite(channel)
+            accountManager.toggleFavorite(channel)
         }
     }
 }

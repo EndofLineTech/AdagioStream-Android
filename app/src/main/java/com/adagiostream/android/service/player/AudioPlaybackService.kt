@@ -3,10 +3,13 @@ package com.adagiostream.android.service.player
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Bundle
 import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -17,9 +20,10 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import com.adagiostream.android.R
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.service.persistence.PersistenceService
-import com.adagiostream.android.service.provider.ProviderManager
+import com.adagiostream.android.service.account.AccountManager
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -35,12 +39,13 @@ import javax.inject.Inject
 class AudioPlaybackService : MediaLibraryService() {
 
     @Inject lateinit var exoPlayerWrapper: ExoPlayerWrapper
-    @Inject lateinit var providerManager: ProviderManager
+    @Inject lateinit var accountManager: AccountManager
     @Inject lateinit var persistenceService: PersistenceService
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastBrowsedParentId: String? = null
+    private var lastPlayerVersion: Int = -1
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
@@ -53,6 +58,34 @@ class AudioPlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        buildSession()
+
+        // Reactive browse tree updates
+        serviceScope.launch {
+            combine(
+                accountManager.groups,
+                accountManager.channels,
+            ) { _, _ -> Unit }.collect {
+                mediaLibrarySession?.connectedControllers?.forEach { controller ->
+                    mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, 0, null)
+                    mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, 0, null)
+                }
+            }
+        }
+
+        // Persist last played channel
+        serviceScope.launch {
+            exoPlayerWrapper.currentChannel.collect { channel ->
+                if (channel != null) {
+                    persistenceService.saveLastPlayed(channel.id)
+                }
+            }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun buildSession() {
+        lastPlayerVersion = exoPlayerWrapper.playerVersion
 
         val forwardingPlayer = object : ForwardingPlayer(exoPlayerWrapper.player) {
             override fun seekToNext() {
@@ -73,30 +106,32 @@ class AudioPlaybackService : MediaLibraryService() {
             }
         }
 
+        mediaLibrarySession?.release()
         mediaLibrarySession = MediaLibrarySession.Builder(this, forwardingPlayer, LibraryCallback())
             .build()
+    }
 
-        // Reactive browse tree updates
-        serviceScope.launch {
-            combine(
-                providerManager.groups,
-                providerManager.channels,
-            ) { _, _ -> Unit }.collect {
-                mediaLibrarySession?.connectedControllers?.forEach { controller ->
-                    mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, 0, null)
-                    mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, 0, null)
-                }
-            }
+    @OptIn(UnstableApi::class)
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+
+        // Rebuild the session if ExoPlayer was recreated (e.g. buffer setting changed)
+        if (exoPlayerWrapper.playerVersion != lastPlayerVersion) {
+            buildSession()
         }
 
-        // Persist last played channel
-        serviceScope.launch {
-            exoPlayerWrapper.currentChannel.collect { channel ->
-                if (channel != null) {
-                    persistenceService.saveLastPlayed(channel.id)
-                }
-            }
-        }
+        // Immediately satisfy the foreground service requirement with a placeholder
+        // notification. Media3 will replace it with proper media controls once playback starts.
+        val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setContentTitle("AdagioStream")
+            .setSmallIcon(R.mipmap.ic_launcher_foreground)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+        ServiceCompat.startForeground(
+            this, 1001, notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+        )
+        return START_STICKY
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -120,11 +155,11 @@ class AudioPlaybackService : MediaLibraryService() {
     }
 
     private fun channelListForContext(channel: Channel): List<Channel> {
-        val channels = providerManager.channels.value
+        val channels = accountManager.channels.value
         return when (lastBrowsedParentId) {
             FAVORITES_ID -> channels.filter { it.isFavorite }
             null -> channels.filter { it.group == channel.group }
-            else -> providerManager.groups.value
+            else -> accountManager.groups.value
                 .find { it.name == lastBrowsedParentId }
                 ?.channels
                 ?: channels.filter { it.group == channel.group }
@@ -171,7 +206,7 @@ class AudioPlaybackService : MediaLibraryService() {
                 val channel = exoPlayerWrapper.currentChannel.value
                 if (channel != null) {
                     serviceScope.launch {
-                        providerManager.toggleFavorite(channel)
+                        accountManager.toggleFavorite(channel)
                     }
                 }
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -185,7 +220,7 @@ class AudioPlaybackService : MediaLibraryService() {
             mediaItems: List<MediaItem>,
         ): ListenableFuture<List<MediaItem>> {
             val resolved = mediaItems.map { item ->
-                val channel = providerManager.channels.value.find { it.id == item.mediaId }
+                val channel = accountManager.channels.value.find { it.id == item.mediaId }
                 if (channel != null) {
                     exoPlayerWrapper.setChannelList(channelListForContext(channel))
                     exoPlayerWrapper.play(channel)
@@ -217,7 +252,7 @@ class AudioPlaybackService : MediaLibraryService() {
                 persistenceService.loadLastPlayed()
             }
             val channel = lastPlayedId?.let { id ->
-                providerManager.channels.value.find { it.id == id }
+                accountManager.channels.value.find { it.id == id }
             }
             if (channel != null) {
                 exoPlayerWrapper.setChannelList(channelListForContext(channel))
@@ -255,8 +290,8 @@ class AudioPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            val groups = providerManager.groups.value
-            val channels = providerManager.channels.value
+            val groups = accountManager.groups.value
+            val channels = accountManager.channels.value
             val favorites = channels.filter { it.isFavorite }
 
             if (parentId != ROOT_ID) {
@@ -304,7 +339,7 @@ class AudioPlaybackService : MediaLibraryService() {
             query: String,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<Void>> {
-            val results = providerManager.channels.value
+            val results = accountManager.channels.value
                 .filter { it.name.contains(query, ignoreCase = true) }
                 .map { buildPlayableItem(it) }
 
@@ -322,7 +357,7 @@ class AudioPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            val results = providerManager.channels.value
+            val results = accountManager.channels.value
                 .filter { it.name.contains(query, ignoreCase = true) }
                 .map { buildPlayableItem(it) }
 

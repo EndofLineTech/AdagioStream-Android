@@ -1,4 +1,4 @@
-package com.adagiostream.android.ui.screens.providers
+package com.adagiostream.android.ui.screens.accounts
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,21 +30,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.adagiostream.android.model.Provider
-import com.adagiostream.android.model.ProviderType
+import com.adagiostream.android.model.Account
+import com.adagiostream.android.model.AccountType
 
 @Composable
-fun ProvidersScreen(
-    onAddProvider: () -> Unit,
-    onEditProvider: (String) -> Unit,
-    viewModel: ProvidersViewModel = hiltViewModel(),
+fun AccountsScreen(
+    onAddAccount: () -> Unit,
+    onEditAccount: (String) -> Unit,
+    viewModel: AccountsViewModel = hiltViewModel(),
 ) {
-    val providers by viewModel.providers.collectAsStateWithLifecycle()
+    val accounts by viewModel.accounts.collectAsStateWithLifecycle()
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddProvider) {
-                Icon(Icons.Default.Add, contentDescription = "Add Provider")
+            FloatingActionButton(onClick = onAddAccount) {
+                Icon(Icons.Default.Add, contentDescription = "Add Account")
             }
         },
     ) { innerPadding ->
@@ -61,7 +61,7 @@ fun ProvidersScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Providers",
+                    text = "Accounts",
                     style = MaterialTheme.typography.headlineMedium,
                 )
                 IconButton(onClick = { viewModel.reload() }) {
@@ -69,20 +69,20 @@ fun ProvidersScreen(
                 }
             }
 
-            if (providers.isEmpty()) {
+            if (accounts.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "No providers configured",
+                            text = "No accounts configured",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Tap + to add a provider",
+                            text = "Tap + to add an account",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -90,11 +90,11 @@ fun ProvidersScreen(
                 }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(providers, key = { it.id }) { provider ->
-                        ProviderCard(
-                            provider = provider,
-                            onEdit = { onEditProvider(provider.id) },
-                            onDelete = { viewModel.deleteProvider(provider.id) },
+                    items(accounts, key = { it.id }) { account ->
+                        AccountCard(
+                            account = account,
+                            onEdit = { onEditAccount(account.id) },
+                            onDelete = { viewModel.deleteAccount(account.id) },
                         )
                     }
                 }
@@ -104,8 +104,8 @@ fun ProvidersScreen(
 }
 
 @Composable
-private fun ProviderCard(
-    provider: Provider,
+private fun AccountCard(
+    account: Account,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -122,13 +122,13 @@ private fun ProviderCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = provider.name,
+                    text = account.name,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    text = when (provider.type) {
-                        is ProviderType.M3U -> "M3U Playlist"
-                        is ProviderType.XtreamCodes -> "Xtream Codes"
+                    text = when (account.type) {
+                        is AccountType.M3U -> "M3U Playlist"
+                        is AccountType.XtreamCodes -> "Xtream Codes"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
