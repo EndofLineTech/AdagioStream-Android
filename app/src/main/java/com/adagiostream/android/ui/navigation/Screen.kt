@@ -2,6 +2,7 @@ package com.adagiostream.android.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
@@ -14,6 +15,7 @@ sealed class Screen(
 ) {
     data object Channels : Screen("channels", "Channels", Icons.Default.Radio)
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
+    data object Loved : Screen("loved", "Loved", Icons.Default.MusicNote)
     data object Accounts : Screen("accounts", "Accounts", Icons.Default.Storage)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
     data object AddAccount : Screen("add_account?accountId={accountId}", "Add Account", Icons.Default.Storage) {
@@ -23,4 +25,4 @@ sealed class Screen(
     }
 }
 
-val bottomNavItems = listOf(Screen.Channels, Screen.Favorites, Screen.Settings)
+val bottomNavItems = listOf(Screen.Channels, Screen.Favorites, Screen.Loved, Screen.Settings)

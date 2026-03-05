@@ -5,6 +5,7 @@ import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
+import com.adagiostream.android.model.LovedTrack
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.metadata.XMPlaylistApi
@@ -59,6 +60,9 @@ class AccountManager @Inject constructor(
     val trackMetadata: StateFlow<Map<String, TrackMetadata>> = _trackMetadata.asStateFlow()
     private var trackMetadataJob: Job? = null
 
+    private val _lovedTracks = MutableStateFlow<List<LovedTrack>>(emptyList())
+    val lovedTracks: StateFlow<List<LovedTrack>> = _lovedTracks.asStateFlow()
+
     private var favoriteIds = mutableListOf<String>()
     var sortPrefixes: List<String> = listOf("Radio: ", "TV: ")
         private set
@@ -75,6 +79,7 @@ class AccountManager @Inject constructor(
             groupSortMode = settings.groupSortMode
             _accounts.value = persistenceService.loadAccounts()
             favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
+            _lovedTracks.value = persistenceService.loadLovedTracks()
             loadAllChannels()
         }
     }
@@ -224,6 +229,42 @@ class AccountManager @Inject constructor(
         }
 
         _epgEntries.value = allEntries
+    }
+
+    fun isTrackLoved(artist: String, title: String): Boolean {
+        return _lovedTracks.value.any { it.artist == artist && it.title == title }
+    }
+
+    suspend fun toggleLovedTrack(track: TrackMetadata, channelName: String) {
+        val existing = _lovedTracks.value.find { it.artist == track.artist && it.title == track.title }
+        val updated = if (existing != null) {
+            _lovedTracks.value.filter { it !== existing }
+        } else {
+            _lovedTracks.value + LovedTrack(
+                artist = track.artist,
+                title = track.title,
+                album = track.album,
+                albumArtURL = track.albumArtURL,
+                channelName = channelName,
+            )
+        }
+        _lovedTracks.value = updated
+        persistenceService.saveLovedTracks(updated)
+    }
+
+    suspend fun removeLovedTrack(index: Int) {
+        val updated = _lovedTracks.value.toMutableList().also { it.removeAt(index) }
+        _lovedTracks.value = updated
+        persistenceService.saveLovedTracks(updated)
+    }
+
+    suspend fun reorderLovedTracks(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val updated = _lovedTracks.value.toMutableList()
+        val item = updated.removeAt(fromIndex)
+        updated.add(toIndex, item)
+        _lovedTracks.value = updated
+        persistenceService.saveLovedTracks(updated)
     }
 
     fun startTrackMetadataPolling(channelName: String) {

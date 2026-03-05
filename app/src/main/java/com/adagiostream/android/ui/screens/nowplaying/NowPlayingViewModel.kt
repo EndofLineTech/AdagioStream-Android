@@ -12,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -52,6 +53,16 @@ class NowPlayingViewModel @Inject constructor(
         metadata[channel.name]
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    val isTrackLoved: StateFlow<Boolean> = combine(
+        vlcPlayer.currentChannel,
+        accountManager.trackMetadata,
+        accountManager.lovedTracks,
+    ) { channel, metadata, lovedTracks ->
+        if (channel == null) return@combine false
+        val track = metadata[channel.name] ?: return@combine false
+        lovedTracks.any { it.artist == track.artist && it.title == track.title }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     init {
         viewModelScope.launch {
             vlcPlayer.currentChannel.collect { channel ->
@@ -67,15 +78,30 @@ class NowPlayingViewModel @Inject constructor(
         }
     }
 
+    val isTimeShifted: StateFlow<Boolean> = vlcPlayer.timeShiftMs
+        .map { it > 0L }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val timeShiftMs: StateFlow<Long> = vlcPlayer.timeShiftMs
+
     fun togglePlayPause() = vlcPlayer.togglePlayPause()
     fun stop() = vlcPlayer.stop()
     fun playNext() = vlcPlayer.playNext()
     fun playPrevious() = vlcPlayer.playPrevious()
+    fun seekToLive() = vlcPlayer.seekToLive()
 
     fun toggleFavorite() {
         val channel = vlcPlayer.currentChannel.value ?: return
         viewModelScope.launch {
             accountManager.toggleFavorite(channel)
+        }
+    }
+
+    fun toggleLovedTrack() {
+        val channel = vlcPlayer.currentChannel.value ?: return
+        val track = accountManager.trackMetadata.value[channel.name] ?: return
+        viewModelScope.launch {
+            accountManager.toggleLovedTrack(track, channel.name)
         }
     }
 }

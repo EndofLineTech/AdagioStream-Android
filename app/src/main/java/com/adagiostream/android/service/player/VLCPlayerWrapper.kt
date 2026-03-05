@@ -55,6 +55,11 @@ class VLCPlayerWrapper(
     private var peakBitrateKbps: Float = 0f
     private var isSwitchingChannels: Boolean = false
 
+    // Time-shift tracking
+    private val _timeShiftMs = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val timeShiftMs: kotlinx.coroutines.flow.StateFlow<Long> = _timeShiftMs
+    private var pausedAtSystemTime: Long = 0L
+
     // Audio focus
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var wasPlayingBeforeFocusLoss = false
@@ -228,6 +233,8 @@ class VLCPlayerWrapper(
         _bitrateKbps.value = 0f
         peakBitrateKbps = 0f
         _streamStartedAt.value = System.currentTimeMillis()
+        _timeShiftMs.value = 0L
+        pausedAtSystemTime = 0L
 
         ContextCompat.startForegroundService(
             context, Intent(context, AudioPlaybackService::class.java)
@@ -247,12 +254,27 @@ class VLCPlayerWrapper(
 
     fun pause() {
         if (mediaPlayer.isPlaying) {
+            pausedAtSystemTime = System.currentTimeMillis()
             mediaPlayer.pause()
         }
     }
 
     fun resume() {
+        if (pausedAtSystemTime > 0L) {
+            val pauseDuration = System.currentTimeMillis() - pausedAtSystemTime
+            _timeShiftMs.value += pauseDuration
+            pausedAtSystemTime = 0L
+            Log.i(TAG, "Resuming with time-shift: ${_timeShiftMs.value}ms behind live")
+        }
         mediaPlayer.play()
+    }
+
+    fun seekToLive() {
+        val channel = _currentChannel.value ?: return
+        Log.i(TAG, "seekToLive(): restarting stream at live edge")
+        _timeShiftMs.value = 0L
+        pausedAtSystemTime = 0L
+        play(channel)
     }
 
     fun togglePlayPause() {
@@ -271,6 +293,8 @@ class VLCPlayerWrapper(
         _playbackState.value = PlaybackState.Idle
         _bitrateKbps.value = 0f
         _streamStartedAt.value = null
+        _timeShiftMs.value = 0L
+        pausedAtSystemTime = 0L
         audioManager.abandonAudioFocusRequest(audioFocusRequest)
         wasPlayingBeforeFocusLoss = false
         isDucking = false

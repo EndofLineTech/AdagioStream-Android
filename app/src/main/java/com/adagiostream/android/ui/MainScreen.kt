@@ -32,6 +32,7 @@ import com.adagiostream.android.ui.screens.accounts.AccountsScreen
 import com.adagiostream.android.ui.screens.accounts.AddAccountScreen
 import com.adagiostream.android.ui.screens.channels.ChannelsScreen
 import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
+import com.adagiostream.android.ui.screens.loved.LovedTracksScreen
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingViewModel
 import com.adagiostream.android.ui.screens.settings.SettingsScreen
@@ -104,6 +105,9 @@ fun MainScreen(
                 }
                 composable(Screen.Favorites.route) {
                     FavoritesScreen()
+                }
+                composable(Screen.Loved.route) {
+                    LovedTracksScreen()
                 }
                 composable(Screen.Accounts.route) {
                     AccountsScreen(

@@ -3,6 +3,7 @@ package com.adagiostream.android.service.persistence
 import android.content.Context
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AppSettings
+import com.adagiostream.android.model.LovedTrack
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -88,6 +89,25 @@ class PersistenceService(
 
     suspend fun clearAllFavorites() = mutex.withLock {
         favoritesFile.delete()
+    }
+
+    private val lovedTracksFile: File
+        get() = File(context.filesDir, "loved_tracks.json")
+
+    suspend fun loadLovedTracks(): List<LovedTrack> = mutex.withLock {
+        try {
+            if (lovedTracksFile.exists()) {
+                json.decodeFromString<List<LovedTrack>>(lovedTracksFile.readText())
+            } else {
+                emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun saveLovedTracks(tracks: List<LovedTrack>) = mutex.withLock {
+        lovedTracksFile.writeText(json.encodeToString(tracks))
     }
 
     private val lastPlayedFile: File

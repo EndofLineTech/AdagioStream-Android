@@ -49,6 +49,8 @@ class AudioPlaybackService : MediaLibraryService() {
         private const val ROOT_ID = "root"
         private const val FAVORITES_ID = "favorites"
         private val TOGGLE_FAVORITE_COMMAND = SessionCommand("TOGGLE_FAVORITE", Bundle.EMPTY)
+        private val SEEK_TO_LIVE_COMMAND = SessionCommand("SEEK_TO_LIVE", Bundle.EMPTY)
+        private val TOGGLE_LOVED_TRACK_COMMAND = SessionCommand("TOGGLE_LOVED_TRACK", Bundle.EMPTY)
     }
 
     @OptIn(UnstableApi::class)
@@ -163,6 +165,8 @@ class AudioPlaybackService : MediaLibraryService() {
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                 .buildUpon()
                 .add(TOGGLE_FAVORITE_COMMAND)
+                .add(SEEK_TO_LIVE_COMMAND)
+                .add(TOGGLE_LOVED_TRACK_COMMAND)
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
@@ -180,6 +184,22 @@ class AudioPlaybackService : MediaLibraryService() {
                 if (channel != null) {
                     serviceScope.launch {
                         accountManager.toggleFavorite(channel)
+                    }
+                }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            if (customCommand.customAction == SEEK_TO_LIVE_COMMAND.customAction) {
+                vlcPlayerWrapper.seekToLive()
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            if (customCommand.customAction == TOGGLE_LOVED_TRACK_COMMAND.customAction) {
+                val channel = vlcPlayerWrapper.currentChannel.value
+                if (channel != null) {
+                    val track = accountManager.trackMetadata.value[channel.name]
+                    if (track != null) {
+                        serviceScope.launch {
+                            accountManager.toggleLovedTrack(track, channel.name)
+                        }
                     }
                 }
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))

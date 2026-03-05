@@ -61,6 +61,8 @@ fun NowPlayingSheet(
     val epgEntries by viewModel.currentEPGEntries.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
     val trackMetadata by viewModel.currentTrackMetadata.collectAsStateWithLifecycle()
+    val isTimeShifted by viewModel.isTimeShifted.collectAsStateWithLifecycle()
+    val isTrackLoved by viewModel.isTrackLoved.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showEPGSheet by remember { mutableStateOf(false) }
     val channel = currentChannel ?: return
@@ -145,17 +147,33 @@ fun NowPlayingSheet(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                Text(
-                    text = trackMetadata!!.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.Center,
-                )
-                Text(
-                    text = trackMetadata!!.artist,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = trackMetadata!!.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = trackMetadata!!.artist,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    IconButton(onClick = { viewModel.toggleLovedTrack() }) {
+                        Icon(
+                            imageVector = if (isTrackLoved) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = if (isTrackLoved) "Unlove track" else "Love track",
+                            tint = if (isTrackLoved) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
 
             if (playbackState is PlaybackState.Buffering) {
@@ -222,6 +240,17 @@ fun NowPlayingSheet(
                         Icons.Default.Stop,
                         contentDescription = "Stop",
                         modifier = Modifier.size(36.dp),
+                    )
+                }
+            }
+
+            if (isTimeShifted) {
+                Spacer(modifier = Modifier.height(12.dp))
+                TextButton(onClick = { viewModel.seekToLive() }) {
+                    Text(
+                        text = "LIVE",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
