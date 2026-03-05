@@ -1,3 +1,6 @@
+# libVLC — keep all JNI and native classes
+-keep class org.videolan.** { *; }
+
 # kotlinx.serialization
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.AnnotationsKt

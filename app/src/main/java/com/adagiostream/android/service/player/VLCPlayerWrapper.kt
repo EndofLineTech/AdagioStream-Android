@@ -44,7 +44,7 @@ class VLCPlayerWrapper(
     var bufferDurationSeconds: Int = initialBufferSeconds
         private set
 
-    private val libVLC: LibVLC = buildLibVLC()
+    private var libVLC: LibVLC = buildLibVLC()
     private var mediaPlayer: MediaPlayer = MediaPlayer(libVLC)
     private var bitrateJob: Job? = null
     private var peakBitrateKbps: Float = 0f
@@ -77,16 +77,12 @@ class VLCPlayerWrapper(
 
     private fun buildLibVLC(): LibVLC {
         val cachingMs = (bufferDurationSeconds * 1000).toString()
+        DebugLogger.log("Building LibVLC with caching=${cachingMs}ms (${bufferDurationSeconds}s)", DebugLogger.Category.VLC)
         val options = arrayListOf(
-            "--aout=opensles",
-            "--audio-resampler=soxr",
+            "--aout=aaudio",
             "--no-video",
-            "--network-caching=$cachingMs",
-            "--live-caching=$cachingMs",
-            "--file-caching=$cachingMs",
-            "--clock-jitter=0",
             "--clock-synchro=0",
-            "-v",
+            "--no-audio-time-stretch",
         )
         return LibVLC(context, options)
     }
@@ -172,8 +168,27 @@ class VLCPlayerWrapper(
     }
 
     fun updateBufferDuration(seconds: Int) {
-        bufferDurationSeconds = seconds.coerceIn(5, 15)
-        // Buffer setting takes effect on next play() — no player rebuild needed with VLC
+        val clamped = seconds.coerceIn(5, 15)
+        if (clamped == bufferDurationSeconds) return
+        bufferDurationSeconds = clamped
+
+        // Rebuild LibVLC + MediaPlayer with new caching values
+        val wasPlaying = _currentChannel.value != null && _playbackState.value is PlaybackState.Playing
+        val currentCh = _currentChannel.value
+
+        stopBitratePolling()
+        mediaPlayer.stop()
+        mediaPlayer.release()
+        libVLC.release()
+
+        libVLC = buildLibVLC()
+        mediaPlayer = MediaPlayer(libVLC)
+        attachEventListener()
+
+        // Resume playback if we were playing
+        if (wasPlaying && currentCh != null) {
+            play(currentCh)
+        }
     }
 
     fun setChannelList(channels: List<Channel>) {
@@ -215,7 +230,7 @@ class VLCPlayerWrapper(
     }
 
     fun play(channel: Channel) {
-        DebugLogger.log("play(): channel=${channel.name}, url=${UrlSanitizer.redact(channel.streamURL)}", DebugLogger.Category.PLAYER)
+        DebugLogger.log("play(): channel=${channel.name}, buffer=${bufferDurationSeconds}s, url=${UrlSanitizer.redact(channel.streamURL)}", DebugLogger.Category.PLAYER)
 
         val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
         if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
