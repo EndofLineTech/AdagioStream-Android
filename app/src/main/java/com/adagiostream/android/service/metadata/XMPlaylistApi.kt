@@ -19,24 +19,34 @@ class XMPlaylistApi(private val client: OkHttpClient) {
             val url = "https://xmplaylist.com/api/station/$slug"
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
+            if (!response.isSuccessful) {
+                Log.d(TAG, "API returned ${response.code} for $slug")
+                return@withContext null
+            }
             val body = response.body?.string() ?: return@withContext null
-            val tracks = json.decodeFromString<List<XMTrack>>(body)
-            val latest = tracks.firstOrNull() ?: return@withContext null
+            val apiResponse = json.decodeFromString<XMApiResponse>(body)
+            val latest = apiResponse.results.firstOrNull() ?: return@withContext null
+            val track = latest.track ?: return@withContext null
+            val title = track.title ?: return@withContext null
+            val artists = track.artists
+            if (artists.isEmpty()) return@withContext null
+
             TrackMetadata(
-                artist = latest.track?.artists?.joinToString(", ") { it.name } ?: return@withContext null,
-                title = latest.track?.name ?: return@withContext null,
-                album = latest.track?.album,
-                albumArtURL = latest.track?.cover,
-                timestamp = latest.startTime ?: 0L,
+                artist = artists.joinToString(", "),
+                title = title,
+                album = null,
+                albumArtURL = latest.spotify?.albumImageLarge,
+                timestamp = 0L,
             )
         } catch (e: Exception) {
-            Log.d("XMPlaylistApi", "Failed to fetch track for $slug: ${e.message}")
+            Log.d(TAG, "Failed to fetch track for $slug: ${e.message}")
             null
         }
     }
 
     companion object {
+        private const val TAG = "XMPlaylistApi"
+
         val CHANNEL_SLUG_MAP = mapOf(
             "siriusxm hits 1" to "siriusxmhits1",
             "hits 1" to "siriusxmhits1",
@@ -94,21 +104,24 @@ class XMPlaylistApi(private val client: OkHttpClient) {
     }
 
     @Serializable
-    private data class XMTrack(
+    private data class XMApiResponse(
+        @SerialName("results") val results: List<XMResult> = emptyList(),
+    )
+
+    @Serializable
+    private data class XMResult(
         @SerialName("track") val track: XMTrackInfo? = null,
-        @SerialName("startTime") val startTime: Long? = null,
+        @SerialName("spotify") val spotify: XMSpotifyInfo? = null,
     )
 
     @Serializable
     private data class XMTrackInfo(
-        @SerialName("name") val name: String? = null,
-        @SerialName("artists") val artists: List<XMArtist> = emptyList(),
-        @SerialName("album") val album: String? = null,
-        @SerialName("cover") val cover: String? = null,
+        @SerialName("title") val title: String? = null,
+        @SerialName("artists") val artists: List<String> = emptyList(),
     )
 
     @Serializable
-    private data class XMArtist(
-        @SerialName("name") val name: String = "",
+    private data class XMSpotifyInfo(
+        @SerialName("albumImageLarge") val albumImageLarge: String? = null,
     )
 }

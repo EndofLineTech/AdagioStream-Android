@@ -30,9 +30,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,9 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.model.PlaybackState
-import com.adagiostream.android.ui.components.EPGInfoCard
 import com.adagiostream.android.ui.components.RetryableAsyncImage
-import com.adagiostream.android.ui.screens.epg.EPGBottomSheet
 import com.adagiostream.android.util.BitrateFormatter
 import com.adagiostream.android.util.rememberElapsedTime
 
@@ -58,13 +53,11 @@ fun NowPlayingSheet(
     val currentChannel by viewModel.currentChannel.collectAsStateWithLifecycle()
     val bitrateKbps by viewModel.bitrateKbps.collectAsStateWithLifecycle()
     val streamStartedAt by viewModel.streamStartedAt.collectAsStateWithLifecycle()
-    val epgEntries by viewModel.currentEPGEntries.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
     val trackMetadata by viewModel.currentTrackMetadata.collectAsStateWithLifecycle()
     val isTimeShifted by viewModel.isTimeShifted.collectAsStateWithLifecycle()
     val isTrackLoved by viewModel.isTrackLoved.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showEPGSheet by remember { mutableStateOf(false) }
     val channel = currentChannel ?: return
 
     ModalBottomSheet(
@@ -181,14 +174,6 @@ fun NowPlayingSheet(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
-            if (epgEntries.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                EPGInfoCard(entries = epgEntries)
-                TextButton(onClick = { showEPGSheet = true }) {
-                    Text("View Full Program Guide")
-                }
-            }
-
             Spacer(modifier = Modifier.height(24.dp))
 
             Row(
@@ -259,11 +244,4 @@ fun NowPlayingSheet(
         }
     }
 
-    if (showEPGSheet) {
-        EPGBottomSheet(
-            entries = epgEntries,
-            channelName = channel.name,
-            onDismiss = { showEPGSheet = false },
-        )
-    }
 }
