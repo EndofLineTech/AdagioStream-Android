@@ -9,6 +9,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,8 @@ import com.adagiostream.android.ui.screens.accounts.AccountsScreen
 import com.adagiostream.android.ui.screens.accounts.AddAccountScreen
 import com.adagiostream.android.ui.screens.channels.ChannelsScreen
 import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
+import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
+import com.adagiostream.android.ui.screens.licenses.LicensesScreen
 import com.adagiostream.android.ui.screens.loved.LovedTracksScreen
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingViewModel
@@ -49,7 +52,16 @@ fun MainScreen(
     val currentChannel by nowPlayingViewModel.currentChannel.collectAsStateWithLifecycle()
     val streamStartedAt by nowPlayingViewModel.streamStartedAt.collectAsStateWithLifecycle()
     val trackMetadata by nowPlayingViewModel.currentTrackMetadata.collectAsStateWithLifecycle()
+    val channels by settingsViewModel.channels.collectAsStateWithLifecycle()
     var showNowPlaying by remember { mutableStateOf(false) }
+    var hasAttemptedStartupStream by remember { mutableStateOf(false) }
+
+    LaunchedEffect(channels, settings.startupStreamID) {
+        if (!hasAttemptedStartupStream && settings.startupStreamID != null && channels.isNotEmpty()) {
+            hasAttemptedStartupStream = true
+            settingsViewModel.playStartupStream()
+        }
+    }
 
     AdagioStreamTheme(
         appearanceMode = settings.appearanceMode,
@@ -128,6 +140,22 @@ fun MainScreen(
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)
                         },
+                        onNavigateToGroups = {
+                            navController.navigate(Screen.Groups.route)
+                        },
+                        onNavigateToLicenses = {
+                            navController.navigate(Screen.Licenses.route)
+                        },
+                    )
+                }
+                composable(Screen.Groups.route) {
+                    GroupManagementScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(Screen.Licenses.route) {
+                    LicensesScreen(
+                        onBack = { navController.popBackStack() },
                     )
                 }
                 composable(

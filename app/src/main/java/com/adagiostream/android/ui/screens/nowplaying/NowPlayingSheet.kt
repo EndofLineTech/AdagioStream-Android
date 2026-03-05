@@ -1,6 +1,7 @@
 package com.adagiostream.android.ui.screens.nowplaying
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,16 +11,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.ThumbUp
-import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -111,6 +112,7 @@ fun NowPlayingSheet(
                 is PlaybackState.Buffering -> "Buffering..."
                 is PlaybackState.Playing -> if (elapsed != null) "Playing \u00B7 $elapsed" else "Playing"
                 is PlaybackState.Paused -> if (elapsed != null) "Paused \u00B7 $elapsed" else "Paused"
+                is PlaybackState.CatchingUp -> "Catching up..."
                 is PlaybackState.Error -> (playbackState as PlaybackState.Error).message
                 else -> ""
             }
@@ -142,12 +144,12 @@ fun NowPlayingSheet(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f),
                     ) {
                         Text(
                             text = trackMetadata!!.title,
@@ -161,9 +163,12 @@ fun NowPlayingSheet(
                             textAlign = TextAlign.Center,
                         )
                     }
-                    IconButton(onClick = { viewModel.toggleLovedTrack() }) {
+                    IconButton(
+                        onClick = { viewModel.toggleLovedTrack() },
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    ) {
                         Icon(
-                            imageVector = if (isTrackLoved) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+                            imageVector = if (isTrackLoved) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = if (isTrackLoved) "Unlove track" else "Love track",
                             tint = if (isTrackLoved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -171,7 +176,7 @@ fun NowPlayingSheet(
                 }
             }
 
-            if (playbackState is PlaybackState.Buffering) {
+            if (playbackState is PlaybackState.Buffering || playbackState is PlaybackState.CatchingUp) {
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
@@ -197,7 +202,7 @@ fun NowPlayingSheet(
                 ) {
                     Icon(
                         imageVector = when (playbackState) {
-                            is PlaybackState.Playing -> Icons.Default.Pause
+                            is PlaybackState.Playing, is PlaybackState.CatchingUp -> Icons.Default.Pause
                             else -> Icons.Default.PlayArrow
                         },
                         contentDescription = "Play/Pause",
@@ -215,7 +220,7 @@ fun NowPlayingSheet(
 
                 IconButton(onClick = { viewModel.toggleFavorite() }) {
                     Icon(
-                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        imageVector = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
                         contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
                         modifier = Modifier.size(36.dp),
                         tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,

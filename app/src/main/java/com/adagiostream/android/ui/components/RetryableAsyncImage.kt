@@ -16,6 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun RetryableAsyncImage(
@@ -23,9 +26,12 @@ fun RetryableAsyncImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
+    allowHardware: Boolean = true,
+    onState: ((AsyncImagePainter.State) -> Unit)? = null,
 ) {
     var retryKey by remember { mutableIntStateOf(0) }
     var hasError by remember(model) { androidx.compose.runtime.mutableStateOf(false) }
+    val context = LocalContext.current
 
     if (hasError) {
         Box(
@@ -42,8 +48,17 @@ fun RetryableAsyncImage(
             )
         }
     } else {
+        val imageModel = if (!allowHardware) {
+            ImageRequest.Builder(context)
+                .data(if (retryKey > 0) "$model#retry=$retryKey" else model)
+                .allowHardware(false)
+                .build()
+        } else {
+            if (retryKey > 0) "$model#retry=$retryKey" else model
+        }
+
         AsyncImage(
-            model = if (retryKey > 0) "$model#retry=$retryKey" else model,
+            model = imageModel,
             contentDescription = contentDescription,
             modifier = modifier,
             contentScale = contentScale,
@@ -51,6 +66,7 @@ fun RetryableAsyncImage(
                 if (state is AsyncImagePainter.State.Error) {
                     hasError = true
                 }
+                onState?.invoke(state)
             },
         )
     }

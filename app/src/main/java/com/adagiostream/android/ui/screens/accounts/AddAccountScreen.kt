@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -21,6 +22,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,9 +48,28 @@ fun AddAccountScreen(
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
     val saveComplete by viewModel.saveComplete.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val addAccountResult by viewModel.addAccountResult.collectAsStateWithLifecycle()
 
     LaunchedEffect(saveComplete) {
         if (saveComplete) onBack()
+    }
+
+    addAccountResult?.let { result ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissResult() },
+            title = { Text("Account Added") },
+            text = {
+                Text(
+                    "Loaded ${result.channelCount} channels in ${result.newGroupCount} new groups. " +
+                        "New groups are hidden by default \u2014 enable them in Settings \u2192 Groups."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissResult() }) {
+                    Text("OK")
+                }
+            },
+        )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

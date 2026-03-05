@@ -17,6 +17,12 @@ class AccountsViewModel @Inject constructor(
     val accounts: StateFlow<List<Account>> = accountManager.accounts
     val isLoading: StateFlow<Boolean> = accountManager.isLoading
 
+    fun toggleAccountEnabled(accountId: String) {
+        viewModelScope.launch {
+            accountManager.toggleAccountEnabled(accountId)
+        }
+    }
+
     fun deleteAccount(accountId: String) {
         viewModelScope.launch {
             accountManager.deleteAccount(accountId)

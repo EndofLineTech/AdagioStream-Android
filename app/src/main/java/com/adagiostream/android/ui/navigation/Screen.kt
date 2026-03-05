@@ -1,7 +1,9 @@
 package com.adagiostream.android.ui.navigation
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Settings
@@ -14,10 +16,12 @@ sealed class Screen(
     val icon: ImageVector,
 ) {
     data object Channels : Screen("channels", "Channels", Icons.Default.Radio)
-    data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
+    data object Favorites : Screen("favorites", "Favorites", Icons.Default.Star)
     data object Loved : Screen("loved", "Loved", Icons.Default.MusicNote)
     data object Accounts : Screen("accounts", "Accounts", Icons.Default.Storage)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+    data object Groups : Screen("groups", "Groups", Icons.Default.Folder)
+    data object Licenses : Screen("licenses", "Licenses", Icons.Default.Gavel)
     data object AddAccount : Screen("add_account?accountId={accountId}", "Add Account", Icons.Default.Storage) {
         fun createRoute(accountId: String? = null): String {
             return if (accountId != null) "add_account?accountId=$accountId" else "add_account"

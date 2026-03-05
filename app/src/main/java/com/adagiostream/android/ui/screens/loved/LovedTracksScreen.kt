@@ -1,6 +1,10 @@
 package com.adagiostream.android.ui.screens.loved
 
-import androidx.compose.foundation.clickable
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -88,7 +95,7 @@ fun LovedTracksScreen(
             ) {
                 itemsIndexed(localTracks, key = { _, track -> "${track.artist}|${track.title}|${track.lovedAt}" }) { index, track ->
                     ReorderableItem(reorderableLazyListState, key = "${track.artist}|${track.title}|${track.lovedAt}") {
-                        LovedTrackItem(
+                        LovedTrackItemWithMenu(
                             track = track,
                             onDelete = { viewModel.removeTrack(index) },
                             modifier = Modifier.animateItem(),
@@ -109,6 +116,62 @@ fun LovedTracksScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LovedTrackItemWithMenu(
+    track: LovedTrack,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingContent: @Composable (() -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    var showMenu by remember { mutableStateOf(false) }
+
+    Box {
+        LovedTrackItem(
+            track = track,
+            onDelete = onDelete,
+            modifier = modifier.combinedClickable(
+                onClick = {},
+                onLongClick = { showMenu = true },
+            ),
+            leadingContent = leadingContent,
+        )
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false },
+        ) {
+            val query = Uri.encode("${track.artist} ${track.title}")
+            DropdownMenuItem(
+                text = { Text("Search on Spotify") },
+                onClick = {
+                    showMenu = false
+                    val spotifyIntent = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:${track.artist} ${track.title}"))
+                    try {
+                        context.startActivity(spotifyIntent)
+                    } catch (_: ActivityNotFoundException) {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://open.spotify.com/search/$query")))
+                    }
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Search on YouTube Music") },
+                onClick = {
+                    showMenu = false
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/search?q=$query")))
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Search on Apple Music") },
+                onClick = {
+                    showMenu = false
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.apple.com/us/search?term=$query")))
+                },
+            )
         }
     }
 }

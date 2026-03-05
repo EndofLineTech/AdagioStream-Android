@@ -114,10 +114,8 @@ class AudioPlaybackService : MediaLibraryService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val player = mediaLibrarySession?.player
-        if (player == null || !player.playWhenReady) {
-            stopSelf()
-        }
+        vlcPlayerWrapper.stop()
+        stopSelf()
     }
 
     override fun onDestroy() {

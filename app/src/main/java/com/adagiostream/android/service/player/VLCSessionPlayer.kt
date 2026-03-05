@@ -44,9 +44,10 @@ class VLCSessionPlayer(
                     is PlaybackState.Buffering -> STATE_BUFFERING
                     is PlaybackState.Playing -> STATE_READY
                     is PlaybackState.Paused -> STATE_READY
+                    is PlaybackState.CatchingUp -> STATE_READY
                     is PlaybackState.Error -> STATE_IDLE
                 }
-                currentPlayWhenReady = state is PlaybackState.Playing || state is PlaybackState.Buffering
+                currentPlayWhenReady = state is PlaybackState.Playing || state is PlaybackState.Buffering || state is PlaybackState.CatchingUp
 
                 if (channel != null) {
                     currentMediaItem = MediaItem.Builder()

@@ -12,6 +12,9 @@ data class AppSettings(
     val groupSortMode: SortMode = SortMode.ALPHABETICAL,
     val sortPrefixes: List<String> = listOf("Radio: ", "TV: "),
     val debugLoggingEnabled: Boolean = false,
+    val startupStreamID: String? = null,
+    val enabledGroups: Set<String>? = null,
+    val favoriteGroupOrder: List<String> = emptyList(),
 )
 
 @Serializable

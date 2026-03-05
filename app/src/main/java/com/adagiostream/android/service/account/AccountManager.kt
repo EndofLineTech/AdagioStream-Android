@@ -79,12 +79,20 @@ class AccountManager @Inject constructor(
     var groupSortMode: SortMode = SortMode.ALPHABETICAL
         private set
 
+    // Group management
+    private var enabledGroups: MutableSet<String>? = null  // null = all enabled
+    private var favoriteGroupOrder = mutableListOf<String>()
+    private val _allGroupNames = MutableStateFlow<Set<String>>(emptySet())
+    val allGroupNames: StateFlow<Set<String>> = _allGroupNames.asStateFlow()
+
     init {
         scope.launch {
             val settings = persistenceService.loadSettings()
             sortPrefixes = settings.sortPrefixes
             sortMode = settings.sortMode
             groupSortMode = settings.groupSortMode
+            enabledGroups = settings.enabledGroups?.toMutableSet()
+            favoriteGroupOrder = settings.favoriteGroupOrder.toMutableList()
             _accounts.value = persistenceService.loadAccounts()
             favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
             _lovedTracks.value = persistenceService.loadLovedTracks()
@@ -107,15 +115,51 @@ class AccountManager @Inject constructor(
         }
     }
 
-    suspend fun addAccount(account: Account) {
+    data class AddAccountResult(
+        val channelCount: Int,
+        val newGroupCount: Int,
+    )
+
+    suspend fun addAccount(account: Account): AddAccountResult {
+        val existingGroups = _allGroupNames.value.toSet()
         val updated = _accounts.value + account
+        _accounts.value = updated
+        persistenceService.saveAccounts(updated)
+        loadAllChannels()
+
+        val newGroups = _allGroupNames.value - existingGroups
+        // Auto-disable new groups if there were existing groups
+        if (existingGroups.isNotEmpty() && newGroups.isNotEmpty()) {
+            for (groupName in newGroups) {
+                if (enabledGroups == null) {
+                    // Initialize enabledGroups with all existing groups (excluding new ones)
+                    enabledGroups = (existingGroups).toMutableSet()
+                } else {
+                    // New groups are already not in enabledGroups, so they're disabled
+                }
+            }
+            saveGroupSettings()
+            rebuildGroups()
+        }
+
+        val newChannelCount = _channels.value.count { it.group in _allGroupNames.value }
+        return AddAccountResult(
+            channelCount = newChannelCount,
+            newGroupCount = newGroups.size,
+        )
+    }
+
+    suspend fun updateAccount(account: Account) {
+        val updated = _accounts.value.map { if (it.id == account.id) account else it }
         _accounts.value = updated
         persistenceService.saveAccounts(updated)
         loadAllChannels()
     }
 
-    suspend fun updateAccount(account: Account) {
-        val updated = _accounts.value.map { if (it.id == account.id) account else it }
+    suspend fun toggleAccountEnabled(accountId: String) {
+        val updated = _accounts.value.map {
+            if (it.id == accountId) it.copy(isEnabled = !it.isEnabled) else it
+        }
         _accounts.value = updated
         persistenceService.saveAccounts(updated)
         loadAllChannels()
@@ -134,7 +178,7 @@ class AccountManager @Inject constructor(
 
         try {
             val allChannels = mutableListOf<Channel>()
-            for (account in _accounts.value) {
+            for (account in _accounts.value.filter { it.isEnabled }) {
                 try {
                     val channels = when (account.type) {
                         is AccountType.M3U -> m3uParser.parse(account.type.url)
@@ -208,6 +252,59 @@ class AccountManager @Inject constructor(
     fun updateGroupSortMode(mode: SortMode) {
         groupSortMode = mode
         rebuildGroups()
+    }
+
+    fun isGroupEnabled(groupName: String): Boolean {
+        return enabledGroups?.contains(groupName) ?: true
+    }
+
+    fun isGroupFavorite(groupName: String): Boolean {
+        return groupName in favoriteGroupOrder
+    }
+
+    suspend fun toggleGroupEnabled(groupName: String) {
+        if (enabledGroups == null) {
+            // First toggle: enable all groups except this one
+            enabledGroups = _allGroupNames.value.toMutableSet().also { it.remove(groupName) }
+        } else if (groupName in enabledGroups!!) {
+            enabledGroups!!.remove(groupName)
+        } else {
+            enabledGroups!!.add(groupName)
+        }
+        saveGroupSettings()
+        rebuildGroups()
+    }
+
+    suspend fun toggleGroupFavorite(groupName: String) {
+        if (groupName in favoriteGroupOrder) {
+            favoriteGroupOrder.remove(groupName)
+        } else {
+            favoriteGroupOrder.add(groupName)
+        }
+        saveGroupSettings()
+        rebuildGroups()
+    }
+
+    suspend fun updateFavoriteGroupOrder(order: List<String>) {
+        favoriteGroupOrder = order.toMutableList()
+        saveGroupSettings()
+        rebuildGroups()
+    }
+
+    suspend fun setAllGroupsEnabled(enabled: Boolean) {
+        enabledGroups = if (enabled) null else mutableSetOf()
+        saveGroupSettings()
+        rebuildGroups()
+    }
+
+    private suspend fun saveGroupSettings() {
+        val settings = persistenceService.loadSettings()
+        persistenceService.saveSettings(
+            settings.copy(
+                enabledGroups = enabledGroups?.toSet(),
+                favoriteGroupOrder = favoriteGroupOrder.toList(),
+            )
+        )
     }
 
     suspend fun loadXtreamEPGForChannel(channel: Channel) {
@@ -319,8 +416,19 @@ class AccountManager @Inject constructor(
     }
 
     private fun rebuildGroups() {
-        _groups.value = _channels.value
-            .groupBy { it.group }
+        val allGrouped = _channels.value.groupBy { it.group }
+
+        // Track all raw group names for group management
+        _allGroupNames.value = allGrouped.keys
+
+        // Filter by enabled groups
+        val filteredGrouped = if (enabledGroups != null) {
+            allGrouped.filter { it.key in enabledGroups!! }
+        } else {
+            allGrouped
+        }
+
+        _groups.value = filteredGrouped
             .map { (name, channels) ->
                 val sorted = when (sortMode) {
                     SortMode.ACCOUNT_ORDER -> channels
@@ -332,12 +440,22 @@ class AccountManager @Inject constructor(
                 ChannelGroup(name, sorted)
             }
             .let { groups ->
-                when (groupSortMode) {
+                val sorted = when (groupSortMode) {
                     SortMode.ACCOUNT_ORDER -> groups
                     SortMode.NATURAL -> groups.sortedWith(
                         Comparator { a, b -> naturalCompare(a.name.lowercase(), b.name.lowercase()) },
                     )
                     SortMode.ALPHABETICAL -> groups.sortedBy { it.name }
+                }
+                // Favorite groups always sorted to the top
+                if (favoriteGroupOrder.isNotEmpty()) {
+                    val (favorites, rest) = sorted.partition { it.name in favoriteGroupOrder }
+                    val orderedFavorites = favoriteGroupOrder.mapNotNull { favName ->
+                        favorites.find { it.name == favName }
+                    }
+                    orderedFavorites + rest
+                } else {
+                    sorted
                 }
             }
     }

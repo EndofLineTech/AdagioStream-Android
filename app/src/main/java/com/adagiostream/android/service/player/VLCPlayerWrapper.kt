@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
@@ -54,6 +55,26 @@ class VLCPlayerWrapper(
     private val _timeShiftMs = kotlinx.coroutines.flow.MutableStateFlow(0L)
     val timeShiftMs: kotlinx.coroutines.flow.StateFlow<Long> = _timeShiftMs
     private var pausedAtSystemTime: Long = 0L
+
+    // Time-shift buffer
+    private val timeShiftBuffer = TimeShiftBuffer(context.cacheDir, OkHttpClient())
+    private var isPlayingBufferedFile = false
+    private var timeShiftCaptureJob: Job? = null
+    private var liveChannelForCatchUp: Channel? = null
+
+    // Channel debouncing
+    private var lastTeardownTime: Long = 0L
+    private var pendingPlayJob: Job? = null
+
+    // Connection retry with backoff
+    private var retryCount: Int = 0
+    private var hasReceivedPlayingEvent: Boolean = false
+    private var retryJob: Job? = null
+    private companion object {
+        const val MAX_RETRIES = 3
+        const val DEBOUNCE_WINDOW_MS = 10_000L
+        const val DEBOUNCE_DELAY_MS = 1_500L
+    }
 
     // Audio focus
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -113,7 +134,10 @@ class VLCPlayerWrapper(
             }
             MediaPlayer.Event.Playing -> {
                 DebugLogger.log("Playing ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
-                _playbackState.value = PlaybackState.Playing
+                hasReceivedPlayingEvent = true
+                retryCount = 0
+                retryJob?.cancel()
+                _playbackState.value = if (isPlayingBufferedFile) PlaybackState.CatchingUp else PlaybackState.Playing
                 startBitratePolling()
             }
             MediaPlayer.Event.Paused -> {
@@ -128,16 +152,34 @@ class VLCPlayerWrapper(
             MediaPlayer.Event.EndReached -> {
                 // Ignore stale events from channel switches or user-initiated stop
                 if (!isSwitchingChannels && _currentChannel.value != null) {
-                    DebugLogger.log("EndReached — stream ended for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
-                    _playbackState.value = PlaybackState.Error("Stream ended")
-                    stopBitratePolling()
+                    // When buffer playback ends, go back to live
+                    if (isPlayingBufferedFile) {
+                        DebugLogger.log("TimeShift: buffer playback ended, returning to live", DebugLogger.Category.TIMESHIFT)
+                        isPlayingBufferedFile = false
+                        val liveChannel = liveChannelForCatchUp
+                        liveChannelForCatchUp = null
+                        if (liveChannel != null) {
+                            _timeShiftMs.value = 0L
+                            doPlay(liveChannel)
+                        }
+                    } else if (!hasReceivedPlayingEvent && retryCount < MAX_RETRIES) {
+                        retryConnection("Stream ended before playing")
+                    } else {
+                        DebugLogger.log("EndReached — stream ended for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
+                        _playbackState.value = PlaybackState.Error("Stream ended")
+                        stopBitratePolling()
+                    }
                 }
             }
             MediaPlayer.Event.EncounteredError -> {
                 if (!isSwitchingChannels && _currentChannel.value != null) {
-                    DebugLogger.log("EncounteredError for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
-                    _playbackState.value = PlaybackState.Error("Playback error")
-                    stopBitratePolling()
+                    if (!hasReceivedPlayingEvent && retryCount < MAX_RETRIES) {
+                        retryConnection("Playback error")
+                    } else {
+                        DebugLogger.log("EncounteredError for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
+                        _playbackState.value = PlaybackState.Error("Playback error")
+                        stopBitratePolling()
+                    }
                 }
             }
         }
@@ -203,19 +245,34 @@ class VLCPlayerWrapper(
                     mediaPlayer.setVolume(100)
                     isDucking = false
                 } else if (wasPlayingBeforeFocusLoss) {
-                    resume()
+                    val bufferFile = timeShiftBuffer.stopCapture()
+                    timeShiftCaptureJob?.cancel()
+                    if (bufferFile != null && bufferFile.length() > 0) {
+                        liveChannelForCatchUp = _currentChannel.value
+                        playBufferedFile(bufferFile)
+                    } else {
+                        resume()
+                    }
                 }
                 wasPlayingBeforeFocusLoss = false
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
                 DebugLogger.log("Audio focus lost permanently", DebugLogger.Category.AUDIO)
                 wasPlayingBeforeFocusLoss = false
+                timeShiftCaptureJob?.cancel()
+                timeShiftBuffer.stopCapture()
                 stop()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 DebugLogger.log("Audio focus lost transiently", DebugLogger.Category.AUDIO)
                 if (mediaPlayer.isPlaying) {
                     wasPlayingBeforeFocusLoss = true
+                    val channel = _currentChannel.value
+                    if (channel != null) {
+                        timeShiftCaptureJob = scope.launch {
+                            timeShiftBuffer.startCapture(channel)
+                        }
+                    }
                     pause()
                 }
             }
@@ -229,9 +286,48 @@ class VLCPlayerWrapper(
         }
     }
 
+    private fun playBufferedFile(file: java.io.File) {
+        DebugLogger.log("TimeShift: playing buffered file ${file.name}", DebugLogger.Category.TIMESHIFT)
+        isPlayingBufferedFile = true
+        _playbackState.value = PlaybackState.CatchingUp
+
+        isSwitchingChannels = true
+        mediaPlayer.stop()
+
+        val media = Media(libVLC, Uri.parse(file.absolutePath))
+        media.setHWDecoderEnabled(true, false)
+        media.addOption(":no-video")
+        mediaPlayer.media = media
+        media.release()
+        mediaPlayer.play()
+    }
+
     fun play(channel: Channel) {
         DebugLogger.log("play(): channel=${channel.name}, buffer=${bufferDurationSeconds}s, url=${UrlSanitizer.redact(channel.streamURL)}", DebugLogger.Category.PLAYER)
 
+        // Cancel any pending debounced play
+        pendingPlayJob?.cancel()
+
+        // Reset retry state for new channel
+        retryCount = 0
+        hasReceivedPlayingEvent = false
+        retryJob?.cancel()
+
+        val timeSinceTeardown = System.currentTimeMillis() - lastTeardownTime
+        if (lastTeardownTime > 0 && timeSinceTeardown < DEBOUNCE_WINDOW_MS) {
+            DebugLogger.log("Debouncing play (${timeSinceTeardown}ms since last teardown)", DebugLogger.Category.PLAYER)
+            _currentChannel.value = channel
+            _playbackState.value = PlaybackState.Buffering
+            pendingPlayJob = scope.launch {
+                delay(DEBOUNCE_DELAY_MS)
+                doPlay(channel)
+            }
+        } else {
+            doPlay(channel)
+        }
+    }
+
+    private fun doPlay(channel: Channel) {
         val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
         if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
             DebugLogger.log("Audio focus request denied", DebugLogger.Category.AUDIO)
@@ -264,6 +360,18 @@ class VLCPlayerWrapper(
         mediaPlayer.media = media
         media.release() // MediaPlayer holds its own reference
         mediaPlayer.play()
+    }
+
+    private fun retryConnection(reason: String) {
+        retryCount++
+        val delayMs = (retryCount * 1500L)
+        DebugLogger.log("Retry $retryCount/$MAX_RETRIES ($reason) in ${delayMs}ms", DebugLogger.Category.PLAYER)
+        _playbackState.value = PlaybackState.Buffering
+        retryJob = scope.launch {
+            delay(delayMs)
+            val channel = _currentChannel.value ?: return@launch
+            doPlay(channel)
+        }
     }
 
     fun pause() {
@@ -301,6 +409,15 @@ class VLCPlayerWrapper(
 
     fun stop() {
         DebugLogger.log("stop(): channel=${_currentChannel.value?.name}", DebugLogger.Category.PLAYER)
+        pendingPlayJob?.cancel()
+        retryJob?.cancel()
+        timeShiftCaptureJob?.cancel()
+        timeShiftBuffer.cleanup()
+        isPlayingBufferedFile = false
+        liveChannelForCatchUp = null
+        retryCount = 0
+        hasReceivedPlayingEvent = false
+        lastTeardownTime = System.currentTimeMillis()
         _currentChannel.value = null  // Clear before stop so async events are ignored
         mediaPlayer.stop()
         stopBitratePolling()

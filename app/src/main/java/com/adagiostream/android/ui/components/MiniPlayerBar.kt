@@ -100,6 +100,7 @@ fun MiniPlayerBar(
                             is PlaybackState.Buffering -> "Buffering..."
                             is PlaybackState.Playing -> if (elapsed != null) "Playing \u00B7 $elapsed" else "Playing"
                             is PlaybackState.Paused -> if (elapsed != null) "Paused \u00B7 $elapsed" else "Paused"
+                            is PlaybackState.CatchingUp -> "Catching up..."
                             is PlaybackState.Error -> "Error"
                             else -> ""
                         }
@@ -114,7 +115,7 @@ fun MiniPlayerBar(
                 IconButton(onClick = onPlayPause) {
                     Icon(
                         imageVector = when (playbackState) {
-                            is PlaybackState.Playing -> Icons.Default.Pause
+                            is PlaybackState.Playing, is PlaybackState.CatchingUp -> Icons.Default.Pause
                             else -> Icons.Default.PlayArrow
                         },
                         contentDescription = "Play/Pause",

@@ -56,6 +56,7 @@ object AppModule {
     fun provideImageLoader(@ApplicationContext context: Context): ImageLoader =
         ImageLoader.Builder(context)
             .components { add(OkHttpNetworkFetcherFactory()) }
+            .memoryCachePolicy(CachePolicy.ENABLED)
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache").toOkioPath())

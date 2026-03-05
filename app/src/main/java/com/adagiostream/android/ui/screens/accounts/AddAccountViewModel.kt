@@ -54,6 +54,9 @@ class AddAccountViewModel @Inject constructor(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    private val _addAccountResult = MutableStateFlow<AccountManager.AddAccountResult?>(null)
+    val addAccountResult: StateFlow<AccountManager.AddAccountResult?> = _addAccountResult.asStateFlow()
+
     init {
         if (editAccountId != null) {
             val account = accountManager.accounts.value.find { it.id == editAccountId }
@@ -83,6 +86,10 @@ class AddAccountViewModel @Inject constructor(
     fun setUsername(value: String) { _username.value = value }
     fun setPassword(value: String) { _password.value = value }
     fun setEpgUrl(value: String) { _epgUrl.value = value }
+    fun dismissResult() {
+        _addAccountResult.value = null
+        _saveComplete.value = true
+    }
 
     fun isValid(): Boolean {
         if (_name.value.isBlank()) return false
@@ -125,10 +132,15 @@ class AddAccountViewModel @Inject constructor(
 
                 if (isEditing) {
                     accountManager.updateAccount(account)
+                    _saveComplete.value = true
                 } else {
-                    accountManager.addAccount(account)
+                    val result = accountManager.addAccount(account)
+                    if (result.newGroupCount > 0) {
+                        _addAccountResult.value = result
+                    } else {
+                        _saveComplete.value = true
+                    }
                 }
-                _saveComplete.value = true
             } catch (e: Exception) {
                 _errorMessage.value = UrlSanitizer.redact(e.message ?: "Failed to save account")
             } finally {

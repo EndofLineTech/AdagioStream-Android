@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0-0049"
+        versionName = "1.0-0052"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -95,6 +95,9 @@ dependencies {
     // Coil
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+
+    // Security
+    implementation(libs.security.crypto)
 
     // OkHttp
     implementation(libs.okhttp)

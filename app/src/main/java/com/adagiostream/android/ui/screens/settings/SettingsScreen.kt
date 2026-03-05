@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import com.adagiostream.android.BuildConfig
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
@@ -64,6 +65,8 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onNavigateToAccounts: (() -> Unit)? = null,
+    onNavigateToGroups: (() -> Unit)? = null,
+    onNavigateToLicenses: (() -> Unit)? = null,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val accountCount by viewModel.accountCount.collectAsStateWithLifecycle()
@@ -71,6 +74,7 @@ fun SettingsScreen(
     val favoritesCount by viewModel.favoritesCount.collectAsStateWithLifecycle()
     val bitrateKbps by viewModel.bitrateKbps.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val favoriteChannels by viewModel.favoriteChannels.collectAsStateWithLifecycle()
     var showClearFavoritesDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -273,6 +277,26 @@ fun SettingsScreen(
             onPrefixesChanged = { viewModel.updateSortPrefixes(it) },
         )
 
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Startup Stream
+        Text(
+            text = "Startup Stream",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "Auto-play a favorite channel on launch",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        StartupStreamPicker(
+            selectedId = settings.startupStreamID,
+            favorites = favoriteChannels,
+            onSelected = { viewModel.updateStartupStream(it) },
+        )
+
         if (onNavigateToAccounts != null) {
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -311,6 +335,41 @@ fun SettingsScreen(
                     Icon(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = "Go to Accounts",
+                    )
+                }
+            }
+        }
+
+        if (onNavigateToGroups != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                onClick = onNavigateToGroups,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text(
+                            text = "Manage Groups",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = "Show, hide, and favorite groups",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Go to Groups",
                     )
                 }
             }
@@ -385,6 +444,34 @@ fun SettingsScreen(
                 StatRow("App", "AdagioStream")
                 StatRow("Version", BuildConfig.VERSION_NAME)
                 StatRow("Build", BuildConfig.VERSION_CODE.toString())
+            }
+        }
+
+        if (onNavigateToLicenses != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                onClick = onNavigateToLicenses,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Open Source Licenses",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Go to Licenses",
+                    )
+                }
             }
         }
 
@@ -519,6 +606,53 @@ private fun StatRow(label: String, value: String) {
             text = value,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StartupStreamPicker(
+    selectedId: String?,
+    favorites: List<Channel>,
+    onSelected: (String?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedName = favorites.find { it.id == selectedId }?.name ?: "None"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = selectedName,
+            onValueChange = {},
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = {
+                    onSelected(null)
+                    expanded = false
+                },
+            )
+            favorites.forEach { channel ->
+                DropdownMenuItem(
+                    text = { Text(channel.name) },
+                    onClick = {
+                        onSelected(channel.id)
+                        expanded = false
+                    },
+                )
+            }
+        }
     }
 }
 

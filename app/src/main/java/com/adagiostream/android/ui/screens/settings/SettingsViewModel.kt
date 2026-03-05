@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
@@ -45,6 +46,10 @@ class SettingsViewModel @Inject constructor(
 
     val bitrateKbps: StateFlow<Float> = vlcPlayerWrapper.bitrateKbps
     val playbackState: StateFlow<PlaybackState> = vlcPlayerWrapper.playbackState
+
+    val favoriteChannels: StateFlow<List<Channel>> = accountManager.channels
+        .map { channels -> channels.filter { it.isFavorite } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val debugLogSize = MutableStateFlow(DebugLogger.logFileSize())
 
@@ -106,6 +111,20 @@ class SettingsViewModel @Inject constructor(
 
     fun refreshDebugLogSize() {
         debugLogSize.value = DebugLogger.logFileSize()
+    }
+
+    fun updateStartupStream(channelId: String?) {
+        _settings.value = _settings.value.copy(startupStreamID = channelId)
+        save()
+    }
+
+    val channels: StateFlow<List<Channel>> = accountManager.channels
+
+    fun playStartupStream() {
+        val streamId = _settings.value.startupStreamID ?: return
+        val channel = accountManager.channels.value.find { it.id == streamId } ?: return
+        vlcPlayerWrapper.setChannelList(accountManager.channels.value)
+        vlcPlayerWrapper.play(channel)
     }
 
     fun clearAllFavorites() {

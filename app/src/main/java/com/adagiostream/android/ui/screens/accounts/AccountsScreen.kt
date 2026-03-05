@@ -23,11 +23,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -104,6 +106,7 @@ fun AccountsScreen(
                             account = account,
                             onEdit = { onEditAccount(account.id) },
                             onDelete = { viewModel.deleteAccount(account.id) },
+                            onToggleEnabled = { viewModel.toggleAccountEnabled(account.id) },
                         )
                     }
                 }
@@ -117,11 +120,13 @@ private fun AccountCard(
     account: Account,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onToggleEnabled: () -> Unit,
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .alpha(if (account.isEnabled) 1f else 0.5f),
     ) {
         Row(
             modifier = Modifier
@@ -129,7 +134,15 @@ private fun AccountCard(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Switch(
+                checked = account.isEnabled,
+                onCheckedChange = { onToggleEnabled() },
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+            ) {
                 Text(
                     text = account.name,
                     style = MaterialTheme.typography.titleMedium,

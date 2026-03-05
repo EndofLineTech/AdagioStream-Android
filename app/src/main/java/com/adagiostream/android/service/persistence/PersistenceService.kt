@@ -1,6 +1,8 @@
 package com.adagiostream.android.service.persistence
 
 import android.content.Context
+import androidx.security.crypto.EncryptedFile
+import androidx.security.crypto.MasterKeys
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.LovedTrack
@@ -16,8 +18,13 @@ class PersistenceService(
 ) {
     private val mutex = Mutex()
 
+    private val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+
     private val accountsFile: File
         get() = File(context.filesDir, "accounts.json")
+
+    private val encryptedAccountsFile: File
+        get() = File(context.filesDir, "accounts_encrypted.json")
 
     private val legacyProvidersFile: File
         get() = File(context.filesDir, "providers.json")
@@ -34,21 +41,54 @@ class PersistenceService(
         }
     }
 
+    private fun buildEncryptedFile(): EncryptedFile {
+        return EncryptedFile.Builder(
+            encryptedAccountsFile,
+            context,
+            masterKeyAlias,
+            EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB,
+        ).build()
+    }
+
+    private fun readEncrypted(): String {
+        return buildEncryptedFile().openFileInput().bufferedReader().use { it.readText() }
+    }
+
+    private fun writeEncrypted(content: String) {
+        // EncryptedFile doesn't support overwriting — delete first
+        if (encryptedAccountsFile.exists()) {
+            encryptedAccountsFile.delete()
+        }
+        buildEncryptedFile().openFileOutput().bufferedWriter().use { it.write(content) }
+    }
+
     suspend fun loadAccounts(): List<Account> = mutex.withLock {
         try {
             migrateProvidersFile()
+
+            // Try plaintext first (migration path)
             if (accountsFile.exists()) {
-                json.decodeFromString<List<Account>>(accountsFile.readText())
-            } else {
-                emptyList()
+                val plaintext = accountsFile.readText()
+                val accounts = json.decodeFromString<List<Account>>(plaintext)
+                // Migrate to encrypted
+                writeEncrypted(plaintext)
+                accountsFile.delete()
+                return@withLock accounts
             }
+
+            // Try encrypted
+            if (encryptedAccountsFile.exists()) {
+                return@withLock json.decodeFromString<List<Account>>(readEncrypted())
+            }
+
+            emptyList()
         } catch (_: Exception) {
             emptyList()
         }
     }
 
     suspend fun saveAccounts(accounts: List<Account>) = mutex.withLock {
-        accountsFile.writeText(json.encodeToString(accounts))
+        writeEncrypted(json.encodeToString(accounts))
     }
 
     suspend fun loadFavoriteIds(): List<String> = mutex.withLock {

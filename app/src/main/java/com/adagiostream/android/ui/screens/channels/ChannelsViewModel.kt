@@ -70,4 +70,22 @@ class ChannelsViewModel @Inject constructor(
             accountManager.toggleFavorite(channel)
         }
     }
+
+    fun toggleGroupFavorite(groupName: String) {
+        viewModelScope.launch {
+            accountManager.toggleGroupFavorite(groupName)
+        }
+    }
+
+    fun hideGroup(groupName: String) {
+        viewModelScope.launch {
+            if (accountManager.isGroupEnabled(groupName)) {
+                accountManager.toggleGroupEnabled(groupName)
+            }
+        }
+    }
+
+    fun isGroupFavorite(groupName: String): Boolean {
+        return accountManager.isGroupFavorite(groupName)
+    }
 }
