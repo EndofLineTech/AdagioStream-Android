@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0-0047"
+        versionName = "1.0-0049"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -104,9 +104,6 @@ dependencies {
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
-
-    // Palette
-    implementation(libs.palette.ktx)
 
     // Reorderable
     implementation(libs.reorderable)
