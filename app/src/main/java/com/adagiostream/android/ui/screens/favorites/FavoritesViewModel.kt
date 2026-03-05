@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.service.account.AccountManager
-import com.adagiostream.android.service.player.ExoPlayerWrapper
+import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +16,7 @@ import javax.inject.Inject
 @HiltViewModel
 class FavoritesViewModel @Inject constructor(
     private val accountManager: AccountManager,
-    private val exoPlayer: ExoPlayerWrapper,
+    private val vlcPlayer: VLCPlayerWrapper,
 ) : ViewModel() {
 
     val favorites: StateFlow<List<Channel>> = accountManager.channels
@@ -28,8 +28,8 @@ class FavoritesViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun playChannel(channel: Channel) {
-        exoPlayer.setChannelList(favorites.value)
-        exoPlayer.play(channel)
+        vlcPlayer.setChannelList(favorites.value)
+        vlcPlayer.play(channel)
     }
 
     fun toggleFavorite(channel: Channel) {

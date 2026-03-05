@@ -6,7 +6,7 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.service.account.AccountManager
-import com.adagiostream.android.service.player.ExoPlayerWrapper
+import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,17 +17,17 @@ import javax.inject.Inject
 
 @HiltViewModel
 class NowPlayingViewModel @Inject constructor(
-    private val exoPlayer: ExoPlayerWrapper,
+    private val vlcPlayer: VLCPlayerWrapper,
     private val accountManager: AccountManager,
 ) : ViewModel() {
 
-    val playbackState: StateFlow<PlaybackState> = exoPlayer.playbackState
-    val currentChannel: StateFlow<Channel?> = exoPlayer.currentChannel
-    val bitrateKbps: StateFlow<Float> = exoPlayer.bitrateKbps
-    val streamStartedAt: StateFlow<Long?> = exoPlayer.streamStartedAt
+    val playbackState: StateFlow<PlaybackState> = vlcPlayer.playbackState
+    val currentChannel: StateFlow<Channel?> = vlcPlayer.currentChannel
+    val bitrateKbps: StateFlow<Float> = vlcPlayer.bitrateKbps
+    val streamStartedAt: StateFlow<Long?> = vlcPlayer.streamStartedAt
 
     val currentEPGEntries: StateFlow<List<EPGEntry>> = combine(
-        exoPlayer.currentChannel,
+        vlcPlayer.currentChannel,
         accountManager.epgEntries,
     ) { channel, epgMap ->
         if (channel == null) return@combine emptyList()
@@ -37,7 +37,7 @@ class NowPlayingViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            exoPlayer.currentChannel.collect { channel ->
+            vlcPlayer.currentChannel.collect { channel ->
                 if (channel?.xtreamStreamId != null) {
                     accountManager.loadXtreamEPGForChannel(channel)
                 }
@@ -45,8 +45,8 @@ class NowPlayingViewModel @Inject constructor(
         }
     }
 
-    fun togglePlayPause() = exoPlayer.togglePlayPause()
-    fun stop() = exoPlayer.stop()
-    fun playNext() = exoPlayer.playNext()
-    fun playPrevious() = exoPlayer.playPrevious()
+    fun togglePlayPause() = vlcPlayer.togglePlayPause()
+    fun stop() = vlcPlayer.stop()
+    fun playNext() = vlcPlayer.playNext()
+    fun playPrevious() = vlcPlayer.playPrevious()
 }

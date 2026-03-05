@@ -2,14 +2,13 @@ package com.adagiostream.android.di
 
 import android.content.Context
 import com.adagiostream.android.service.persistence.PersistenceService
-import com.adagiostream.android.service.player.ExoPlayerWrapper
+import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
 @Module
@@ -33,12 +32,11 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideExoPlayerWrapper(
+    fun provideVLCPlayerWrapper(
         @ApplicationContext context: Context,
         persistenceService: PersistenceService,
-        okHttpClient: OkHttpClient,
-    ): ExoPlayerWrapper {
+    ): VLCPlayerWrapper {
         val settings = persistenceService.loadSettingsSync()
-        return ExoPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15), okHttpClient)
+        return VLCPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15))
     }
 }

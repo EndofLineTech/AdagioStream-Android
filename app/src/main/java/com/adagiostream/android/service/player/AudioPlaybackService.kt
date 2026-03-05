@@ -10,10 +10,8 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -38,14 +36,13 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class AudioPlaybackService : MediaLibraryService() {
 
-    @Inject lateinit var exoPlayerWrapper: ExoPlayerWrapper
+    @Inject lateinit var vlcPlayerWrapper: VLCPlayerWrapper
     @Inject lateinit var accountManager: AccountManager
     @Inject lateinit var persistenceService: PersistenceService
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastBrowsedParentId: String? = null
-    private var lastPlayerVersion: Int = -1
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
@@ -75,7 +72,7 @@ class AudioPlaybackService : MediaLibraryService() {
 
         // Persist last played channel
         serviceScope.launch {
-            exoPlayerWrapper.currentChannel.collect { channel ->
+            vlcPlayerWrapper.currentChannel.collect { channel ->
                 if (channel != null) {
                     persistenceService.saveLastPlayed(channel.id)
                 }
@@ -85,40 +82,16 @@ class AudioPlaybackService : MediaLibraryService() {
 
     @OptIn(UnstableApi::class)
     private fun buildSession() {
-        lastPlayerVersion = exoPlayerWrapper.playerVersion
-
-        val forwardingPlayer = object : ForwardingPlayer(exoPlayerWrapper.player) {
-            override fun seekToNext() {
-                exoPlayerWrapper.playNext()
-            }
-
-            override fun seekToPrevious() {
-                exoPlayerWrapper.playPrevious()
-            }
-
-            override fun getAvailableCommands(): Player.Commands {
-                return super.getAvailableCommands().buildUpon()
-                    .addAll(
-                        Player.COMMAND_SEEK_TO_NEXT,
-                        Player.COMMAND_SEEK_TO_PREVIOUS,
-                    )
-                    .build()
-            }
-        }
+        val sessionPlayer = VLCSessionPlayer(vlcPlayerWrapper)
 
         mediaLibrarySession?.release()
-        mediaLibrarySession = MediaLibrarySession.Builder(this, forwardingPlayer, LibraryCallback())
+        mediaLibrarySession = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
             .build()
     }
 
     @OptIn(UnstableApi::class)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-
-        // Rebuild the session if ExoPlayer was recreated (e.g. buffer setting changed)
-        if (exoPlayerWrapper.playerVersion != lastPlayerVersion) {
-            buildSession()
-        }
 
         // Immediately satisfy the foreground service requirement with a placeholder
         // notification. Media3 will replace it with proper media controls once playback starts.
@@ -203,7 +176,7 @@ class AudioPlaybackService : MediaLibraryService() {
             args: Bundle,
         ): ListenableFuture<SessionResult> {
             if (customCommand.customAction == TOGGLE_FAVORITE_COMMAND.customAction) {
-                val channel = exoPlayerWrapper.currentChannel.value
+                val channel = vlcPlayerWrapper.currentChannel.value
                 if (channel != null) {
                     serviceScope.launch {
                         accountManager.toggleFavorite(channel)
@@ -222,8 +195,8 @@ class AudioPlaybackService : MediaLibraryService() {
             val resolved = mediaItems.map { item ->
                 val channel = accountManager.channels.value.find { it.id == item.mediaId }
                 if (channel != null) {
-                    exoPlayerWrapper.setChannelList(channelListForContext(channel))
-                    exoPlayerWrapper.play(channel)
+                    vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+                    vlcPlayerWrapper.play(channel)
                     item.buildUpon()
                         .setUri(channel.streamURL)
                         .setMediaMetadata(
@@ -255,7 +228,7 @@ class AudioPlaybackService : MediaLibraryService() {
                 accountManager.channels.value.find { it.id == id }
             }
             if (channel != null) {
-                exoPlayerWrapper.setChannelList(channelListForContext(channel))
+                vlcPlayerWrapper.setChannelList(channelListForContext(channel))
             }
             val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
             return Futures.immediateFuture(

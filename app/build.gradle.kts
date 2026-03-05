@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0-0030"
+        versionName = "1.0-0031"
     }
 
     buildTypes {
@@ -85,10 +85,8 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
-    // ExoPlayer
-    implementation(libs.media3.exoplayer)
-    implementation(libs.media3.exoplayer.hls)
-    implementation(libs.media3.datasource.okhttp)
+    // libVLC
+    implementation(libs.libvlc.all)
 
     // Coil
     implementation(libs.coil.compose)

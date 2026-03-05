@@ -8,7 +8,7 @@ import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.persistence.PersistenceService
-import com.adagiostream.android.service.player.ExoPlayerWrapper
+import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,7 +23,7 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val persistenceService: PersistenceService,
     private val accountManager: AccountManager,
-    private val exoPlayerWrapper: ExoPlayerWrapper,
+    private val vlcPlayerWrapper: VLCPlayerWrapper,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(AppSettings())
@@ -53,7 +53,7 @@ class SettingsViewModel @Inject constructor(
     fun updateBufferDuration(seconds: Int) {
         val clamped = seconds.coerceIn(5, 15)
         _settings.value = _settings.value.copy(bufferDurationSeconds = clamped)
-        exoPlayerWrapper.updateBufferDuration(clamped)
+        vlcPlayerWrapper.updateBufferDuration(clamped)
         save()
     }
 
