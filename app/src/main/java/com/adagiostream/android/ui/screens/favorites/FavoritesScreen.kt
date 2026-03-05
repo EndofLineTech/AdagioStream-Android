@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.ui.components.ChannelListItem
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -34,6 +35,7 @@ fun FavoritesScreen(
     viewModel: FavoritesViewModel = hiltViewModel(),
 ) {
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
     var localFavorites by remember(favorites) { mutableStateOf(favorites) }
 
     val lazyListState = rememberLazyListState()
@@ -69,10 +71,12 @@ fun FavoritesScreen(
             ) {
                 items(localFavorites, key = { it.id }) { channel ->
                     ReorderableItem(reorderableLazyListState, key = channel.id) {
+                        val slug = XMPlaylistApi.slugForChannel(channel.name)
                         ChannelListItem(
                             channel = channel,
                             onClick = { viewModel.playChannel(channel) },
                             onFavoriteToggle = { viewModel.toggleFavorite(channel) },
+                            trackMetadata = slug?.let { feedMetadata[it] },
                             modifier = Modifier.animateItem(),
                             leadingContent = {
                                 IconButton(

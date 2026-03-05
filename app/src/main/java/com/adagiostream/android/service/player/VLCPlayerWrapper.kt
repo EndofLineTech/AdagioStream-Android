@@ -89,7 +89,9 @@ class VLCPlayerWrapper(
             "--network-caching=$cachingMs",
             "--live-caching=$cachingMs",
             "--file-caching=$cachingMs",
-            "-vv",  // verbose logging for debugging; reduce to -v or remove later
+            "--clock-jitter=0",
+            "--clock-synchro=0",
+            "-v",
         )
         return LibVLC(context, options)
     }
@@ -112,7 +114,9 @@ class VLCPlayerWrapper(
             MediaPlayer.Event.Buffering -> {
                 val pct = event.buffering
                 Log.d(TAG, "VLC: Buffering ${pct}%")
-                if (pct < 100f) {
+                // Only show Buffering UI before the first Playing event.
+                // Once playing, ignore sub-100% micro-buffer fluctuations.
+                if (pct < 100f && _playbackState.value !is PlaybackState.Playing) {
                     _playbackState.value = PlaybackState.Buffering
                 }
             }

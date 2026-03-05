@@ -1,5 +1,6 @@
 package com.adagiostream.android.service.account
 
+import android.util.Log
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.Channel
@@ -33,6 +34,10 @@ class AccountManager @Inject constructor(
     private val client: OkHttpClient,
     private val xmPlaylistApi: XMPlaylistApi,
 ) {
+    companion object {
+        private const val TAG = "AccountManager"
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val m3uParser = M3UParser(client)
     private val xtreamApi = XtreamCodesApi(client)
@@ -60,6 +65,11 @@ class AccountManager @Inject constructor(
     val trackMetadata: StateFlow<Map<String, TrackMetadata>> = _trackMetadata.asStateFlow()
     private var trackMetadataJob: Job? = null
 
+    // Feed metadata keyed by XM slug — used for channel list subtitles
+    private val _feedMetadata = MutableStateFlow<Map<String, TrackMetadata>>(emptyMap())
+    val feedMetadata: StateFlow<Map<String, TrackMetadata>> = _feedMetadata.asStateFlow()
+    private var feedJob: Job? = null
+
     private val _lovedTracks = MutableStateFlow<List<LovedTrack>>(emptyList())
     val lovedTracks: StateFlow<List<LovedTrack>> = _lovedTracks.asStateFlow()
 
@@ -81,6 +91,21 @@ class AccountManager @Inject constructor(
             favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
             _lovedTracks.value = persistenceService.loadLovedTracks()
             loadAllChannels()
+            startFeedPolling()
+        }
+    }
+
+    private fun startFeedPolling() {
+        feedJob?.cancel()
+        feedJob = scope.launch {
+            while (true) {
+                val feed = xmPlaylistApi.getFeed()
+                if (feed.isNotEmpty()) {
+                    _feedMetadata.value = feed
+                    Log.d(TAG, "Feed loaded: ${feed.size} channels with track data")
+                }
+                delay(30_000L)
+            }
         }
     }
 
@@ -269,12 +294,20 @@ class AccountManager @Inject constructor(
 
     fun startTrackMetadataPolling(channelName: String) {
         trackMetadataJob?.cancel()
-        val slug = XMPlaylistApi.slugForChannel(channelName) ?: return
+        val slug = XMPlaylistApi.slugForChannel(channelName)
+        if (slug == null) {
+            Log.d(TAG, "No XM slug for channel: '$channelName'")
+            return
+        }
+        Log.d(TAG, "Starting XM metadata polling for '$channelName' → slug='$slug'")
         trackMetadataJob = scope.launch {
             while (true) {
                 val track = xmPlaylistApi.getRecentTrack(slug)
                 if (track != null) {
+                    Log.d(TAG, "XM track: ${track.artist} - ${track.title}")
                     _trackMetadata.value = _trackMetadata.value + (channelName to track)
+                } else {
+                    Log.d(TAG, "XM returned null for slug='$slug'")
                 }
                 delay(30_000L)
             }

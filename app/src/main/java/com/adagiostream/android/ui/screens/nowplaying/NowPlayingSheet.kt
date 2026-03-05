@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -77,7 +79,7 @@ fun NowPlayingSheet(
                     modifier = Modifier
                         .size(160.dp)
                         .clip(RoundedCornerShape(16.dp)),
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                 )
             } else {
                 Icon(
@@ -161,9 +163,9 @@ fun NowPlayingSheet(
                     }
                     IconButton(onClick = { viewModel.toggleLovedTrack() }) {
                         Icon(
-                            imageVector = if (isTrackLoved) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            imageVector = if (isTrackLoved) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
                             contentDescription = if (isTrackLoved) "Unlove track" else "Love track",
-                            tint = if (isTrackLoved) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isTrackLoved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

@@ -48,6 +48,7 @@ fun MainScreen(
     val playbackState by nowPlayingViewModel.playbackState.collectAsStateWithLifecycle()
     val currentChannel by nowPlayingViewModel.currentChannel.collectAsStateWithLifecycle()
     val streamStartedAt by nowPlayingViewModel.streamStartedAt.collectAsStateWithLifecycle()
+    val trackMetadata by nowPlayingViewModel.currentTrackMetadata.collectAsStateWithLifecycle()
     var showNowPlaying by remember { mutableStateOf(false) }
 
     AdagioStreamTheme(
@@ -67,6 +68,7 @@ fun MainScreen(
                             channel = currentChannel!!,
                             playbackState = playbackState,
                             streamStartedAt = streamStartedAt,
+                            trackMetadata = trackMetadata,
                             onPlayPause = { nowPlayingViewModel.togglePlayPause() },
                             onStop = { nowPlayingViewModel.stop() },
                             onClick = { showNowPlaying = true },

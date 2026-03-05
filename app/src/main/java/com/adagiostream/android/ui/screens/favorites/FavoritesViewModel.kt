@@ -3,6 +3,7 @@ package com.adagiostream.android.ui.screens.favorites
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +19,8 @@ class FavoritesViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val vlcPlayer: VLCPlayerWrapper,
 ) : ViewModel() {
+
+    val feedMetadata: StateFlow<Map<String, TrackMetadata>> = accountManager.feedMetadata
 
     val favorites: StateFlow<List<Channel>> = accountManager.channels
         .map { channels ->

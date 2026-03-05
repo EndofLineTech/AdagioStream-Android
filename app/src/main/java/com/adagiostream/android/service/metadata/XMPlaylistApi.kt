@@ -14,6 +14,45 @@ class XMPlaylistApi(private val client: OkHttpClient) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * Fetch the feed of recent tracks across all SXM channels.
+     * Returns a map of slug → TrackMetadata (most recent track per channel).
+     */
+    suspend fun getFeed(): Map<String, TrackMetadata> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder().url("https://xmplaylist.com/api/feed").build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.d(TAG, "Feed API returned ${response.code}")
+                return@withContext emptyMap()
+            }
+            val body = response.body?.string() ?: return@withContext emptyMap()
+            val apiResponse = json.decodeFromString<XMApiResponse>(body)
+
+            // Group by channelId and take the first (most recent) per channel
+            val result = mutableMapOf<String, TrackMetadata>()
+            for (entry in apiResponse.results) {
+                val channelId = entry.channelId ?: continue
+                if (channelId in result) continue // already have the most recent
+                val track = entry.track ?: continue
+                val title = track.title ?: continue
+                val artists = track.artists
+                if (artists.isEmpty()) continue
+                result[channelId] = TrackMetadata(
+                    artist = artists.joinToString(", "),
+                    title = title,
+                    album = null,
+                    albumArtURL = entry.spotify?.albumImageLarge,
+                    timestamp = 0L,
+                )
+            }
+            result
+        } catch (e: Exception) {
+            Log.d(TAG, "Failed to fetch feed: ${e.message}")
+            emptyMap()
+        }
+    }
+
     suspend fun getRecentTrack(slug: String): TrackMetadata? = withContext(Dispatchers.IO) {
         try {
             val url = "https://xmplaylist.com/api/station/$slug"
@@ -99,7 +138,15 @@ class XMPlaylistApi(private val client: OkHttpClient) {
         )
 
         fun slugForChannel(channelName: String): String? {
-            return CHANNEL_SLUG_MAP[channelName.lowercase().trim()]
+            val normalized = channelName.lowercase().trim()
+            // Direct match first
+            CHANNEL_SLUG_MAP[normalized]?.let { return it }
+            // Strip common Xtream Codes prefixes like "Radio: "
+            val stripped = normalized
+                .removePrefix("radio: ")
+                .removePrefix("music: ")
+                .trim()
+            return CHANNEL_SLUG_MAP[stripped]
         }
     }
 
@@ -112,6 +159,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
     private data class XMResult(
         @SerialName("track") val track: XMTrackInfo? = null,
         @SerialName("spotify") val spotify: XMSpotifyInfo? = null,
+        @SerialName("channelId") val channelId: String? = null,
     )
 
     @Serializable

@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.palette.graphics.Palette
@@ -41,6 +42,7 @@ import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.TrackMetadata
 
 private val paletteCache = mutableMapOf<String, Color>()
 
@@ -50,6 +52,7 @@ fun ChannelListItem(
     onClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    trackMetadata: TrackMetadata? = null,
     leadingContent: @Composable (() -> Unit)? = null,
 ) {
     Row(
@@ -84,7 +87,7 @@ fun ChannelListItem(
                         .build(),
                     contentDescription = channel.name,
                     modifier = Modifier.size(48.dp),
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     onState = { state ->
                         if (state is AsyncImagePainter.State.Success && logoUrl !in paletteCache) {
                             try {
@@ -120,10 +123,15 @@ fun ChannelListItem(
                 maxLines = 1,
             )
             Text(
-                text = channel.group,
+                text = if (trackMetadata != null) {
+                    "${trackMetadata.artist} \u2013 ${trackMetadata.title}"
+                } else {
+                    channel.group
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
 

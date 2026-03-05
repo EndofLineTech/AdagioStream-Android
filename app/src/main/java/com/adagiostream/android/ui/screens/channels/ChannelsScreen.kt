@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.ui.components.ChannelListItem
 import com.adagiostream.android.ui.components.GroupHeader
 
@@ -39,6 +40,7 @@ fun ChannelsScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
+    val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -110,10 +112,12 @@ fun ChannelsScreen(
                                 items = group.channels,
                                 key = { "channel_${it.id}" },
                             ) { channel ->
+                                val slug = XMPlaylistApi.slugForChannel(channel.name)
                                 ChannelListItem(
                                     channel = channel,
                                     onClick = { viewModel.playChannel(channel) },
                                     onFavoriteToggle = { viewModel.toggleFavorite(channel) },
+                                    trackMetadata = slug?.let { feedMetadata[it] },
                                 )
                             }
                         }

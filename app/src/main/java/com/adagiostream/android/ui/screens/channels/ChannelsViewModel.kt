@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
+import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +28,7 @@ class ChannelsViewModel @Inject constructor(
 
     val isLoading: StateFlow<Boolean> = accountManager.isLoading
     val error: StateFlow<String?> = accountManager.error
+    val feedMetadata: StateFlow<Map<String, TrackMetadata>> = accountManager.feedMetadata
 
     val filteredGroups: StateFlow<List<ChannelGroup>> = combine(
         accountManager.groups,
