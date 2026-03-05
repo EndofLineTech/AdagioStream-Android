@@ -49,6 +49,7 @@ class VLCPlayerWrapper(
     private var mediaPlayer: MediaPlayer = MediaPlayer(libVLC)
     private var bitrateJob: Job? = null
     private var peakBitrateKbps: Float = 0f
+    private var isSwitchingChannels: Boolean = false
 
     init {
         attachEventListener()
@@ -79,6 +80,7 @@ class VLCPlayerWrapper(
     private fun handleEvent(event: MediaPlayer.Event) {
         when (event.type) {
             MediaPlayer.Event.Opening -> {
+                isSwitchingChannels = false
                 Log.i(TAG, "VLC: Opening stream for ${_currentChannel.value?.name}")
                 _playbackState.value = PlaybackState.Buffering
             }
@@ -104,14 +106,19 @@ class VLCPlayerWrapper(
                 stopBitratePolling()
             }
             MediaPlayer.Event.EndReached -> {
-                Log.w(TAG, "VLC: EndReached — stream ended for ${_currentChannel.value?.name}")
-                _playbackState.value = PlaybackState.Error("Stream ended")
-                stopBitratePolling()
+                // Ignore stale events from channel switches or user-initiated stop
+                if (!isSwitchingChannels && _currentChannel.value != null) {
+                    Log.w(TAG, "VLC: EndReached — stream ended for ${_currentChannel.value?.name}")
+                    _playbackState.value = PlaybackState.Error("Stream ended")
+                    stopBitratePolling()
+                }
             }
             MediaPlayer.Event.EncounteredError -> {
-                Log.e(TAG, "VLC: EncounteredError for ${_currentChannel.value?.name}")
-                _playbackState.value = PlaybackState.Error("Playback error")
-                stopBitratePolling()
+                if (!isSwitchingChannels && _currentChannel.value != null) {
+                    Log.e(TAG, "VLC: EncounteredError for ${_currentChannel.value?.name}")
+                    _playbackState.value = PlaybackState.Error("Playback error")
+                    stopBitratePolling()
+                }
             }
         }
     }
@@ -152,7 +159,9 @@ class VLCPlayerWrapper(
     fun play(channel: Channel) {
         Log.i(TAG, "play(): channel=${channel.name}, url=${UrlSanitizer.redact(channel.streamURL)}")
 
-        // Stop any current playback
+        // Guard against stale EndReached/Error events from the old stream —
+        // VLC dispatches events asynchronously so they arrive after stop() returns.
+        isSwitchingChannels = true
         mediaPlayer.stop()
 
         _currentChannel.value = channel
@@ -197,6 +206,7 @@ class VLCPlayerWrapper(
 
     fun stop() {
         Log.i(TAG, "stop(): channel=${_currentChannel.value?.name}")
+        _currentChannel.value = null  // Clear before stop so async events are ignored
         mediaPlayer.stop()
         stopBitratePolling()
         _playbackState.value = PlaybackState.Idle
