@@ -23,4 +23,4 @@ sealed class Screen(
     }
 }
 
-val bottomNavItems = listOf(Screen.Channels, Screen.Favorites, Screen.Accounts, Screen.Settings)
+val bottomNavItems = listOf(Screen.Channels, Screen.Favorites, Screen.Settings)

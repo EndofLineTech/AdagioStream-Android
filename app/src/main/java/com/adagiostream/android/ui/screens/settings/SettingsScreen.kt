@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
@@ -47,19 +48,24 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.BuildConfig
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
+import com.adagiostream.android.util.BitrateFormatter
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
+    onNavigateToAccounts: (() -> Unit)? = null,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val accountCount by viewModel.accountCount.collectAsStateWithLifecycle()
     val channelCount by viewModel.channelCount.collectAsStateWithLifecycle()
     val favoritesCount by viewModel.favoritesCount.collectAsStateWithLifecycle()
+    val bitrateKbps by viewModel.bitrateKbps.collectAsStateWithLifecycle()
+    val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     var showClearFavoritesDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -71,6 +77,26 @@ fun SettingsScreen(
         Text(
             text = "Settings",
             style = MaterialTheme.typography.headlineMedium,
+        )
+
+        // Stream Quality
+        Text(
+            text = "Stream Quality",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val qualityText = when (playbackState) {
+            is PlaybackState.Playing, is PlaybackState.Buffering -> {
+                val formatted = BitrateFormatter.format(bitrateKbps)
+                formatted.ifEmpty { "Measuring..." }
+            }
+            else -> "Not playing"
+        }
+        Text(
+            text = qualityText,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -241,6 +267,49 @@ fun SettingsScreen(
             prefixes = settings.sortPrefixes,
             onPrefixesChanged = { viewModel.updateSortPrefixes(it) },
         )
+
+        if (onNavigateToAccounts != null) {
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Accounts
+            Text(
+                text = "Accounts",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Card(
+                onClick = onNavigateToAccounts,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text(
+                            text = "Manage Accounts",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = "$accountCount configured",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Go to Accounts",
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()

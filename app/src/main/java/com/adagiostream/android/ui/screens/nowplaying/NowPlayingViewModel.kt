@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,11 +36,32 @@ class NowPlayingViewModel @Inject constructor(
         epgMap[channelId] ?: emptyList()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val isFavorite: StateFlow<Boolean> = combine(
+        vlcPlayer.currentChannel,
+        accountManager.channels,
+    ) { current, channels ->
+        if (current == null) return@combine false
+        channels.any { it.streamURL == current.streamURL && it.isFavorite }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val currentTrackMetadata: StateFlow<TrackMetadata?> = combine(
+        vlcPlayer.currentChannel,
+        accountManager.trackMetadata,
+    ) { channel, metadata ->
+        if (channel == null) return@combine null
+        metadata[channel.name]
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     init {
         viewModelScope.launch {
             vlcPlayer.currentChannel.collect { channel ->
-                if (channel?.xtreamStreamId != null) {
-                    accountManager.loadXtreamEPGForChannel(channel)
+                if (channel != null) {
+                    if (channel.xtreamStreamId != null) {
+                        accountManager.loadXtreamEPGForChannel(channel)
+                    }
+                    accountManager.startTrackMetadataPolling(channel.name)
+                } else {
+                    accountManager.stopTrackMetadataPolling()
                 }
             }
         }
@@ -49,4 +71,11 @@ class NowPlayingViewModel @Inject constructor(
     fun stop() = vlcPlayer.stop()
     fun playNext() = vlcPlayer.playNext()
     fun playPrevious() = vlcPlayer.playPrevious()
+
+    fun toggleFavorite() {
+        val channel = vlcPlayer.currentChannel.value ?: return
+        viewModelScope.launch {
+            accountManager.toggleFavorite(channel)
+        }
+    }
 }

@@ -2,7 +2,11 @@ package com.adagiostream.android.service.player
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.adagiostream.android.model.Channel
@@ -50,6 +54,22 @@ class VLCPlayerWrapper(
     private var bitrateJob: Job? = null
     private var peakBitrateKbps: Float = 0f
     private var isSwitchingChannels: Boolean = false
+
+    // Audio focus
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var wasPlayingBeforeFocusLoss = false
+    private var isDucking = false
+    private val audioFocusRequest: AudioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+        )
+        .setOnAudioFocusChangeListener { focusChange ->
+            scope.launch { handleAudioFocusChange(focusChange) }
+        }
+        .build()
 
     init {
         attachEventListener()
@@ -156,8 +176,47 @@ class VLCPlayerWrapper(
         channelList = channels
     }
 
+    private fun handleAudioFocusChange(focusChange: Int) {
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                Log.i(TAG, "Audio focus gained")
+                if (isDucking) {
+                    mediaPlayer.setVolume(100)
+                    isDucking = false
+                } else if (wasPlayingBeforeFocusLoss) {
+                    resume()
+                }
+                wasPlayingBeforeFocusLoss = false
+            }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                Log.i(TAG, "Audio focus lost permanently")
+                wasPlayingBeforeFocusLoss = false
+                stop()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                Log.i(TAG, "Audio focus lost transiently")
+                if (mediaPlayer.isPlaying) {
+                    wasPlayingBeforeFocusLoss = true
+                    pause()
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                Log.i(TAG, "Audio focus ducking")
+                if (mediaPlayer.isPlaying) {
+                    isDucking = true
+                    mediaPlayer.setVolume(40)
+                }
+            }
+        }
+    }
+
     fun play(channel: Channel) {
         Log.i(TAG, "play(): channel=${channel.name}, url=${UrlSanitizer.redact(channel.streamURL)}")
+
+        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
+        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            Log.w(TAG, "Audio focus request denied")
+        }
 
         // Guard against stale EndReached/Error events from the old stream —
         // VLC dispatches events asynchronously so they arrive after stop() returns.
@@ -212,6 +271,9 @@ class VLCPlayerWrapper(
         _playbackState.value = PlaybackState.Idle
         _bitrateKbps.value = 0f
         _streamStartedAt.value = null
+        audioManager.abandonAudioFocusRequest(audioFocusRequest)
+        wasPlayingBeforeFocusLoss = false
+        isDucking = false
     }
 
     fun playNext() {
@@ -240,6 +302,7 @@ class VLCPlayerWrapper(
 
     fun release() {
         stopBitratePolling()
+        audioManager.abandonAudioFocusRequest(audioFocusRequest)
         mediaPlayer.release()
         libVLC.release()
         _playbackState.value = PlaybackState.Idle

@@ -1,6 +1,10 @@
 package com.adagiostream.android.ui.components
 
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,12 +22,27 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.palette.graphics.Palette
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.toBitmap
 import com.adagiostream.android.model.Channel
+
+private val paletteCache = mutableMapOf<String, Color>()
 
 @Composable
 fun ChannelListItem(
@@ -45,14 +64,44 @@ fun ChannelListItem(
         }
 
         if (channel.logoURL != null) {
-            RetryableAsyncImage(
-                model = channel.logoURL,
-                contentDescription = channel.name,
+            val logoUrl = channel.logoURL
+            var bgColor by remember(logoUrl) {
+                mutableStateOf(paletteCache[logoUrl] ?: Color.Transparent)
+            }
+            val context = LocalContext.current
+
+            Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Crop,
-            )
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(bgColor),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(logoUrl)
+                        .allowHardware(false)
+                        .build(),
+                    contentDescription = channel.name,
+                    modifier = Modifier.size(48.dp),
+                    contentScale = ContentScale.Crop,
+                    onState = { state ->
+                        if (state is AsyncImagePainter.State.Success && logoUrl !in paletteCache) {
+                            try {
+                                val bitmap = state.result.image.toBitmap()
+                                Palette.from(bitmap).generate { palette ->
+                                    val color = palette?.dominantSwatch?.rgb?.let { Color(it) }
+                                        ?: Color.Transparent
+                                    paletteCache[logoUrl] = color
+                                    bgColor = color
+                                }
+                            } catch (_: Exception) {
+                                // Palette extraction failed — keep transparent
+                            }
+                        }
+                    },
+                )
+            }
         } else {
             Icon(
                 imageVector = Icons.Default.Radio,

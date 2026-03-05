@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Radio
@@ -57,6 +59,8 @@ fun NowPlayingSheet(
     val bitrateKbps by viewModel.bitrateKbps.collectAsStateWithLifecycle()
     val streamStartedAt by viewModel.streamStartedAt.collectAsStateWithLifecycle()
     val epgEntries by viewModel.currentEPGEntries.collectAsStateWithLifecycle()
+    val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
+    val trackMetadata by viewModel.currentTrackMetadata.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showEPGSheet by remember { mutableStateOf(false) }
     val channel = currentChannel ?: return
@@ -128,6 +132,32 @@ fun NowPlayingSheet(
                 )
             }
 
+            if (trackMetadata != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                if (trackMetadata!!.albumArtURL != null) {
+                    RetryableAsyncImage(
+                        model = trackMetadata!!.albumArtURL,
+                        contentDescription = "Album art",
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Text(
+                    text = trackMetadata!!.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = trackMetadata!!.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
             if (playbackState is PlaybackState.Buffering) {
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -175,6 +205,15 @@ fun NowPlayingSheet(
                         Icons.Default.SkipNext,
                         contentDescription = "Next",
                         modifier = Modifier.size(36.dp),
+                    )
+                }
+
+                IconButton(onClick = { viewModel.toggleFavorite() }) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                        modifier = Modifier.size(36.dp),
+                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 

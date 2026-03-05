@@ -19,6 +19,7 @@ ksp = "2.1.10-1.0.29"
 junit = "4.13.2"
 mockk = "1.13.16"
 turbine = "1.2.0"
+palette = "1.0.0"
 reorderable = "2.4.3"
 robolectric = "4.14.1"
 libvlc = "4.0.0-eap23"
@@ -71,6 +72,7 @@ mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+palette-ktx = { group = "androidx.palette", name = "palette-ktx", version.ref = "palette" }
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
 libvlc-all = { group = "org.videolan.android", name = "libvlc-all", version.ref = "libvlc" }
 

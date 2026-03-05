@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
@@ -40,6 +41,9 @@ class SettingsViewModel @Inject constructor(
     val favoritesCount: StateFlow<Int> = accountManager.channels
         .map { channels -> channels.count { it.isFavorite } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val bitrateKbps: StateFlow<Float> = vlcPlayerWrapper.bitrateKbps
+    val playbackState: StateFlow<PlaybackState> = vlcPlayerWrapper.playbackState
 
     init {
         viewModelScope.launch {

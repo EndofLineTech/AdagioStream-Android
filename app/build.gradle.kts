@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0-0031"
+        versionName = "1.0-0032"
     }
 
     buildTypes {
@@ -100,6 +100,9 @@ dependencies {
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
+
+    // Palette
+    implementation(libs.palette.ktx)
 
     // Reorderable
     implementation(libs.reorderable)

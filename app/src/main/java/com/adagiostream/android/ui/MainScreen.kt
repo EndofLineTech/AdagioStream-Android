@@ -113,10 +113,16 @@ fun MainScreen(
                         onEditAccount = { accountId ->
                             navController.navigate(Screen.AddAccount.createRoute(accountId))
                         },
+                        onBack = { navController.popBackStack() },
                     )
                 }
                 composable(Screen.Settings.route) {
-                    SettingsScreen(viewModel = settingsViewModel)
+                    SettingsScreen(
+                        viewModel = settingsViewModel,
+                        onNavigateToAccounts = {
+                            navController.navigate(Screen.Accounts.route)
+                        },
+                    )
                 }
                 composable(
                     route = Screen.AddAccount.route,

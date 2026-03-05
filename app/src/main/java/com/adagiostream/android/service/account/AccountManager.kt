@@ -6,6 +6,8 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.SortMode
+import com.adagiostream.android.model.TrackMetadata
+import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.service.parsing.EPGParser
 import com.adagiostream.android.service.parsing.M3UParser
 import com.adagiostream.android.service.parsing.XtreamCodesApi
@@ -13,7 +15,9 @@ import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +30,7 @@ import javax.inject.Singleton
 class AccountManager @Inject constructor(
     private val persistenceService: PersistenceService,
     private val client: OkHttpClient,
+    private val xmPlaylistApi: XMPlaylistApi,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val m3uParser = M3UParser(client)
@@ -49,6 +54,10 @@ class AccountManager @Inject constructor(
 
     private val _epgEntries = MutableStateFlow<Map<String, List<EPGEntry>>>(emptyMap())
     val epgEntries: StateFlow<Map<String, List<EPGEntry>>> = _epgEntries.asStateFlow()
+
+    private val _trackMetadata = MutableStateFlow<Map<String, TrackMetadata>>(emptyMap())
+    val trackMetadata: StateFlow<Map<String, TrackMetadata>> = _trackMetadata.asStateFlow()
+    private var trackMetadataJob: Job? = null
 
     private var favoriteIds = mutableListOf<String>()
     var sortPrefixes: List<String> = listOf("Radio: ", "TV: ")
@@ -215,6 +224,25 @@ class AccountManager @Inject constructor(
         }
 
         _epgEntries.value = allEntries
+    }
+
+    fun startTrackMetadataPolling(channelName: String) {
+        trackMetadataJob?.cancel()
+        val slug = XMPlaylistApi.slugForChannel(channelName) ?: return
+        trackMetadataJob = scope.launch {
+            while (true) {
+                val track = xmPlaylistApi.getRecentTrack(slug)
+                if (track != null) {
+                    _trackMetadata.value = _trackMetadata.value + (channelName to track)
+                }
+                delay(30_000L)
+            }
+        }
+    }
+
+    fun stopTrackMetadataPolling() {
+        trackMetadataJob?.cancel()
+        trackMetadataJob = null
     }
 
     private fun rebuildGroups() {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -37,6 +38,7 @@ import com.adagiostream.android.model.AccountType
 fun AccountsScreen(
     onAddAccount: () -> Unit,
     onEditAccount: (String) -> Unit,
+    onBack: (() -> Unit)? = null,
     viewModel: AccountsViewModel = hiltViewModel(),
 ) {
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
@@ -60,10 +62,17 @@ fun AccountsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Accounts",
-                    style = MaterialTheme.typography.headlineMedium,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                    Text(
+                        text = "Accounts",
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                }
                 IconButton(onClick = { viewModel.reload() }) {
                     Icon(Icons.Default.Refresh, contentDescription = "Reload")
                 }
