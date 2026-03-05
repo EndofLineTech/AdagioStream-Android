@@ -156,6 +156,7 @@ class AccountManager @Inject constructor(
             _channels.value = withFavorites
             rebuildGroups()
             loadEPG()
+            xmPlaylistApi.matchChannels(withFavorites, sortPrefixes)
         } catch (e: Exception) {
             _error.value = UrlSanitizer.redact(e.message ?: "Unknown error")
         } finally {
@@ -292,22 +293,22 @@ class AccountManager @Inject constructor(
         persistenceService.saveLovedTracks(updated)
     }
 
-    fun startTrackMetadataPolling(channelName: String) {
+    fun startTrackMetadataPolling(channel: Channel) {
         trackMetadataJob?.cancel()
-        val slug = XMPlaylistApi.slugForChannel(channelName)
-        if (slug == null) {
-            Log.d(TAG, "No XM slug for channel: '$channelName'")
+        val deeplink = xmPlaylistApi.deeplinkForChannel(channel.id)
+        if (deeplink == null) {
+            Log.d(TAG, "No XM deeplink for channel: '${channel.name}' (id=${channel.id})")
             return
         }
-        Log.d(TAG, "Starting XM metadata polling for '$channelName' → slug='$slug'")
+        Log.d(TAG, "Starting XM metadata polling for '${channel.name}' → deeplink='$deeplink'")
         trackMetadataJob = scope.launch {
             while (true) {
-                val track = xmPlaylistApi.getRecentTrack(slug)
+                val track = xmPlaylistApi.getRecentTrack(deeplink)
                 if (track != null) {
                     Log.d(TAG, "XM track: ${track.artist} - ${track.title}")
-                    _trackMetadata.value = _trackMetadata.value + (channelName to track)
+                    _trackMetadata.value = _trackMetadata.value + (channel.name to track)
                 } else {
-                    Log.d(TAG, "XM returned null for slug='$slug'")
+                    Log.d(TAG, "XM returned null for deeplink='$deeplink'")
                 }
                 delay(30_000L)
             }

@@ -70,7 +70,7 @@ class NowPlayingViewModel @Inject constructor(
                     if (channel.xtreamStreamId != null) {
                         accountManager.loadXtreamEPGForChannel(channel)
                     }
-                    accountManager.startTrackMetadataPolling(channel.name)
+                    accountManager.startTrackMetadataPolling(channel)
                 } else {
                     accountManager.stopTrackMetadataPolling()
                 }
