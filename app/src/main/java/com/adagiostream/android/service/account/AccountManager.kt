@@ -1,6 +1,5 @@
 package com.adagiostream.android.service.account
 
-import android.util.Log
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.Channel
@@ -14,6 +13,7 @@ import com.adagiostream.android.service.parsing.EPGParser
 import com.adagiostream.android.service.parsing.M3UParser
 import com.adagiostream.android.service.parsing.XtreamCodesApi
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,9 +34,7 @@ class AccountManager @Inject constructor(
     private val client: OkHttpClient,
     private val xmPlaylistApi: XMPlaylistApi,
 ) {
-    companion object {
-        private const val TAG = "AccountManager"
-    }
+    companion object
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val m3uParser = M3UParser(client)
@@ -102,7 +100,7 @@ class AccountManager @Inject constructor(
                 val feed = xmPlaylistApi.getFeed()
                 if (feed.isNotEmpty()) {
                     _feedMetadata.value = feed
-                    Log.d(TAG, "Feed loaded: ${feed.size} channels with track data")
+                    DebugLogger.log("Feed loaded: ${feed.size} channels with track data", DebugLogger.Category.SXM)
                 }
                 delay(30_000L)
             }
@@ -297,18 +295,18 @@ class AccountManager @Inject constructor(
         trackMetadataJob?.cancel()
         val deeplink = xmPlaylistApi.deeplinkForChannel(channel.id)
         if (deeplink == null) {
-            Log.d(TAG, "No XM deeplink for channel: '${channel.name}' (id=${channel.id})")
+            DebugLogger.log("No XM deeplink for channel: '${channel.name}' (id=${channel.id})", DebugLogger.Category.SXM)
             return
         }
-        Log.d(TAG, "Starting XM metadata polling for '${channel.name}' → deeplink='$deeplink'")
+        DebugLogger.log("Starting XM metadata polling for '${channel.name}' → deeplink='$deeplink'", DebugLogger.Category.SXM)
         trackMetadataJob = scope.launch {
             while (true) {
                 val track = xmPlaylistApi.getRecentTrack(deeplink)
                 if (track != null) {
-                    Log.d(TAG, "XM track: ${track.artist} - ${track.title}")
+                    DebugLogger.log("XM track: ${track.artist} - ${track.title}", DebugLogger.Category.SXM)
                     _trackMetadata.value = _trackMetadata.value + (channel.name to track)
                 } else {
-                    Log.d(TAG, "XM returned null for deeplink='$deeplink'")
+                    DebugLogger.log("XM returned null for deeplink='$deeplink'", DebugLogger.Category.SXM)
                 }
                 delay(30_000L)
             }

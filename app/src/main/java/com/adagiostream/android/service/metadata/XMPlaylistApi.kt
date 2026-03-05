@@ -1,8 +1,8 @@
 package com.adagiostream.android.service.metadata
 
-import android.util.Log
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.TrackMetadata
+import com.adagiostream.android.util.DebugLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -37,22 +37,22 @@ class XMPlaylistApi(private val client: OkHttpClient) {
             val sxmPattern = Regex("(?i)\\b(siriusxm|sirius\\s*xm|sxm|sirius|xm)\\b")
             val sxmChannels = channels.filter { sxmPattern.containsMatchIn(it.group) }
             if (sxmChannels.isEmpty()) {
-                Log.d(TAG, "No SXM channels found in ${channels.size} channels")
+                DebugLogger.log("No SXM channels found in ${channels.size} channels", DebugLogger.Category.SXM)
                 return@withContext
             }
-            Log.d(TAG, "Found ${sxmChannels.size} SXM channels to match")
+            DebugLogger.log("Found ${sxmChannels.size} SXM channels to match", DebugLogger.Category.SXM)
 
             // Fetch station list
             val request = Request.Builder().url("$BASE_URL/station").build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
-                Log.d(TAG, "Station list API returned ${response.code}")
+                DebugLogger.log("Station list API returned ${response.code}", DebugLogger.Category.SXM)
                 return@withContext
             }
             val body = response.body?.string() ?: return@withContext
             val stationList = json.decodeFromString<XMStationListResponse>(body)
             val stations = stationList.results
-            Log.d(TAG, "Fetched ${stations.size} XMPlaylist stations")
+            DebugLogger.log("Fetched ${stations.size} XMPlaylist stations", DebugLogger.Category.SXM)
 
             // Build normalized station lookup: normalized name → station
             val stationLookup = mutableMapOf<String, XMStation>()
@@ -100,7 +100,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                 }
 
                 if (!matched) {
-                    Log.d(TAG, "Unmatched SXM channel: '${channel.name}'")
+                    DebugLogger.log("Unmatched SXM channel: '${channel.name}'", DebugLogger.Category.SXM)
                 }
             }
 
@@ -108,10 +108,10 @@ class XMPlaylistApi(private val client: OkHttpClient) {
             deeplinkToChannelIds = result.entries
                 .groupBy({ it.value }, { it.key })
 
-            Log.d(TAG, "Matched ${result.size}/${sxmChannels.size} channels " +
-                    "(exact=$exactMatches, word=$wordMatches)")
+            DebugLogger.log("Matched ${result.size}/${sxmChannels.size} channels " +
+                    "(exact=$exactMatches, word=$wordMatches)", DebugLogger.Category.SXM)
         } catch (e: Exception) {
-            Log.d(TAG, "Failed to match channels: ${e.message}")
+            DebugLogger.log("Failed to match channels: ${e.message}", DebugLogger.Category.SXM)
         }
     }
 
@@ -127,7 +127,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
             val request = Request.Builder().url("$BASE_URL/feed").build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
-                Log.d(TAG, "Feed API returned ${response.code}")
+                DebugLogger.log("Feed API returned ${response.code}", DebugLogger.Category.SXM)
                 return@withContext emptyMap()
             }
             val body = response.body?.string() ?: return@withContext emptyMap()
@@ -161,7 +161,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
             }
             result
         } catch (e: Exception) {
-            Log.d(TAG, "Failed to fetch feed: ${e.message}")
+            DebugLogger.log("Failed to fetch feed: ${e.message}", DebugLogger.Category.SXM)
             emptyMap()
         }
     }
@@ -174,7 +174,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
             val request = Request.Builder().url("$BASE_URL/station/$deeplink").build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
-                Log.d(TAG, "API returned ${response.code} for $deeplink")
+                DebugLogger.log("API returned ${response.code} for $deeplink", DebugLogger.Category.SXM)
                 return@withContext null
             }
             val body = response.body?.string() ?: return@withContext null
@@ -193,13 +193,12 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                 timestamp = 0L,
             )
         } catch (e: Exception) {
-            Log.d(TAG, "Failed to fetch track for $deeplink: ${e.message}")
+            DebugLogger.log("Failed to fetch track for $deeplink: ${e.message}", DebugLogger.Category.SXM)
             null
         }
     }
 
     companion object {
-        private const val TAG = "XMPlaylistApi"
         private const val BASE_URL = "https://xmplaylist.com/api"
     }
 

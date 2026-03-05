@@ -1,5 +1,6 @@
 package com.adagiostream.android.ui.screens.settings
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +35,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,15 +45,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.content.FileProvider
 import com.adagiostream.android.BuildConfig
 import com.adagiostream.android.model.AppearanceMode
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.util.BitrateFormatter
+import com.adagiostream.android.util.DebugLogger
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -332,6 +337,13 @@ fun SettingsScreen(
         HorizontalDivider()
         Spacer(modifier = Modifier.height(24.dp))
 
+        // Debug Logs
+        DebugLogsSection(viewModel)
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(24.dp))
+
         // Statistics
         Text(
             text = "Statistics",
@@ -401,6 +413,93 @@ fun SettingsScreen(
             },
         )
     }
+}
+
+@Composable
+private fun DebugLogsSection(viewModel: SettingsViewModel) {
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val logSize by viewModel.debugLogSize.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    Text(
+        text = "Debug Logs",
+        style = MaterialTheme.typography.titleMedium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Enable Logging",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        text = "Log size: $logSize",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.debugLoggingEnabled,
+                    onCheckedChange = { viewModel.updateDebugLogging(it) },
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = {
+                        val file = DebugLogger.logFile()
+                        if (file != null) {
+                            val uri = FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                file,
+                            )
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share Debug Log"))
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = logSize != "0 KB",
+                ) {
+                    Text("Share Log")
+                }
+                Button(
+                    onClick = {
+                        viewModel.clearDebugLogs()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                    enabled = logSize != "0 KB",
+                ) {
+                    Text("Clear Logs")
+                }
+            }
+        }
+    }
+
+    viewModel.refreshDebugLogSize()
 }
 
 @Composable

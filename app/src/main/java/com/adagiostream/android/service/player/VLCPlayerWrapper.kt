@@ -6,11 +6,10 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
-import android.os.Build
-import android.util.Log
 import androidx.core.content.ContextCompat
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,10 +25,6 @@ class VLCPlayerWrapper(
     private val context: Context,
     initialBufferSeconds: Int = 10,
 ) {
-    companion object {
-        private const val TAG = "AdagioPlayer"
-    }
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val _playbackState = kotlinx.coroutines.flow.MutableStateFlow<PlaybackState>(PlaybackState.Idle)
@@ -108,12 +103,12 @@ class VLCPlayerWrapper(
         when (event.type) {
             MediaPlayer.Event.Opening -> {
                 isSwitchingChannels = false
-                Log.i(TAG, "VLC: Opening stream for ${_currentChannel.value?.name}")
+                DebugLogger.log("Opening stream for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
                 _playbackState.value = PlaybackState.Buffering
             }
             MediaPlayer.Event.Buffering -> {
                 val pct = event.buffering
-                Log.d(TAG, "VLC: Buffering ${pct}%")
+                DebugLogger.log("Buffering ${pct}%", DebugLogger.Category.VLC)
                 // Only show Buffering UI before the first Playing event.
                 // Once playing, ignore sub-100% micro-buffer fluctuations.
                 if (pct < 100f && _playbackState.value !is PlaybackState.Playing) {
@@ -121,30 +116,30 @@ class VLCPlayerWrapper(
                 }
             }
             MediaPlayer.Event.Playing -> {
-                Log.i(TAG, "VLC: Playing ${_currentChannel.value?.name}")
+                DebugLogger.log("Playing ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
                 _playbackState.value = PlaybackState.Playing
                 startBitratePolling()
             }
             MediaPlayer.Event.Paused -> {
-                Log.i(TAG, "VLC: Paused")
+                DebugLogger.log("Paused", DebugLogger.Category.VLC)
                 _playbackState.value = PlaybackState.Paused
                 stopBitratePolling()
             }
             MediaPlayer.Event.Stopped -> {
-                Log.i(TAG, "VLC: Stopped")
+                DebugLogger.log("Stopped", DebugLogger.Category.VLC)
                 stopBitratePolling()
             }
             MediaPlayer.Event.EndReached -> {
                 // Ignore stale events from channel switches or user-initiated stop
                 if (!isSwitchingChannels && _currentChannel.value != null) {
-                    Log.w(TAG, "VLC: EndReached — stream ended for ${_currentChannel.value?.name}")
+                    DebugLogger.log("EndReached — stream ended for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
                     _playbackState.value = PlaybackState.Error("Stream ended")
                     stopBitratePolling()
                 }
             }
             MediaPlayer.Event.EncounteredError -> {
                 if (!isSwitchingChannels && _currentChannel.value != null) {
-                    Log.e(TAG, "VLC: EncounteredError for ${_currentChannel.value?.name}")
+                    DebugLogger.log("EncounteredError for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
                     _playbackState.value = PlaybackState.Error("Playback error")
                     stopBitratePolling()
                 }
@@ -188,7 +183,7 @@ class VLCPlayerWrapper(
     private fun handleAudioFocusChange(focusChange: Int) {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
-                Log.i(TAG, "Audio focus gained")
+                DebugLogger.log("Audio focus gained", DebugLogger.Category.AUDIO)
                 if (isDucking) {
                     mediaPlayer.setVolume(100)
                     isDucking = false
@@ -198,19 +193,19 @@ class VLCPlayerWrapper(
                 wasPlayingBeforeFocusLoss = false
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
-                Log.i(TAG, "Audio focus lost permanently")
+                DebugLogger.log("Audio focus lost permanently", DebugLogger.Category.AUDIO)
                 wasPlayingBeforeFocusLoss = false
                 stop()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                Log.i(TAG, "Audio focus lost transiently")
+                DebugLogger.log("Audio focus lost transiently", DebugLogger.Category.AUDIO)
                 if (mediaPlayer.isPlaying) {
                     wasPlayingBeforeFocusLoss = true
                     pause()
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                Log.i(TAG, "Audio focus ducking")
+                DebugLogger.log("Audio focus ducking", DebugLogger.Category.AUDIO)
                 if (mediaPlayer.isPlaying) {
                     isDucking = true
                     mediaPlayer.setVolume(40)
@@ -220,11 +215,11 @@ class VLCPlayerWrapper(
     }
 
     fun play(channel: Channel) {
-        Log.i(TAG, "play(): channel=${channel.name}, url=${UrlSanitizer.redact(channel.streamURL)}")
+        DebugLogger.log("play(): channel=${channel.name}, url=${UrlSanitizer.redact(channel.streamURL)}", DebugLogger.Category.PLAYER)
 
         val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
         if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            Log.w(TAG, "Audio focus request denied")
+            DebugLogger.log("Audio focus request denied", DebugLogger.Category.AUDIO)
         }
 
         // Guard against stale EndReached/Error events from the old stream —
@@ -268,14 +263,14 @@ class VLCPlayerWrapper(
             val pauseDuration = System.currentTimeMillis() - pausedAtSystemTime
             _timeShiftMs.value += pauseDuration
             pausedAtSystemTime = 0L
-            Log.i(TAG, "Resuming with time-shift: ${_timeShiftMs.value}ms behind live")
+            DebugLogger.log("Resuming with time-shift: ${_timeShiftMs.value}ms behind live", DebugLogger.Category.TIMESHIFT)
         }
         mediaPlayer.play()
     }
 
     fun seekToLive() {
         val channel = _currentChannel.value ?: return
-        Log.i(TAG, "seekToLive(): restarting stream at live edge")
+        DebugLogger.log("seekToLive(): restarting stream at live edge", DebugLogger.Category.TIMESHIFT)
         _timeShiftMs.value = 0L
         pausedAtSystemTime = 0L
         play(channel)
@@ -290,7 +285,7 @@ class VLCPlayerWrapper(
     }
 
     fun stop() {
-        Log.i(TAG, "stop(): channel=${_currentChannel.value?.name}")
+        DebugLogger.log("stop(): channel=${_currentChannel.value?.name}", DebugLogger.Category.PLAYER)
         _currentChannel.value = null  // Clear before stop so async events are ignored
         mediaPlayer.stop()
         stopBitratePolling()

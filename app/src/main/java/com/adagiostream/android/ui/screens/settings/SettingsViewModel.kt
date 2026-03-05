@@ -10,6 +10,7 @@ import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.VLCPlayerWrapper
+import com.adagiostream.android.util.DebugLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,12 +46,15 @@ class SettingsViewModel @Inject constructor(
     val bitrateKbps: StateFlow<Float> = vlcPlayerWrapper.bitrateKbps
     val playbackState: StateFlow<PlaybackState> = vlcPlayerWrapper.playbackState
 
+    val debugLogSize = MutableStateFlow(DebugLogger.logFileSize())
+
     init {
         viewModelScope.launch {
             val loaded = persistenceService.loadSettings()
             _settings.value = loaded.copy(
                 bufferDurationSeconds = loaded.bufferDurationSeconds.coerceIn(5, 15),
             )
+            DebugLogger.isEnabled = loaded.debugLoggingEnabled
         }
     }
 
@@ -87,6 +91,21 @@ class SettingsViewModel @Inject constructor(
         _settings.value = _settings.value.copy(sortPrefixes = prefixes)
         accountManager.updateSortPrefixes(prefixes)
         save()
+    }
+
+    fun updateDebugLogging(enabled: Boolean) {
+        _settings.value = _settings.value.copy(debugLoggingEnabled = enabled)
+        DebugLogger.isEnabled = enabled
+        save()
+    }
+
+    fun clearDebugLogs() {
+        DebugLogger.clearLogs()
+        debugLogSize.value = DebugLogger.logFileSize()
+    }
+
+    fun refreshDebugLogSize() {
+        debugLogSize.value = DebugLogger.logFileSize()
     }
 
     fun clearAllFavorites() {
