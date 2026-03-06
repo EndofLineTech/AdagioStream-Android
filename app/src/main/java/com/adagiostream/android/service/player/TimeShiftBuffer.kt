@@ -2,6 +2,7 @@ package com.adagiostream.android.service.player
 
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.util.DebugLogger
+import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -65,7 +66,7 @@ class TimeShiftBuffer(
                 response.close()
                 DebugLogger.log("TimeShift: capture stopped, ${capturedBytes} bytes captured", DebugLogger.Category.TIMESHIFT)
             } catch (e: Exception) {
-                DebugLogger.log("TimeShift: capture error: ${e.message}", DebugLogger.Category.TIMESHIFT)
+                DebugLogger.log("TimeShift: capture error: ${UrlSanitizer.redact(e.message ?: "Unknown error")}", DebugLogger.Category.TIMESHIFT)
             }
         }
     }

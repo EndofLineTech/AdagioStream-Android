@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- fullBackupContent rules for Android 11 and below -->
+<full-backup-content>
+    <exclude domain="file" path="accounts_encrypted.json" />
+    <exclude domain="file" path="accounts.json" />
+    <exclude domain="file" path="settings.json" />
+    <exclude domain="file" path="favorites.json" />
+    <exclude domain="file" path="loved_tracks.json" />
+    <exclude domain="file" path="last_played.txt" />
+    <exclude domain="file" path="debug_log.txt" />
+</full-backup-content>

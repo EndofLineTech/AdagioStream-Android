@@ -62,6 +62,25 @@ class PersistenceService(
         buildEncryptedFile().openFileOutput().bufferedWriter().use { it.write(content) }
     }
 
+    private fun secureDelete(file: File) {
+        try {
+            val length = file.length()
+            file.outputStream().use { out ->
+                val zeros = ByteArray(minOf(length, 8192L).toInt())
+                var remaining = length
+                while (remaining > 0) {
+                    val chunk = minOf(remaining, zeros.size.toLong()).toInt()
+                    out.write(zeros, 0, chunk)
+                    remaining -= chunk
+                }
+                out.fd.sync()
+            }
+        } catch (_: Exception) {
+            // Best-effort; proceed to delete regardless
+        }
+        file.delete()
+    }
+
     suspend fun loadAccounts(): List<Account> = mutex.withLock {
         try {
             migrateProvidersFile()
@@ -72,7 +91,8 @@ class PersistenceService(
                 val accounts = json.decodeFromString<List<Account>>(plaintext)
                 // Migrate to encrypted
                 writeEncrypted(plaintext)
-                accountsFile.delete()
+                // Overwrite plaintext with zeros before deleting (defense-in-depth)
+                secureDelete(accountsFile)
                 return@withLock accounts
             }
 

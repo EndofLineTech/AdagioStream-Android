@@ -150,7 +150,7 @@ private fun LovedTrackItemWithMenu(
                 text = { Text("Search on Spotify") },
                 onClick = {
                     showMenu = false
-                    val spotifyIntent = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:${track.artist} ${track.title}"))
+                    val spotifyIntent = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:$query"))
                     try {
                         context.startActivity(spotifyIntent)
                     } catch (_: ActivityNotFoundException) {
