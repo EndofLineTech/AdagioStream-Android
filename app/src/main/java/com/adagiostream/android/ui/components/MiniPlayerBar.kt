@@ -59,14 +59,15 @@ fun MiniPlayerBar(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (channel.logoURL != null) {
+                val imageUrl = trackMetadata?.albumArtURL ?: channel.logoURL
+                if (imageUrl != null) {
                     RetryableAsyncImage(
-                        model = channel.logoURL,
+                        model = imageUrl,
                         contentDescription = channel.name,
                         modifier = Modifier
                             .size(40.dp)
                             .clip(RoundedCornerShape(6.dp)),
-                        contentScale = ContentScale.Fit,
+                        contentScale = if (trackMetadata?.albumArtURL != null) ContentScale.Crop else ContentScale.Fit,
                     )
                 } else {
                     Icon(
