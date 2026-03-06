@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 
@@ -13,7 +14,7 @@ class TimeShiftBuffer(
     private val cacheDir: File,
     private val client: OkHttpClient,
 ) {
-    private var outputStream: FileOutputStream? = null
+    private var outputStream: BufferedOutputStream? = null
     private var captureFile: File? = null
     @Volatile
     var capturedBytes: Long = 0L
@@ -46,9 +47,9 @@ class TimeShiftBuffer(
                     return@withContext
                 }
 
-                val fos = FileOutputStream(file)
+                val fos = FileOutputStream(file).buffered(65536)
                 outputStream = fos
-                val buffer = ByteArray(8192)
+                val buffer = ByteArray(65536)
                 val source = body.byteStream()
 
                 while (isCapturing) {

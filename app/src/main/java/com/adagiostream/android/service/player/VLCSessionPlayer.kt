@@ -8,6 +8,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.util.DebugLogger
+import com.adagiostream.android.util.DebugLogger.Category.AUTO
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
@@ -33,12 +35,14 @@ class VLCSessionPlayer(
     private var currentPlayWhenReady: Boolean = false
 
     init {
+        DebugLogger.log("VLCSessionPlayer init", AUTO)
         // Observe VLC state changes and invalidate SimpleBasePlayer state
         scope.launch {
             combine(
                 vlcWrapper.playbackState,
                 vlcWrapper.currentChannel,
             ) { state, channel -> state to channel }.collect { (state, channel) ->
+                val prevState = currentPlaybackState
                 currentPlaybackState = when (state) {
                     is PlaybackState.Idle -> STATE_IDLE
                     is PlaybackState.Buffering -> STATE_BUFFERING
@@ -48,6 +52,10 @@ class VLCSessionPlayer(
                     is PlaybackState.Error -> STATE_IDLE
                 }
                 currentPlayWhenReady = state is PlaybackState.Playing || state is PlaybackState.Buffering || state is PlaybackState.CatchingUp
+
+                if (prevState != currentPlaybackState) {
+                    DebugLogger.log("VLCSessionPlayer state: $state → media3State=$currentPlaybackState, playWhenReady=$currentPlayWhenReady", AUTO)
+                }
 
                 if (channel != null) {
                     currentMediaItem = MediaItem.Builder()
@@ -92,11 +100,15 @@ class VLCSessionPlayer(
 
         val item = currentMediaItem
         if (item != null) {
+            val meta = item.mediaMetadata
+            DebugLogger.log("getState() - mediaId=${item.mediaId}, title=${meta.title}, artist=${meta.artist}, station=${meta.station}, artworkUri=${meta.artworkUri}", AUTO)
             builder.setPlaylist(listOf(SimpleBasePlayer.MediaItemData.Builder(item.mediaId.hashCode().toLong())
                 .setMediaItem(item)
                 .setMediaMetadata(item.mediaMetadata)
                 .build()))
             builder.setCurrentMediaItemIndex(0)
+        } else {
+            DebugLogger.log("getState() - no current media item, state=$currentPlaybackState", AUTO)
         }
 
         return builder.build()
@@ -116,6 +128,7 @@ class VLCSessionPlayer(
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        DebugLogger.log("handleSetPlayWhenReady($playWhenReady)", AUTO)
         if (playWhenReady) {
             vlcWrapper.resume()
         } else {
@@ -125,6 +138,7 @@ class VLCSessionPlayer(
     }
 
     override fun handleStop(): ListenableFuture<*> {
+        DebugLogger.log("handleStop()", AUTO)
         vlcWrapper.stop()
         return Futures.immediateVoidFuture()
     }
@@ -134,6 +148,7 @@ class VLCSessionPlayer(
         positionMs: Long,
         seekCommand: Int,
     ): ListenableFuture<*> {
+        DebugLogger.log("handleSeek() - index=$mediaItemIndex, command=$seekCommand", AUTO)
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT -> vlcWrapper.playNext()
             COMMAND_SEEK_TO_PREVIOUS -> vlcWrapper.playPrevious()
@@ -142,6 +157,7 @@ class VLCSessionPlayer(
     }
 
     override fun handleRelease(): ListenableFuture<*> {
+        DebugLogger.log("handleRelease()", AUTO)
         vlcWrapper.release()
         return Futures.immediateVoidFuture()
     }

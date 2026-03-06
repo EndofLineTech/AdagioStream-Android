@@ -15,8 +15,8 @@ android {
         applicationId = "com.adagiostream.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0-0052"
+        versionCode = 56
+        versionName = "1.0(56)"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -57,7 +57,8 @@ android {
     applicationVariants.all {
         outputs.all {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            output.outputFileName = "AdagioStream-${versionName}-${buildType.name}.apk"
+            val safeVersion = versionName?.replace("(", "-")?.replace(")", "") ?: "unknown"
+            output.outputFileName = "AdagioStream-${safeVersion}-${buildType.name}.apk"
         }
     }
 }

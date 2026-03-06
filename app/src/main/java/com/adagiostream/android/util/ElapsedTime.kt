@@ -18,7 +18,7 @@ fun rememberElapsedTime(startedAt: Long?): String? {
     LaunchedEffect(startedAt) {
         while (true) {
             now = System.currentTimeMillis()
-            delay(1_000L)
+            delay(5_000L)
         }
     }
 

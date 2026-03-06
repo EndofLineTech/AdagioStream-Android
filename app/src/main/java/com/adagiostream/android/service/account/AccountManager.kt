@@ -85,6 +85,8 @@ class AccountManager @Inject constructor(
     private val _allGroupNames = MutableStateFlow<Set<String>>(emptySet())
     val allGroupNames: StateFlow<Set<String>> = _allGroupNames.asStateFlow()
 
+    private var hasSxmChannels = false
+
     init {
         scope.launch {
             val settings = persistenceService.loadSettings()
@@ -97,12 +99,16 @@ class AccountManager @Inject constructor(
             favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
             _lovedTracks.value = persistenceService.loadLovedTracks()
             loadAllChannels()
-            startFeedPolling()
         }
     }
 
-    private fun startFeedPolling() {
-        feedJob?.cancel()
+    private fun startFeedPollingIfNeeded() {
+        if (!hasSxmChannels) {
+            feedJob?.cancel()
+            feedJob = null
+            return
+        }
+        if (feedJob != null) return // already polling
         feedJob = scope.launch {
             while (true) {
                 val feed = xmPlaylistApi.getFeed()
@@ -199,6 +205,8 @@ class AccountManager @Inject constructor(
             rebuildGroups()
             loadEPG()
             xmPlaylistApi.matchChannels(withFavorites, sortPrefixes)
+            hasSxmChannels = xmPlaylistApi.hasMappedChannels()
+            startFeedPollingIfNeeded()
         } catch (e: Exception) {
             _error.value = UrlSanitizer.redact(e.message ?: "Unknown error")
         } finally {
@@ -405,7 +413,7 @@ class AccountManager @Inject constructor(
                 } else {
                     DebugLogger.log("XM returned null for deeplink='$deeplink'", DebugLogger.Category.SXM)
                 }
-                delay(30_000L)
+                delay(15_000L)
             }
         }
     }

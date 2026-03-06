@@ -118,6 +118,9 @@ class XMPlaylistApi(private val client: OkHttpClient) {
     /** Get the deeplink (slug) for a channel by its ID. */
     fun deeplinkForChannel(channelId: String): String? = channelDeeplinkMap[channelId]
 
+    /** Whether any channels have been mapped to XM deeplinks. */
+    fun hasMappedChannels(): Boolean = channelDeeplinkMap.isNotEmpty()
+
     /**
      * Fetch the feed of recent tracks across all SXM channels.
      * Returns a map of channelId (app) → TrackMetadata.

@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -189,7 +190,7 @@ class VLCPlayerWrapper(
         bitrateJob?.cancel()
         bitrateJob = scope.launch {
             while (true) {
-                delay(1_000L)
+                delay(5_000L)
                 val media = mediaPlayer.media ?: continue
                 val stats = media.stats ?: continue
                 // VLC reports bitrate in KB/s; convert to kbps (× 8)
@@ -457,6 +458,7 @@ class VLCPlayerWrapper(
 
     fun release() {
         stopBitratePolling()
+        scope.cancel()
         audioManager.abandonAudioFocusRequest(audioFocusRequest)
         mediaPlayer.release()
         libVLC.release()

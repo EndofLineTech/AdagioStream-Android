@@ -20,8 +20,11 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.adagiostream.android.R
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.util.DebugLogger
+import com.adagiostream.android.util.DebugLogger.Category.AUTO
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -29,7 +32,11 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -53,23 +60,37 @@ class AudioPlaybackService : MediaLibraryService() {
         private val TOGGLE_LOVED_TRACK_COMMAND = SessionCommand("TOGGLE_LOVED_TRACK", Bundle.EMPTY)
     }
 
-    @OptIn(UnstableApi::class)
+    @OptIn(UnstableApi::class, FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
+        DebugLogger.log("AudioPlaybackService.onCreate()", AUTO)
         createNotificationChannel()
         buildSession()
+        DebugLogger.log("MediaLibrarySession built, session=$mediaLibrarySession", AUTO)
 
-        // Reactive browse tree updates
+        // Reactive browse tree updates (debounced to batch rapid changes during init)
         serviceScope.launch {
             combine(
                 accountManager.groups,
                 accountManager.channels,
-            ) { _, _ -> Unit }.collect {
-                mediaLibrarySession?.connectedControllers?.forEach { controller ->
-                    mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, 0, null)
-                    mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, 0, null)
-                }
+            ) { groups, channels ->
+                val favorites = channels.filter { it.isFavorite }
+                Triple(groups.size, channels.size, favorites.size)
             }
+                .debounce(500L)
+                .distinctUntilChanged()
+                .collect { (groupCount, channelCount, favCount) ->
+                    val rootChildCount = groupCount + if (favCount > 0) 1 else 0
+                    val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
+                    DebugLogger.log("Browse tree data changed: $groupCount groups, $channelCount channels, $favCount favorites, notifying ${controllers.size} controller(s)", AUTO)
+                    controllers.forEach { controller ->
+                        DebugLogger.log("  Notifying controller: pkg=${controller.packageName}, rootChildCount=$rootChildCount, favCount=$favCount", AUTO)
+                        mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, rootChildCount, null)
+                        if (favCount > 0) {
+                            mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, favCount, null)
+                        }
+                    }
+                }
         }
 
         // Persist last played channel
@@ -80,23 +101,34 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
             }
         }
+
+        // Stop foreground when playback goes idle
+        serviceScope.launch {
+            vlcPlayerWrapper.playbackState.collect { state ->
+                if (state is PlaybackState.Idle) {
+                    DebugLogger.log("Playback idle — removing foreground", AUTO)
+                    ServiceCompat.stopForeground(this@AudioPlaybackService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                }
+            }
+        }
     }
 
     @OptIn(UnstableApi::class)
     private fun buildSession() {
+        DebugLogger.log("buildSession() - creating VLCSessionPlayer and MediaLibrarySession", AUTO)
         val sessionPlayer = VLCSessionPlayer(vlcPlayerWrapper)
 
         mediaLibrarySession?.release()
         mediaLibrarySession = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
             .build()
+        DebugLogger.log("buildSession() - session created: token=${mediaLibrarySession?.token}", AUTO)
     }
 
     @OptIn(UnstableApi::class)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        DebugLogger.log("onStartCommand() - intent=${intent?.action}, flags=$flags, startId=$startId", AUTO)
         super.onStartCommand(intent, flags, startId)
 
-        // Immediately satisfy the foreground service requirement with a placeholder
-        // notification. Media3 will replace it with proper media controls once playback starts.
         val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("AdagioStream")
             .setSmallIcon(R.mipmap.ic_launcher_foreground)
@@ -106,19 +138,24 @@ class AudioPlaybackService : MediaLibraryService() {
             this, 1001, notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
         )
+        DebugLogger.log("onStartCommand() - foreground service started", AUTO)
         return START_STICKY
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
+        DebugLogger.log("onGetSession() - controller: pkg=${controllerInfo.packageName}, uid=${controllerInfo.uid}, session=${mediaLibrarySession != null}", AUTO)
         return mediaLibrarySession
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        DebugLogger.log("onTaskRemoved()", AUTO)
         vlcPlayerWrapper.stop()
         stopSelf()
     }
 
     override fun onDestroy() {
+        DebugLogger.log("onDestroy() - releasing session and cancelling scope", AUTO)
+        serviceScope.cancel()
         mediaLibrarySession?.run {
             player.release()
             release()
@@ -160,15 +197,25 @@ class AudioPlaybackService : MediaLibraryService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
+            DebugLogger.log("onConnect() - controller: pkg=${controller.packageName}, uid=${controller.uid}, pid=${controller.controllerVersion}", AUTO)
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                 .buildUpon()
                 .add(TOGGLE_FAVORITE_COMMAND)
                 .add(SEEK_TO_LIVE_COMMAND)
                 .add(TOGGLE_LOVED_TRACK_COMMAND)
                 .build()
+            DebugLogger.log("onConnect() - accepting connection with custom commands: TOGGLE_FAVORITE, SEEK_TO_LIVE, TOGGLE_LOVED_TRACK", AUTO)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .build()
+        }
+
+        override fun onDisconnected(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ) {
+            DebugLogger.log("onDisconnected() - controller: pkg=${controller.packageName}, uid=${controller.uid}", AUTO)
+            super.onDisconnected(session, controller)
         }
 
         override fun onCustomCommand(
@@ -177,6 +224,7 @@ class AudioPlaybackService : MediaLibraryService() {
             customCommand: SessionCommand,
             args: Bundle,
         ): ListenableFuture<SessionResult> {
+            DebugLogger.log("onCustomCommand() - command=${customCommand.customAction}, from=${controller.packageName}", AUTO)
             if (customCommand.customAction == TOGGLE_FAVORITE_COMMAND.customAction) {
                 val channel = vlcPlayerWrapper.currentChannel.value
                 if (channel != null) {
@@ -210,9 +258,12 @@ class AudioPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: List<MediaItem>,
         ): ListenableFuture<List<MediaItem>> {
+            DebugLogger.log("onAddMediaItems() - ${mediaItems.size} item(s) from ${controller.packageName}", AUTO)
+            mediaItems.forEach { DebugLogger.log("  mediaId=${it.mediaId}, uri=${it.localConfiguration?.uri}", AUTO) }
             val resolved = mediaItems.map { item ->
                 val channel = accountManager.channels.value.find { it.id == item.mediaId }
                 if (channel != null) {
+                    DebugLogger.log("  Resolved channel: ${channel.name} (group=${channel.group})", AUTO)
                     vlcPlayerWrapper.setChannelList(channelListForContext(channel))
                     vlcPlayerWrapper.play(channel)
                     item.buildUpon()
@@ -229,6 +280,7 @@ class AudioPlaybackService : MediaLibraryService() {
                         )
                         .build()
                 } else {
+                    DebugLogger.log("  WARN: No channel found for mediaId=${item.mediaId}", AUTO)
                     item
                 }
             }
@@ -239,14 +291,19 @@ class AudioPlaybackService : MediaLibraryService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            DebugLogger.log("onPlaybackResumption() - from ${controller.packageName}", AUTO)
             val lastPlayedId = kotlinx.coroutines.runBlocking {
                 persistenceService.loadLastPlayed()
             }
+            DebugLogger.log("onPlaybackResumption() - lastPlayedId=$lastPlayedId", AUTO)
             val channel = lastPlayedId?.let { id ->
                 accountManager.channels.value.find { it.id == id }
             }
             if (channel != null) {
+                DebugLogger.log("onPlaybackResumption() - resuming: ${channel.name}", AUTO)
                 vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+            } else {
+                DebugLogger.log("onPlaybackResumption() - no channel found to resume", AUTO)
             }
             val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
             return Futures.immediateFuture(
@@ -259,6 +316,7 @@ class AudioPlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> {
+            DebugLogger.log("onGetLibraryRoot() - browser: pkg=${browser.packageName}, uid=${browser.uid}, params=$params", AUTO)
             val root = MediaItem.Builder()
                 .setMediaId(ROOT_ID)
                 .setMediaMetadata(
@@ -270,6 +328,7 @@ class AudioPlaybackService : MediaLibraryService() {
                         .build()
                 )
                 .build()
+            DebugLogger.log("onGetLibraryRoot() - returning root=$ROOT_ID", AUTO)
             return Futures.immediateFuture(LibraryResult.ofItem(root, params))
         }
 
@@ -281,9 +340,11 @@ class AudioPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            DebugLogger.log("onGetChildren() - parentId=$parentId, page=$page, pageSize=$pageSize, browser=${browser.packageName}", AUTO)
             val groups = accountManager.groups.value
             val channels = accountManager.channels.value
             val favorites = channels.filter { it.isFavorite }
+            DebugLogger.log("onGetChildren() - ${groups.size} groups, ${channels.size} channels, ${favorites.size} favorites", AUTO)
 
             if (parentId != ROOT_ID) {
                 lastBrowsedParentId = parentId
@@ -319,6 +380,7 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
             }
 
+            DebugLogger.log("onGetChildren() - returning ${items.size} items for parentId=$parentId", AUTO)
             return Futures.immediateFuture(
                 LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
             )
@@ -330,10 +392,12 @@ class AudioPlaybackService : MediaLibraryService() {
             query: String,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<Void>> {
+            DebugLogger.log("onSearch() - query='$query' from ${browser.packageName}", AUTO)
             val results = accountManager.channels.value
                 .filter { it.name.contains(query, ignoreCase = true) }
                 .map { buildPlayableItem(it) }
 
+            DebugLogger.log("onSearch() - ${results.size} results", AUTO)
             mediaLibrarySession?.notifySearchResultChanged(
                 browser, query, results.size, params
             )
@@ -348,10 +412,12 @@ class AudioPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            DebugLogger.log("onGetSearchResult() - query='$query', page=$page, pageSize=$pageSize from ${browser.packageName}", AUTO)
             val results = accountManager.channels.value
                 .filter { it.name.contains(query, ignoreCase = true) }
                 .map { buildPlayableItem(it) }
 
+            DebugLogger.log("onGetSearchResult() - returning ${results.size} results", AUTO)
             return Futures.immediateFuture(
                 LibraryResult.ofItemList(ImmutableList.copyOf(results), params)
             )

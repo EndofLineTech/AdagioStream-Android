@@ -54,7 +54,6 @@ fun NowPlayingSheet(
 ) {
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val currentChannel by viewModel.currentChannel.collectAsStateWithLifecycle()
-    val bitrateKbps by viewModel.bitrateKbps.collectAsStateWithLifecycle()
     val streamStartedAt by viewModel.streamStartedAt.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
     val trackMetadata by viewModel.currentTrackMetadata.collectAsStateWithLifecycle()
@@ -122,14 +121,7 @@ fun NowPlayingSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            val bitrateText = BitrateFormatter.format(bitrateKbps)
-            if (bitrateText.isNotEmpty()) {
-                Text(
-                    text = bitrateText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            BitrateDisplay(viewModel)
 
             if (trackMetadata != null) {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -251,4 +243,18 @@ fun NowPlayingSheet(
         }
     }
 
+}
+
+/** Isolated Composable so bitrate changes only recompose this text, not the entire sheet. */
+@Composable
+private fun BitrateDisplay(viewModel: NowPlayingViewModel) {
+    val bitrateKbps by viewModel.bitrateKbps.collectAsStateWithLifecycle()
+    val bitrateText = BitrateFormatter.format(bitrateKbps)
+    if (bitrateText.isNotEmpty()) {
+        Text(
+            text = bitrateText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
