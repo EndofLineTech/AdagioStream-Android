@@ -28,6 +28,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.TrackMetadata
 
 @Composable
@@ -37,6 +38,7 @@ fun ChannelListItem(
     onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier,
     trackMetadata: TrackMetadata? = null,
+    espnGame: ESPNGameInfo? = null,
     leadingContent: @Composable (() -> Unit)? = null,
 ) {
     Row(
@@ -82,14 +84,20 @@ fun ChannelListItem(
                 style = MaterialTheme.typography.bodyLarge,
                 maxLines = 1,
             )
+            val subtitleText = when {
+                trackMetadata != null -> "${trackMetadata.artist} \u2013 ${trackMetadata.title}"
+                espnGame != null -> espnGame.displayText
+                else -> channel.group
+            }
+            val subtitleColor = if (espnGame != null && espnGame.state == ESPNGameInfo.GameState.LIVE && trackMetadata == null) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
             Text(
-                text = if (trackMetadata != null) {
-                    "${trackMetadata.artist} \u2013 ${trackMetadata.title}"
-                } else {
-                    channel.group
-                },
+                text = subtitleText,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = subtitleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

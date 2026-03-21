@@ -35,6 +35,7 @@ fun FavoritesScreen(
 ) {
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
+    val espnGames by viewModel.espnGames.collectAsStateWithLifecycle()
     var localFavorites by remember(favorites) { mutableStateOf(favorites) }
 
     val lazyListState = rememberLazyListState()
@@ -75,6 +76,7 @@ fun FavoritesScreen(
                             onClick = { viewModel.playChannel(channel) },
                             onFavoriteToggle = { viewModel.toggleFavorite(channel) },
                             trackMetadata = feedMetadata[channel.id],
+                            espnGame = espnGames[channel.id],
                             modifier = Modifier.animateItem(),
                             leadingContent = {
                                 IconButton(

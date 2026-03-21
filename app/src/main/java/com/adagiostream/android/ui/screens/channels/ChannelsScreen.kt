@@ -46,6 +46,7 @@ fun ChannelsScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
+    val espnGames by viewModel.espnGames.collectAsStateWithLifecycle()
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -125,6 +126,7 @@ fun ChannelsScreen(
                                     onClick = { viewModel.playChannel(channel) },
                                     onFavoriteToggle = { viewModel.toggleFavorite(channel) },
                                     trackMetadata = feedMetadata[channel.id],
+                                    espnGame = espnGames[channel.id],
                                 )
                             }
                         }

@@ -116,6 +116,7 @@ object DebugLogger {
         NOWPLAY("NOWPLAY"),
         TIMESHIFT("TIMESHIFT"),
         SXM("SXM"),
+        ESPN("ESPN"),
         IMGCACHE("IMGCACHE"),
     }
 }

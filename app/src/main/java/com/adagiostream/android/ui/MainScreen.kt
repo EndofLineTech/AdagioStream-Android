@@ -52,6 +52,7 @@ fun MainScreen(
     val currentChannel by nowPlayingViewModel.currentChannel.collectAsStateWithLifecycle()
     val streamStartedAt by nowPlayingViewModel.streamStartedAt.collectAsStateWithLifecycle()
     val trackMetadata by nowPlayingViewModel.currentTrackMetadata.collectAsStateWithLifecycle()
+    val espnGame by nowPlayingViewModel.currentESPNGame.collectAsStateWithLifecycle()
     val channels by settingsViewModel.channels.collectAsStateWithLifecycle()
     var showNowPlaying by remember { mutableStateOf(false) }
     var hasAttemptedStartupStream by remember { mutableStateOf(false) }
@@ -81,6 +82,7 @@ fun MainScreen(
                             playbackState = playbackState,
                             streamStartedAt = streamStartedAt,
                             trackMetadata = trackMetadata,
+                            espnGame = espnGame,
                             onPlayPause = { nowPlayingViewModel.togglePlayPause() },
                             onStop = { nowPlayingViewModel.stop() },
                             onClick = { showNowPlaying = true },

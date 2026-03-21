@@ -8,6 +8,8 @@ import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.LovedTrack
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TrackMetadata
+import com.adagiostream.android.model.ESPNGameInfo
+import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.service.parsing.EPGParser
 import com.adagiostream.android.service.parsing.M3UParser
@@ -33,6 +35,7 @@ class AccountManager @Inject constructor(
     private val persistenceService: PersistenceService,
     private val client: OkHttpClient,
     private val xmPlaylistApi: XMPlaylistApi,
+    private val espnScoreService: ESPNScoreService,
 ) {
     companion object
 
@@ -84,6 +87,8 @@ class AccountManager @Inject constructor(
     private var favoriteGroupOrder = mutableListOf<String>()
     private val _allGroupNames = MutableStateFlow<Set<String>>(emptySet())
     val allGroupNames: StateFlow<Set<String>> = _allGroupNames.asStateFlow()
+
+    val espnGames: StateFlow<Map<String, ESPNGameInfo>> = espnScoreService.gamesByChannel
 
     private var hasSxmChannels = false
 
@@ -207,6 +212,8 @@ class AccountManager @Inject constructor(
             xmPlaylistApi.matchChannels(withFavorites, sortPrefixes)
             hasSxmChannels = xmPlaylistApi.hasMappedChannels()
             startFeedPollingIfNeeded()
+            espnScoreService.matchChannels(withFavorites, sortPrefixes)
+            espnScoreService.setPollingEnabled(true)
         } catch (e: Exception) {
             _error.value = UrlSanitizer.redact(e.message ?: "Unknown error")
         } finally {

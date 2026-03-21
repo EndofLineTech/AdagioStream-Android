@@ -59,6 +59,7 @@ fun NowPlayingSheet(
     val trackMetadata by viewModel.currentTrackMetadata.collectAsStateWithLifecycle()
     val isTimeShifted by viewModel.isTimeShifted.collectAsStateWithLifecycle()
     val isTrackLoved by viewModel.isTrackLoved.collectAsStateWithLifecycle()
+    val espnGame by viewModel.currentESPNGame.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val channel = currentChannel ?: return
 
@@ -122,6 +123,21 @@ fun NowPlayingSheet(
             )
 
             BitrateDisplay(viewModel)
+
+            if (trackMetadata == null && espnGame != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = espnGame!!.nowPlayingTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = espnGame!!.nowPlayingSubtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
 
             if (trackMetadata != null) {
                 Spacer(modifier = Modifier.height(12.dp))

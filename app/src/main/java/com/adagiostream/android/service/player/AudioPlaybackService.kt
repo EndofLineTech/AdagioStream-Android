@@ -20,7 +20,9 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.adagiostream.android.R
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.util.DebugLogger
@@ -46,6 +48,7 @@ class AudioPlaybackService : MediaLibraryService() {
     @Inject lateinit var vlcPlayerWrapper: VLCPlayerWrapper
     @Inject lateinit var accountManager: AccountManager
     @Inject lateinit var persistenceService: PersistenceService
+    @Inject lateinit var espnScoreService: ESPNScoreService
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -93,6 +96,32 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
         }
 
+        // Reactive browse tree updates for dynamic subtitle data (ESPN scores, SXM tracks)
+        serviceScope.launch {
+            combine(
+                accountManager.feedMetadata,
+                espnScoreService.gamesByChannel,
+            ) { feed, espn -> feed.size to espn.size }
+                .debounce(1000L)
+                .distinctUntilChanged()
+                .collect { (feedCount, espnCount) ->
+                    val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
+                    if (controllers.isNotEmpty() && (feedCount > 0 || espnCount > 0)) {
+                        DebugLogger.log("Dynamic subtitle data changed: feed=$feedCount, espn=$espnCount — refreshing browse tree", AUTO)
+                        val groups = accountManager.groups.value
+                        val favorites = accountManager.channels.value.filter { it.isFavorite }
+                        controllers.forEach { controller ->
+                            groups.forEach { group ->
+                                mediaLibrarySession?.notifyChildrenChanged(controller, group.name, group.channels.size, null)
+                            }
+                            if (favorites.isNotEmpty()) {
+                                mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, favorites.size, null)
+                            }
+                        }
+                    }
+                }
+        }
+
         // Persist last played channel
         serviceScope.launch {
             vlcPlayerWrapper.currentChannel.collect { channel ->
@@ -116,7 +145,7 @@ class AudioPlaybackService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     private fun buildSession() {
         DebugLogger.log("buildSession() - creating VLCSessionPlayer and MediaLibrarySession", AUTO)
-        val sessionPlayer = VLCSessionPlayer(vlcPlayerWrapper)
+        val sessionPlayer = VLCSessionPlayer(vlcPlayerWrapper, accountManager, espnScoreService)
 
         mediaLibrarySession?.release()
         mediaLibrarySession = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
@@ -439,11 +468,29 @@ class AudioPlaybackService : MediaLibraryService() {
             .build()
     }
 
+    /**
+     * Resolves a dynamic subtitle for a channel: SXM track > ESPN game > group name.
+     */
+    private fun channelSubtitle(channel: Channel): String {
+        // SXM feed metadata takes priority
+        accountManager.feedMetadata.value[channel.id]?.let { track ->
+            return "${track.artist} \u2013 ${track.title}"
+        }
+        // ESPN game score
+        espnScoreService.gamesByChannel.value[channel.id]?.let { game ->
+            return game.displayText
+        }
+        // Default: group name
+        return channel.group
+    }
+
     private fun buildPlayableItem(channel: Channel): MediaItem {
+        val subtitle = channelSubtitle(channel)
         val metadataBuilder = MediaMetadata.Builder()
             .setTitle(channel.name)
             .setStation(channel.name)
-            .setArtist(channel.group)
+            .setArtist(subtitle)
+            .setSubtitle(subtitle)
             .setIsPlayable(true)
             .setIsBrowsable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.EPGEntry
+import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.account.AccountManager
@@ -27,6 +28,13 @@ class NowPlayingViewModel @Inject constructor(
     val currentChannel: StateFlow<Channel?> = vlcPlayer.currentChannel
     val bitrateKbps: StateFlow<Float> = vlcPlayer.bitrateKbps
     val streamStartedAt: StateFlow<Long?> = vlcPlayer.streamStartedAt
+
+    val currentESPNGame: StateFlow<ESPNGameInfo?> = combine(
+        vlcPlayer.currentChannel,
+        accountManager.espnGames,
+    ) { channel, games ->
+        if (channel == null) null else games[channel.id]
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val currentEPGEntries: StateFlow<List<EPGEntry>> = combine(
         vlcPlayer.currentChannel,

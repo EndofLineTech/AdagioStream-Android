@@ -8,6 +8,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.DebugLogger.Category.AUTO
 import com.google.common.util.concurrent.Futures
@@ -26,6 +28,8 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class VLCSessionPlayer(
     private val vlcWrapper: VLCPlayerWrapper,
+    private val accountManager: AccountManager? = null,
+    private val espnScoreService: ESPNScoreService? = null,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -58,17 +62,43 @@ class VLCSessionPlayer(
                 }
 
                 if (channel != null) {
+                    // Resolve dynamic artist text: SXM track > ESPN game > group name
+                    val trackMeta = accountManager?.trackMetadata?.value?.get(channel.name)
+                    val espnGame = espnScoreService?.gamesByChannel?.value?.get(channel.id)
+
+                    val displayTitle: String
+                    val displayArtist: String
+                    val artworkUri: android.net.Uri?
+
+                    when {
+                        trackMeta != null -> {
+                            displayTitle = trackMeta.title
+                            displayArtist = trackMeta.artist
+                            artworkUri = (trackMeta.albumArtURL ?: channel.logoURL)?.let { android.net.Uri.parse(it) }
+                        }
+                        espnGame != null -> {
+                            displayTitle = espnGame.nowPlayingTitle
+                            displayArtist = espnGame.nowPlayingSubtitle
+                            artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
+                        }
+                        else -> {
+                            displayTitle = channel.name
+                            displayArtist = channel.group
+                            artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
+                        }
+                    }
+
                     currentMediaItem = MediaItem.Builder()
                         .setMediaId(channel.id)
                         .setUri(channel.streamURL)
                         .setMediaMetadata(
                             MediaMetadata.Builder()
-                                .setTitle(channel.name)
+                                .setTitle(displayTitle)
                                 .setStation(channel.name)
-                                .setArtist(channel.group)
+                                .setArtist(displayArtist)
                                 .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
                                 .setIsPlayable(true)
-                                .apply { channel.logoURL?.let { setArtworkUri(android.net.Uri.parse(it)) } }
+                                .apply { artworkUri?.let { setArtworkUri(it) } }
                                 .build()
                         )
                         .build()

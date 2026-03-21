@@ -28,6 +28,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.util.rememberElapsedTime
@@ -38,6 +39,7 @@ fun MiniPlayerBar(
     playbackState: PlaybackState,
     streamStartedAt: Long?,
     trackMetadata: TrackMetadata? = null,
+    espnGame: ESPNGameInfo? = null,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onClick: () -> Unit,
@@ -92,6 +94,18 @@ fun MiniPlayerBar(
                             text = "${trackMetadata.artist} \u2013 ${trackMetadata.title}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else if (espnGame != null) {
+                        Text(
+                            text = espnGame.displayText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (espnGame.state == ESPNGameInfo.GameState.LIVE) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
