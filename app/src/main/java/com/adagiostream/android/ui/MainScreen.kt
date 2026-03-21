@@ -1,5 +1,6 @@
 package com.adagiostream.android.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -26,6 +27,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.ui.components.AdagioSplashOverlay
 import com.adagiostream.android.ui.components.MiniPlayerBar
 import com.adagiostream.android.ui.navigation.Screen
 import com.adagiostream.android.ui.navigation.bottomNavItems
@@ -56,6 +58,7 @@ fun MainScreen(
     val channels by settingsViewModel.channels.collectAsStateWithLifecycle()
     var showNowPlaying by remember { mutableStateOf(false) }
     var hasAttemptedStartupStream by remember { mutableStateOf(false) }
+    var showSplash by remember { mutableStateOf(true) }
 
     LaunchedEffect(channels, settings.startupStreamID) {
         if (!hasAttemptedStartupStream && settings.startupStreamID != null && channels.isNotEmpty()) {
@@ -184,5 +187,10 @@ fun MainScreen(
                 artworkDisplayMode = settings.artworkDisplayMode,
             )
         }
+
+        AdagioSplashOverlay(
+            visible = showSplash,
+            onFinished = { showSplash = false },
+        )
     }
 }

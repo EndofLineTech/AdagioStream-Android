@@ -537,6 +537,7 @@ private fun DebugLogsSection(viewModel: SettingsViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val logSize by viewModel.debugLogSize.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var showShareLogDialog by remember { mutableStateOf(false) }
 
     Text(
         text = "Debug Logs",
@@ -578,22 +579,7 @@ private fun DebugLogsSection(viewModel: SettingsViewModel) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(
-                    onClick = {
-                        val file = DebugLogger.logFile()
-                        if (file != null) {
-                            val uri = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                file,
-                            )
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share Debug Log"))
-                        }
-                    },
+                    onClick = { showShareLogDialog = true },
                     modifier = Modifier.weight(1f),
                     enabled = logSize != "0 KB",
                 ) {
@@ -617,6 +603,42 @@ private fun DebugLogsSection(viewModel: SettingsViewModel) {
     }
 
     viewModel.refreshDebugLogSize()
+
+    if (showShareLogDialog) {
+        AlertDialog(
+            onDismissRequest = { showShareLogDialog = false },
+            title = { Text("Share Debug Log") },
+            text = { Text("Debug logs may contain sensitive information including server URLs, account details, and stream addresses. Only share with trusted recipients.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showShareLogDialog = false
+                        val file = DebugLogger.logFile()
+                        if (file != null) {
+                            val uri = FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                file,
+                            )
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share Debug Log"))
+                        }
+                    },
+                ) {
+                    Text("Share")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showShareLogDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 }
 
 @Composable

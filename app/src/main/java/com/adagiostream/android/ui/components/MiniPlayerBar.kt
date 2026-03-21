@@ -18,7 +18,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,6 +31,7 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.TrackMetadata
+import com.adagiostream.android.ui.theme.glassBackground
 import com.adagiostream.android.util.rememberListeningTime
 
 @Composable
@@ -47,12 +47,11 @@ fun MiniPlayerBar(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        tonalElevation = 3.dp,
-        shadowElevation = 4.dp,
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .glassBackground(),
     ) {
-        Column {
             if (playbackState is PlaybackState.Buffering) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
@@ -153,4 +152,3 @@ fun MiniPlayerBar(
             }
         }
     }
-}
