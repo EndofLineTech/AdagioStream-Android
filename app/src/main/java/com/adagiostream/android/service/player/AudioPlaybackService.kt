@@ -96,18 +96,19 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
         }
 
-        // Reactive browse tree updates for dynamic subtitle data (ESPN scores, SXM tracks)
+        // Reactive browse tree updates for dynamic subtitle data (ESPN scores, SXM tracks, EPG)
         serviceScope.launch {
             combine(
                 accountManager.feedMetadata,
                 espnScoreService.gamesByChannel,
-            ) { feed, espn -> feed.size to espn.size }
+                accountManager.epgEntries,
+            ) { feed, espn, epg -> Triple(feed.size, espn.size, epg.size) }
                 .debounce(1000L)
                 .distinctUntilChanged()
-                .collect { (feedCount, espnCount) ->
+                .collect { (feedCount, espnCount, epgCount) ->
                     val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
-                    if (controllers.isNotEmpty() && (feedCount > 0 || espnCount > 0)) {
-                        DebugLogger.log("Dynamic subtitle data changed: feed=$feedCount, espn=$espnCount — refreshing browse tree", AUTO)
+                    if (controllers.isNotEmpty() && (feedCount > 0 || espnCount > 0 || epgCount > 0)) {
+                        DebugLogger.log("Dynamic subtitle data changed: feed=$feedCount, espn=$espnCount, epg=$epgCount — refreshing browse tree", AUTO)
                         val groups = accountManager.groups.value
                         val favorites = accountManager.channels.value.filter { it.isFavorite }
                         controllers.forEach { controller ->
@@ -469,7 +470,7 @@ class AudioPlaybackService : MediaLibraryService() {
     }
 
     /**
-     * Resolves a dynamic subtitle for a channel: SXM track > ESPN game > group name.
+     * Resolves a dynamic subtitle for a channel: SXM track > ESPN game > EPG program > group name.
      */
     private fun channelSubtitle(channel: Channel): String {
         // SXM feed metadata takes priority
@@ -479,6 +480,12 @@ class AudioPlaybackService : MediaLibraryService() {
         // ESPN game score
         espnScoreService.gamesByChannel.value[channel.id]?.let { game ->
             return game.displayText
+        }
+        // EPG current program
+        channel.epgChannelID?.let { epgId ->
+            accountManager.epgEntries.value[epgId]?.firstOrNull { it.isCurrentlyAiring }?.let { entry ->
+                return entry.title
+            }
         }
         // Default: group name
         return channel.group
