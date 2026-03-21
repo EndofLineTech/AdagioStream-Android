@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
@@ -77,6 +78,11 @@ class SettingsViewModel @Inject constructor(
 
     fun updateTextSizeMode(mode: TextSizeMode) {
         _settings.value = _settings.value.copy(textSizeMode = mode)
+        save()
+    }
+
+    fun updateArtworkDisplayMode(mode: ArtworkDisplayMode) {
+        _settings.value = _settings.value.copy(artworkDisplayMode = mode)
         save()
     }
 

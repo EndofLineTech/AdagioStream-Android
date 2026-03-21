@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import com.adagiostream.android.BuildConfig
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
@@ -209,6 +210,35 @@ fun SettingsScreen(
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Artwork Display
+        Text(
+            text = "Artwork Display",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "Choose whether to display track cover art or the channel logo",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            ArtworkDisplayMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = settings.artworkDisplayMode == mode,
+                    onClick = { viewModel.updateArtworkDisplayMode(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = ArtworkDisplayMode.entries.size,
+                    ),
+                ) {
+                    Text(text = mode.displayName)
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 

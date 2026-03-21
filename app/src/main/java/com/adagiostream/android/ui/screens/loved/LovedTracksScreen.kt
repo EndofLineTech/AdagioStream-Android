@@ -32,7 +32,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -98,6 +100,7 @@ fun LovedTracksScreen(
                         LovedTrackItemWithMenu(
                             track = track,
                             onDelete = { viewModel.removeTrack(index) },
+                            viewModel = viewModel,
                             modifier = Modifier.animateItem(),
                             leadingContent = {
                                 IconButton(
@@ -125,10 +128,12 @@ fun LovedTracksScreen(
 private fun LovedTrackItemWithMenu(
     track: LovedTrack,
     onDelete: () -> Unit,
+    viewModel: LovedTracksViewModel,
     modifier: Modifier = Modifier,
     leadingContent: @Composable (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showMenu by remember { mutableStateOf(false) }
 
     Box {
@@ -169,7 +174,11 @@ private fun LovedTrackItemWithMenu(
                 text = { Text("Search on Apple Music") },
                 onClick = {
                     showMenu = false
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.apple.com/us/search?term=$query")))
+                    scope.launch {
+                        val directUrl = viewModel.getAppleMusicUrl(track.artist, track.title)
+                        val url = directUrl ?: "https://music.apple.com/us/search?term=$query"
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }
                 },
             )
         }

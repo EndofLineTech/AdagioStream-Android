@@ -91,6 +91,7 @@ class NowPlayingViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val timeShiftMs: StateFlow<Long> = vlcPlayer.timeShiftMs
+    val listeningTimeMs: StateFlow<Long> = vlcPlayer.listeningTimeMs
 
     fun togglePlayPause() = vlcPlayer.togglePlayPause()
     fun stop() = vlcPlayer.stop()

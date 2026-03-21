@@ -57,6 +57,11 @@ class VLCPlayerWrapper(
     val timeShiftMs: kotlinx.coroutines.flow.StateFlow<Long> = _timeShiftMs
     private var pausedAtSystemTime: Long = 0L
 
+    // Listening timer — tracks actual playback time (excludes pause/buffer)
+    private val _listeningTimeMs = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val listeningTimeMs: kotlinx.coroutines.flow.StateFlow<Long> = _listeningTimeMs
+    private var listeningSegmentStartTime: Long = 0L
+
     // Time-shift buffer
     private val timeShiftBuffer = TimeShiftBuffer(context.cacheDir, OkHttpClient())
     private var isPlayingBufferedFile = false
@@ -140,15 +145,18 @@ class VLCPlayerWrapper(
                 retryJob?.cancel()
                 _playbackState.value = if (isPlayingBufferedFile) PlaybackState.CatchingUp else PlaybackState.Playing
                 startBitratePolling()
+                listeningSegmentStartTime = System.currentTimeMillis()
             }
             MediaPlayer.Event.Paused -> {
                 DebugLogger.log("Paused", DebugLogger.Category.VLC)
                 _playbackState.value = PlaybackState.Paused
                 stopBitratePolling()
+                accumulateListeningSegment()
             }
             MediaPlayer.Event.Stopped -> {
                 DebugLogger.log("Stopped", DebugLogger.Category.VLC)
                 stopBitratePolling()
+                accumulateListeningSegment()
             }
             MediaPlayer.Event.EndReached -> {
                 // Ignore stale events from channel switches or user-initiated stop
@@ -346,6 +354,8 @@ class VLCPlayerWrapper(
         _streamStartedAt.value = System.currentTimeMillis()
         _timeShiftMs.value = 0L
         pausedAtSystemTime = 0L
+        _listeningTimeMs.value = 0L
+        listeningSegmentStartTime = 0L
 
         ContextCompat.startForegroundService(
             context, Intent(context, AudioPlaybackService::class.java)
@@ -378,11 +388,13 @@ class VLCPlayerWrapper(
     fun pause() {
         if (mediaPlayer.isPlaying) {
             pausedAtSystemTime = System.currentTimeMillis()
+            accumulateListeningSegment()
             mediaPlayer.pause()
         }
     }
 
     fun resume() {
+        listeningSegmentStartTime = System.currentTimeMillis()
         if (pausedAtSystemTime > 0L) {
             val pauseDuration = System.currentTimeMillis() - pausedAtSystemTime
             _timeShiftMs.value += pauseDuration
@@ -427,6 +439,8 @@ class VLCPlayerWrapper(
         _streamStartedAt.value = null
         _timeShiftMs.value = 0L
         pausedAtSystemTime = 0L
+        _listeningTimeMs.value = 0L
+        listeningSegmentStartTime = 0L
         audioManager.abandonAudioFocusRequest(audioFocusRequest)
         wasPlayingBeforeFocusLoss = false
         isDucking = false
@@ -456,8 +470,17 @@ class VLCPlayerWrapper(
     /** Whether the VLC player is currently playing audio. */
     val isPlaying: Boolean get() = mediaPlayer.isPlaying
 
+    private fun accumulateListeningSegment() {
+        if (listeningSegmentStartTime > 0L) {
+            _listeningTimeMs.value += System.currentTimeMillis() - listeningSegmentStartTime
+            listeningSegmentStartTime = 0L
+        }
+    }
+
     fun release() {
         stopBitratePolling()
+        _listeningTimeMs.value = 0L
+        listeningSegmentStartTime = 0L
         scope.cancel()
         audioManager.abandonAudioFocusRequest(audioFocusRequest)
         mediaPlayer.release()

@@ -50,7 +50,7 @@ fun MainScreen(
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val playbackState by nowPlayingViewModel.playbackState.collectAsStateWithLifecycle()
     val currentChannel by nowPlayingViewModel.currentChannel.collectAsStateWithLifecycle()
-    val streamStartedAt by nowPlayingViewModel.streamStartedAt.collectAsStateWithLifecycle()
+    val listeningTimeMs by nowPlayingViewModel.listeningTimeMs.collectAsStateWithLifecycle()
     val trackMetadata by nowPlayingViewModel.currentTrackMetadata.collectAsStateWithLifecycle()
     val espnGame by nowPlayingViewModel.currentESPNGame.collectAsStateWithLifecycle()
     val channels by settingsViewModel.channels.collectAsStateWithLifecycle()
@@ -80,9 +80,10 @@ fun MainScreen(
                         MiniPlayerBar(
                             channel = currentChannel!!,
                             playbackState = playbackState,
-                            streamStartedAt = streamStartedAt,
+                            listeningTimeMs = listeningTimeMs,
                             trackMetadata = trackMetadata,
                             espnGame = espnGame,
+                            artworkDisplayMode = settings.artworkDisplayMode,
                             onPlayPause = { nowPlayingViewModel.togglePlayPause() },
                             onStop = { nowPlayingViewModel.stop() },
                             onClick = { showNowPlaying = true },
@@ -180,6 +181,7 @@ fun MainScreen(
         if (showNowPlaying) {
             NowPlayingSheet(
                 onDismiss = { showNowPlaying = false },
+                artworkDisplayMode = settings.artworkDisplayMode,
             )
         }
     }

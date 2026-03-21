@@ -41,20 +41,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.ui.components.RetryableAsyncImage
 import com.adagiostream.android.util.BitrateFormatter
-import com.adagiostream.android.util.rememberElapsedTime
+import com.adagiostream.android.util.rememberListeningTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowPlayingSheet(
     onDismiss: () -> Unit,
+    artworkDisplayMode: ArtworkDisplayMode = ArtworkDisplayMode.COVER_ART,
     viewModel: NowPlayingViewModel = hiltViewModel(),
 ) {
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val currentChannel by viewModel.currentChannel.collectAsStateWithLifecycle()
-    val streamStartedAt by viewModel.streamStartedAt.collectAsStateWithLifecycle()
+    val listeningTimeMs by viewModel.listeningTimeMs.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
     val trackMetadata by viewModel.currentTrackMetadata.collectAsStateWithLifecycle()
     val isTimeShifted by viewModel.isTimeShifted.collectAsStateWithLifecycle()
@@ -74,14 +76,24 @@ fun NowPlayingSheet(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (channel.logoURL != null) {
+            val mainImageUrl = if (artworkDisplayMode == ArtworkDisplayMode.COVER_ART) {
+                trackMetadata?.albumArtURL ?: channel.logoURL
+            } else {
+                channel.logoURL
+            }
+            val mainImageScale = if (artworkDisplayMode == ArtworkDisplayMode.COVER_ART && trackMetadata?.albumArtURL != null) {
+                ContentScale.Crop
+            } else {
+                ContentScale.Fit
+            }
+            if (mainImageUrl != null) {
                 RetryableAsyncImage(
-                    model = channel.logoURL,
+                    model = mainImageUrl,
                     contentDescription = channel.name,
                     modifier = Modifier
                         .size(160.dp)
                         .clip(RoundedCornerShape(16.dp)),
-                    contentScale = ContentScale.Fit,
+                    contentScale = mainImageScale,
                 )
             } else {
                 Icon(
@@ -108,11 +120,12 @@ fun NowPlayingSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            val elapsed = rememberElapsedTime(streamStartedAt)
+            val isActive = playbackState is PlaybackState.Playing || playbackState is PlaybackState.CatchingUp
+            val listeningTime = rememberListeningTime(accumulatedMs = listeningTimeMs, isPlaying = isActive)
             val statusText = when (playbackState) {
                 is PlaybackState.Buffering -> "Buffering..."
-                is PlaybackState.Playing -> if (elapsed != null) "Playing \u00B7 $elapsed" else "Playing"
-                is PlaybackState.Paused -> if (elapsed != null) "Paused \u00B7 $elapsed" else "Paused"
+                is PlaybackState.Playing -> if (listeningTime != null) "Playing \u00B7 $listeningTime" else "Playing"
+                is PlaybackState.Paused -> if (listeningTime != null) "Paused \u00B7 $listeningTime" else "Paused"
                 is PlaybackState.CatchingUp -> "Catching up..."
                 is PlaybackState.Error -> (playbackState as PlaybackState.Error).message
                 else -> ""
@@ -153,7 +166,9 @@ fun NowPlayingSheet(
 
             if (trackMetadata != null) {
                 Spacer(modifier = Modifier.height(12.dp))
-                if (trackMetadata!!.albumArtURL != null) {
+                // Only show separate album art when in CHANNEL_LOGO mode
+                // (in COVER_ART mode, the main image already shows album art)
+                if (artworkDisplayMode == ArtworkDisplayMode.CHANNEL_LOGO && trackMetadata!!.albumArtURL != null) {
                     RetryableAsyncImage(
                         model = trackMetadata!!.albumArtURL,
                         contentDescription = "Album art",

@@ -26,7 +26,30 @@ fun rememberElapsedTime(startedAt: Long?): String? {
     return formatElapsed(elapsed)
 }
 
-private fun formatElapsed(totalSeconds: Long): String {
+/** Ticks every second while playing and returns formatted listening duration, or null when not tracking. */
+@Composable
+fun rememberListeningTime(accumulatedMs: Long, isPlaying: Boolean): String? {
+    if (accumulatedMs == 0L && !isPlaying) return null
+
+    var extraMs by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            val segmentStart = System.currentTimeMillis()
+            while (true) {
+                extraMs = System.currentTimeMillis() - segmentStart
+                delay(1_000L)
+            }
+        } else {
+            extraMs = 0L
+        }
+    }
+
+    val totalSeconds = ((accumulatedMs + extraMs) / 1000L).coerceAtLeast(0)
+    return formatElapsed(totalSeconds)
+}
+
+internal fun formatElapsed(totalSeconds: Long): String {
     val h = totalSeconds / 3600
     val m = (totalSeconds % 3600) / 60
     val s = totalSeconds % 60

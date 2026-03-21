@@ -2,6 +2,7 @@ package com.adagiostream.android.di
 
 import android.content.Context
 import com.adagiostream.android.service.metadata.ESPNScoreService
+import com.adagiostream.android.service.metadata.ITunesSearchApi
 import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.VLCPlayerWrapper
@@ -55,6 +56,10 @@ object AppModule {
     @Provides
     @Singleton
     fun provideESPNScoreService(client: OkHttpClient): ESPNScoreService = ESPNScoreService(client)
+
+    @Provides
+    @Singleton
+    fun provideITunesSearchApi(client: OkHttpClient): ITunesSearchApi = ITunesSearchApi(client)
 
     @Provides
     @Singleton

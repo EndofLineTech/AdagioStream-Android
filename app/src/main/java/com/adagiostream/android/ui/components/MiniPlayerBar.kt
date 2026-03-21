@@ -27,19 +27,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.TrackMetadata
-import com.adagiostream.android.util.rememberElapsedTime
+import com.adagiostream.android.util.rememberListeningTime
 
 @Composable
 fun MiniPlayerBar(
     channel: Channel,
     playbackState: PlaybackState,
-    streamStartedAt: Long?,
+    listeningTimeMs: Long = 0L,
     trackMetadata: TrackMetadata? = null,
     espnGame: ESPNGameInfo? = null,
+    artworkDisplayMode: ArtworkDisplayMode = ArtworkDisplayMode.COVER_ART,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onClick: () -> Unit,
@@ -61,7 +63,11 @@ fun MiniPlayerBar(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val imageUrl = trackMetadata?.albumArtURL ?: channel.logoURL
+                val imageUrl = if (artworkDisplayMode == ArtworkDisplayMode.COVER_ART) {
+                    trackMetadata?.albumArtURL ?: channel.logoURL
+                } else {
+                    channel.logoURL
+                }
                 if (imageUrl != null) {
                     RetryableAsyncImage(
                         model = imageUrl,
@@ -110,11 +116,12 @@ fun MiniPlayerBar(
                             overflow = TextOverflow.Ellipsis,
                         )
                     } else {
-                        val elapsed = rememberElapsedTime(streamStartedAt)
+                        val isActive = playbackState is PlaybackState.Playing || playbackState is PlaybackState.CatchingUp
+                        val listeningTime = rememberListeningTime(accumulatedMs = listeningTimeMs, isPlaying = isActive)
                         val statusText = when (playbackState) {
                             is PlaybackState.Buffering -> "Buffering..."
-                            is PlaybackState.Playing -> if (elapsed != null) "Playing \u00B7 $elapsed" else "Playing"
-                            is PlaybackState.Paused -> if (elapsed != null) "Paused \u00B7 $elapsed" else "Paused"
+                            is PlaybackState.Playing -> if (listeningTime != null) "Playing \u00B7 $listeningTime" else "Playing"
+                            is PlaybackState.Paused -> if (listeningTime != null) "Paused \u00B7 $listeningTime" else "Paused"
                             is PlaybackState.CatchingUp -> "Catching up..."
                             is PlaybackState.Error -> "Error"
                             else -> ""
