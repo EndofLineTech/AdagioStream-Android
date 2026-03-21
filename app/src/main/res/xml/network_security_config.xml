@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        cleartextTrafficPermitted must remain true: Xtream Codes servers
+        may use HTTP-only endpoints, and OkHttp respects this setting on
+        Android 9+. This is a protocol constraint, same as credentials in URLs.
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

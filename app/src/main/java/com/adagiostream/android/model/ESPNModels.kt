@@ -1,0 +1,201 @@
+package com.adagiostream.android.model
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+// MARK: - ESPN Scoreboard API Response
+
+@Serializable
+data class ESPNScoreboardResponse(
+    val events: List<ESPNEvent> = emptyList(),
+)
+
+@Serializable
+data class ESPNEvent(
+    val id: String,
+    val shortName: String = "",               // "MIN @ BOS"
+    val competitions: List<ESPNCompetition> = emptyList(),
+) {
+    val competition: ESPNCompetition? get() = competitions.firstOrNull()
+}
+
+@Serializable
+data class ESPNCompetition(
+    val competitors: List<ESPNCompetitor> = emptyList(),
+    val status: ESPNStatus,
+    val situation: ESPNSituation? = null,
+) {
+    val homeTeam: ESPNCompetitor? get() = competitors.firstOrNull { it.homeAway == "home" }
+    val awayTeam: ESPNCompetitor? get() = competitors.firstOrNull { it.homeAway == "away" }
+}
+
+@Serializable
+data class ESPNSituation(
+    // MLB
+    val outs: Int? = null,
+    val balls: Int? = null,
+    val strikes: Int? = null,
+    val onFirst: Boolean? = null,
+    val onSecond: Boolean? = null,
+    val onThird: Boolean? = null,
+    // NFL
+    val possession: String? = null,            // team ID with possession
+    val down: Int? = null,
+    val distance: Int? = null,
+    val yardLine: Int? = null,
+    val downDistanceText: String? = null,       // "1st & 10 at GB 25"
+    val shortDownDistanceText: String? = null,  // "1st & 10"
+    val possessionText: String? = null,         // "Green Bay Packers"
+)
+
+@Serializable
+data class ESPNCompetitor(
+    val homeAway: String = "",                 // "home" or "away"
+    val score: String = "0",                   // "0", "3", etc.
+    val team: ESPNTeam,
+    val records: List<ESPNRecord>? = null,
+) {
+    val overallRecord: String?
+        get() = records?.firstOrNull { it.name == "overall" }?.summary
+}
+
+@Serializable
+data class ESPNTeam(
+    val id: String = "",
+    val displayName: String = "",              // "Boston Red Sox"
+    val abbreviation: String = "",             // "BOS"
+)
+
+@Serializable
+data class ESPNRecord(
+    val name: String = "",                     // "overall"
+    val summary: String = "",                  // "9-11"
+)
+
+@Serializable
+data class ESPNStatus(
+    val displayClock: String? = null,          // "8:35", "0:00"
+    val period: Int? = null,                   // 1, 2, 3, 4
+    val type: ESPNStatusType,
+)
+
+@Serializable
+data class ESPNStatusType(
+    val state: String = "",                    // "pre", "in", "post"
+    val shortDetail: String = "",              // "3/15 - 1:05 PM EDT", "Bot 7th", "Final"
+)
+
+// MARK: - League
+
+enum class ESPNLeague(val sportPath: String, val periodName: String) {
+    MLB("baseball/mlb", ""),              // MLB uses innings, handled by shortDetail
+    NBA("basketball/nba", "Quarter"),
+    NHL("hockey/nhl", "Period"),
+    NFL("football/nfl", ""),              // NFL uses custom format
+}
+
+// MARK: - Resolved Game Info for Display
+
+/**
+ * A matched ESPN game ready for display in a channel row.
+ */
+data class ESPNGameInfo(
+    val league: ESPNLeague,
+    val awayAbbr: String,                      // "MIN"
+    val homeAbbr: String,                      // "BOS"
+    val awayScore: String,                     // "3"
+    val homeScore: String,                     // "0"
+    val awayRecord: String?,                   // "7-13-1"
+    val homeRecord: String?,                   // "9-11"
+    val state: GameState,                      // .PRE, .LIVE, .POST
+    val statusDetail: String,                  // "Bot 7th", "8:35 - 1st", "Final"
+    val displayClock: String?,                 // "8:35"
+    val period: Int?,                          // 1-4
+    // MLB
+    val outs: Int? = null,                     // 0-3 during live game
+    // NFL
+    val possessionTeamAbbr: String? = null,    // "GB" — team with the ball
+    val downDistanceText: String? = null,      // "1st & 10"
+) {
+    enum class GameState(val apiValue: String) {
+        PRE("pre"),
+        LIVE("in"),
+        POST("post");
+
+        companion object {
+            fun fromApi(state: String): GameState =
+                entries.firstOrNull { it.apiValue == state } ?: PRE
+        }
+    }
+
+    // MARK: - One-liner (channel row, mini player)
+
+    val displayText: String
+        get() = when (state) {
+            GameState.PRE -> "${awayAbbr}${recordText(awayRecord)} @ ${homeAbbr}${recordText(homeRecord)} · $statusDetail"
+            GameState.LIVE -> "$scoreLine · $liveDetail"
+            GameState.POST -> "$scoreLine · $statusDetail"
+        }
+
+    // MARK: - Two-line (Now Playing, Android Auto)
+
+    /** Line 1: score line */
+    val nowPlayingTitle: String
+        get() = when (state) {
+            GameState.PRE -> "${awayAbbr}${recordText(awayRecord)} @ ${homeAbbr}${recordText(homeRecord)}"
+            GameState.LIVE, GameState.POST -> scoreLine
+        }
+
+    /** Line 2: game status */
+    val nowPlayingSubtitle: String
+        get() = when (state) {
+            GameState.LIVE -> liveDetail
+            GameState.PRE, GameState.POST -> statusDetail
+        }
+
+    // MARK: - Private Formatting
+
+    private val scoreLine: String
+        get() = when (league) {
+            ESPNLeague.NFL -> {
+                // Arrow points at team with possession
+                val awayPoss = if (possessionTeamAbbr == awayAbbr) "\u25B6 " else ""
+                val homePoss = if (possessionTeamAbbr == homeAbbr) "\u25B6 " else ""
+                "${awayPoss}${awayAbbr} $awayScore - ${homePoss}${homeAbbr} $homeScore"
+            }
+            else -> "$awayAbbr $awayScore - $homeAbbr $homeScore"
+        }
+
+    private val liveDetail: String
+        get() = when (league) {
+            ESPNLeague.MLB -> "$statusDetail$outsText"
+            ESPNLeague.NBA, ESPNLeague.NHL -> {
+                val clock = displayClock ?: ""
+                val periodStr = period?.let { "${ordinal(it)} ${league.periodName}" } ?: ""
+                if (clock.isEmpty()) periodStr else "$clock, $periodStr"
+            }
+            ESPNLeague.NFL -> {
+                val parts = mutableListOf<String>()
+                downDistanceText?.let { parts.add(it) }
+                period?.let { parts.add("Q$it") }
+                displayClock?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+                parts.joinToString(", ")
+            }
+        }
+
+    private val outsText: String
+        get() {
+            val o = outs ?: return ""
+            return ", $o ${if (o == 1) "Out" else "Outs"}"
+        }
+
+    private fun recordText(record: String?): String =
+        record?.let { " ($it)" } ?: ""
+
+    private fun ordinal(n: Int): String = when (n) {
+        1 -> "1st"
+        2 -> "2nd"
+        3 -> "3rd"
+        else -> "${n}th"
+    }
+}

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Only expose log files for sharing — not the entire filesDir -->
+    <files-path name="logs" path="adagiostream-debug.log" />
+    <files-path name="prev_logs" path="adagiostream-debug-prev.log" />
+</paths>
