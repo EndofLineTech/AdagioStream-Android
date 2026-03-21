@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -33,8 +34,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.adagiostream.android.model.Channel
 import com.adagiostream.android.ui.components.ChannelListItem
 import com.adagiostream.android.ui.components.GroupHeader
+import com.adagiostream.android.ui.screens.epg.EPGBottomSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,7 +50,9 @@ fun ChannelsScreen(
     val error by viewModel.error.collectAsStateWithLifecycle()
     val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
     val espnGames by viewModel.espnGames.collectAsStateWithLifecycle()
+    val epgEntries by viewModel.epgEntries.collectAsStateWithLifecycle()
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
+    var showEPGChannel by remember { mutableStateOf<Channel?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -121,12 +126,16 @@ fun ChannelsScreen(
                                 items = group.channels,
                                 key = { "channel_${it.id}" },
                             ) { channel ->
+                                val epgProgram = channel.epgChannelID?.let { epgId ->
+                                    epgEntries[epgId]?.firstOrNull { it.isCurrentlyAiring }?.title
+                                }
                                 ChannelListItem(
                                     channel = channel,
                                     onClick = { viewModel.playChannel(channel) },
                                     onFavoriteToggle = { viewModel.toggleFavorite(channel) },
                                     trackMetadata = feedMetadata[channel.id],
                                     espnGame = espnGames[channel.id],
+                                    currentProgram = epgProgram,
                                 )
                             }
                         }
@@ -134,6 +143,20 @@ fun ChannelsScreen(
                 }
             }
         }
+    }
+
+    showEPGChannel?.let { epgChannel ->
+        LaunchedEffect(epgChannel) {
+            if (epgChannel.xtreamStreamId != null) {
+                viewModel.loadEPGForChannel(epgChannel)
+            }
+        }
+        val channelEpgId = epgChannel.epgChannelID ?: epgChannel.id
+        EPGBottomSheet(
+            entries = epgEntries[channelEpgId] ?: emptyList(),
+            channelName = epgChannel.name,
+            onDismiss = { showEPGChannel = null },
+        )
     }
 }
 

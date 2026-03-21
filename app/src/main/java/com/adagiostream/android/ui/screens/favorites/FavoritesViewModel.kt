@@ -3,6 +3,7 @@ package com.adagiostream.android.ui.screens.favorites
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.account.AccountManager
@@ -23,6 +24,7 @@ class FavoritesViewModel @Inject constructor(
 
     val feedMetadata: StateFlow<Map<String, TrackMetadata>> = accountManager.feedMetadata
     val espnGames: StateFlow<Map<String, ESPNGameInfo>> = accountManager.espnGames
+    val epgEntries: StateFlow<Map<String, List<EPGEntry>>> = accountManager.epgEntries
 
     val favorites: StateFlow<List<Channel>> = accountManager.channels
         .map { channels ->

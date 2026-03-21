@@ -39,6 +39,7 @@ fun ChannelListItem(
     modifier: Modifier = Modifier,
     trackMetadata: TrackMetadata? = null,
     espnGame: ESPNGameInfo? = null,
+    currentProgram: String? = null,
     leadingContent: @Composable (() -> Unit)? = null,
 ) {
     Row(
@@ -87,6 +88,7 @@ fun ChannelListItem(
             val subtitleText = when {
                 trackMetadata != null -> "${trackMetadata.artist} \u2013 ${trackMetadata.title}"
                 espnGame != null -> espnGame.displayText
+                currentProgram != null -> currentProgram
                 else -> channel.group
             }
             val subtitleColor = if (espnGame != null && espnGame.state == ESPNGameInfo.GameState.LIVE && trackMetadata == null) {

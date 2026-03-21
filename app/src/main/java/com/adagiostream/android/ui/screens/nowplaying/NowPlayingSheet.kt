@@ -60,6 +60,7 @@ fun NowPlayingSheet(
     val isTimeShifted by viewModel.isTimeShifted.collectAsStateWithLifecycle()
     val isTrackLoved by viewModel.isTrackLoved.collectAsStateWithLifecycle()
     val espnGame by viewModel.currentESPNGame.collectAsStateWithLifecycle()
+    val epgEntries by viewModel.currentEPGEntries.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val channel = currentChannel ?: return
 
@@ -137,6 +138,17 @@ fun NowPlayingSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
+            } else if (trackMetadata == null && espnGame == null) {
+                val currentEPG = epgEntries.firstOrNull { it.isCurrentlyAiring }
+                if (currentEPG != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = currentEPG.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
 
             if (trackMetadata != null) {

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
+import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.account.AccountManager
@@ -31,6 +32,7 @@ class ChannelsViewModel @Inject constructor(
     val error: StateFlow<String?> = accountManager.error
     val feedMetadata: StateFlow<Map<String, TrackMetadata>> = accountManager.feedMetadata
     val espnGames: StateFlow<Map<String, ESPNGameInfo>> = accountManager.espnGames
+    val epgEntries: StateFlow<Map<String, List<EPGEntry>>> = accountManager.epgEntries
 
     val filteredGroups: StateFlow<List<ChannelGroup>> = combine(
         accountManager.groups,
@@ -89,5 +91,11 @@ class ChannelsViewModel @Inject constructor(
 
     fun isGroupFavorite(groupName: String): Boolean {
         return accountManager.isGroupFavorite(groupName)
+    }
+
+    fun loadEPGForChannel(channel: Channel) {
+        viewModelScope.launch {
+            accountManager.loadXtreamEPGForChannel(channel)
+        }
     }
 }

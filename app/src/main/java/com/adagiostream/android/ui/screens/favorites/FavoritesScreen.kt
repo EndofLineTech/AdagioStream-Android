@@ -36,6 +36,7 @@ fun FavoritesScreen(
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
     val espnGames by viewModel.espnGames.collectAsStateWithLifecycle()
+    val epgEntries by viewModel.epgEntries.collectAsStateWithLifecycle()
     var localFavorites by remember(favorites) { mutableStateOf(favorites) }
 
     val lazyListState = rememberLazyListState()
@@ -71,12 +72,16 @@ fun FavoritesScreen(
             ) {
                 items(localFavorites, key = { it.id }) { channel ->
                     ReorderableItem(reorderableLazyListState, key = channel.id) {
+                        val epgProgram = channel.epgChannelID?.let { epgId ->
+                            epgEntries[epgId]?.firstOrNull { it.isCurrentlyAiring }?.title
+                        }
                         ChannelListItem(
                             channel = channel,
                             onClick = { viewModel.playChannel(channel) },
                             onFavoriteToggle = { viewModel.toggleFavorite(channel) },
                             trackMetadata = feedMetadata[channel.id],
                             espnGame = espnGames[channel.id],
+                            currentProgram = epgProgram,
                             modifier = Modifier.animateItem(),
                             leadingContent = {
                                 IconButton(
