@@ -20,16 +20,22 @@ jobs:
       - name: Decode keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > $GITHUB_WORKSPACE/release.jks
 
+      - name: Write local.properties
+        shell: bash
+        run: |
+          printf 'release.storeFile=%s\n' "${{ github.workspace }}/release.jks" > local.properties
+          printf 'release.storePassword=%s\n' '${{ secrets.KEYSTORE_PASSWORD }}' >> local.properties
+          printf 'release.keyAlias=%s\n' '${{ secrets.KEY_ALIAS }}' >> local.properties
+          printf 'release.keyPassword=%s\n' '${{ secrets.KEY_PASSWORD }}' >> local.properties
+
+      - name: Verify keystore
+        run: keytool -list -keystore $GITHUB_WORKSPACE/release.jks -alias adagio -storepass '${{ secrets.KEYSTORE_PASSWORD }}'
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
       - name: Build release AAB
         run: ./gradlew bundleRelease
-        env:
-          KEYSTORE_FILE: ${{ github.workspace }}/release.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1
