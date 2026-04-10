@@ -47,7 +47,7 @@ When the user says **"ship it"**, execute this sequence immediately without aski
 1. **Bump version** in `app/build.gradle.kts`:
    - Increment `versionCode` by 1
    - Update `versionName` to match (e.g. `"1.0(75)"`)
-2. **Commit** the version bump
+2. **Commit** with a meaningful message — summarize what changed since the last tag (e.g. "Release v1.0.75: Fix mini player blur and empty browse tree"). Do NOT just say "Bump version to X".
 3. **Tag** the commit as `v1.0.<versionCode>` (e.g. `v1.0.75`)
 4. **Push** both the commit and the tag: `git push && git push origin <tag>`
 
