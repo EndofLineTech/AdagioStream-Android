@@ -2,7 +2,7 @@ package com.adagiostream.android.service.persistence
 
 import android.content.Context
 import androidx.security.crypto.EncryptedFile
-import androidx.security.crypto.MasterKeys
+import androidx.security.crypto.MasterKey
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.CustomPlaylist
@@ -19,7 +19,9 @@ class PersistenceService(
 ) {
     private val mutex = Mutex()
 
-    private val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+    private val masterKey = MasterKey.Builder(context)
+        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+        .build()
 
     private val accountsFile: File
         get() = File(context.filesDir, "accounts.json")
@@ -44,9 +46,9 @@ class PersistenceService(
 
     private fun buildEncryptedFile(): EncryptedFile {
         return EncryptedFile.Builder(
-            encryptedAccountsFile,
             context,
-            masterKeyAlias,
+            encryptedAccountsFile,
+            masterKey,
             EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB,
         ).build()
     }

@@ -1,3 +1,5 @@
+@file:OptIn(FlowPreview::class)
+
 package com.adagiostream.android.service.player
 
 import android.app.NotificationChannel
@@ -65,7 +67,7 @@ class AudioPlaybackService : MediaLibraryService() {
         private val TOGGLE_LOVED_TRACK_COMMAND = SessionCommand("TOGGLE_LOVED_TRACK", Bundle.EMPTY)
     }
 
-    @OptIn(UnstableApi::class, FlowPreview::class)
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         DebugLogger.log("AudioPlaybackService.onCreate()", AUTO)
