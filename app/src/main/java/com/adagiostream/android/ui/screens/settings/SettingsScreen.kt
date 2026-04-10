@@ -1,6 +1,8 @@
 package com.adagiostream.android.ui.screens.settings
 
 import android.content.Intent
+import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -615,17 +617,22 @@ private fun DebugLogsSection(viewModel: SettingsViewModel) {
                         showShareLogDialog = false
                         val file = DebugLogger.logFile()
                         if (file != null) {
-                            val uri = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                file,
-                            )
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            try {
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    file,
+                                )
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Debug Log"))
+                            } catch (e: Exception) {
+                                Log.e("SettingsScreen", "Failed to share log", e)
+                                Toast.makeText(context, "Unable to share log file", Toast.LENGTH_SHORT).show()
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share Debug Log"))
                         }
                     },
                 ) {

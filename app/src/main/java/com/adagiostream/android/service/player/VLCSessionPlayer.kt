@@ -120,6 +120,8 @@ class VLCSessionPlayer(
                         COMMAND_STOP,
                         COMMAND_SEEK_TO_NEXT,
                         COMMAND_SEEK_TO_PREVIOUS,
+                        COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                        COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
                         COMMAND_GET_CURRENT_MEDIA_ITEM,
                         COMMAND_GET_METADATA,
                     )
@@ -180,8 +182,8 @@ class VLCSessionPlayer(
     ): ListenableFuture<*> {
         DebugLogger.log("handleSeek() - index=$mediaItemIndex, command=$seekCommand", AUTO)
         when (seekCommand) {
-            COMMAND_SEEK_TO_NEXT -> vlcWrapper.playNext()
-            COMMAND_SEEK_TO_PREVIOUS -> vlcWrapper.playPrevious()
+            COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> vlcWrapper.playNext()
+            COMMAND_SEEK_TO_PREVIOUS, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> vlcWrapper.playPrevious()
         }
         return Futures.immediateVoidFuture()
     }

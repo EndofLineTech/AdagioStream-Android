@@ -94,6 +94,8 @@ fun MiniPlayerBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    val isActive = playbackState is PlaybackState.Playing || playbackState is PlaybackState.CatchingUp
+                    val listeningTime = rememberListeningTime(accumulatedMs = listeningTimeMs, isPlaying = isActive)
                     if (trackMetadata != null) {
                         Text(
                             text = "${trackMetadata.artist} \u2013 ${trackMetadata.title}",
@@ -115,8 +117,6 @@ fun MiniPlayerBar(
                             overflow = TextOverflow.Ellipsis,
                         )
                     } else {
-                        val isActive = playbackState is PlaybackState.Playing || playbackState is PlaybackState.CatchingUp
-                        val listeningTime = rememberListeningTime(accumulatedMs = listeningTimeMs, isPlaying = isActive)
                         val statusText = when (playbackState) {
                             is PlaybackState.Buffering -> "Buffering..."
                             is PlaybackState.Playing -> if (listeningTime != null) "Playing \u00B7 $listeningTime" else "Playing"

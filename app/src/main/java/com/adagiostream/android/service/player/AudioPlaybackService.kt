@@ -332,6 +332,7 @@ class AudioPlaybackService : MediaLibraryService() {
             if (channel != null) {
                 DebugLogger.log("onPlaybackResumption() - resuming: ${channel.name}", AUTO)
                 vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+                vlcPlayerWrapper.play(channel)
             } else {
                 DebugLogger.log("onPlaybackResumption() - no channel found to resume", AUTO)
             }

@@ -30,7 +30,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: localProps?.getProperty("release.storeFile") ?: "")
+            storeFile = (System.getenv("KEYSTORE_FILE") ?: localProps?.getProperty("release.storeFile"))?.let { file(it) }
             storePassword = System.getenv("KEYSTORE_PASSWORD") ?: localProps?.getProperty("release.storePassword") ?: ""
             keyAlias = System.getenv("KEY_ALIAS") ?: localProps?.getProperty("release.keyAlias") ?: ""
             keyPassword = System.getenv("KEY_PASSWORD") ?: localProps?.getProperty("release.keyPassword") ?: ""
