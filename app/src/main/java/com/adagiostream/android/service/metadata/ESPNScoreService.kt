@@ -36,8 +36,9 @@ class ESPNScoreService(private val client: OkHttpClient) {
     private var pollJob: Job? = null
     private var lastScoreboardLogLine: String? = null
 
+    var livePollIntervalMs: Long = 15_000L
+
     companion object {
-        private const val LIVE_POLL_INTERVAL = 15_000L
         private const val IDLE_POLL_INTERVAL = 60_000L
         private val SPORTS_LEAGUES = setOf("NFL", "MLB", "NBA", "NHL")
         private val CHANNEL_PREFIXES = listOf("Radio: ", "TV: ")
@@ -103,7 +104,7 @@ class ESPNScoreService(private val client: OkHttpClient) {
     }
 
     private val currentPollInterval: Long
-        get() = if (hasLiveGame) LIVE_POLL_INTERVAL else IDLE_POLL_INTERVAL
+        get() = if (hasLiveGame) livePollIntervalMs else IDLE_POLL_INTERVAL
 
     private fun startPolling() {
         stopPolling()

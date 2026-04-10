@@ -6,6 +6,7 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.LovedTrack
+import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.model.ESPNGameInfo
@@ -81,6 +82,8 @@ class AccountManager @Inject constructor(
         private set
     var groupSortMode: SortMode = SortMode.ALPHABETICAL
         private set
+    var groupingMode: ChannelGroupingMode = ChannelGroupingMode.ALL_GROUPS
+        private set
 
     // Group management
     private var enabledGroups: MutableSet<String>? = null  // null = all enabled
@@ -98,6 +101,7 @@ class AccountManager @Inject constructor(
             sortPrefixes = settings.sortPrefixes
             sortMode = settings.sortMode
             groupSortMode = settings.groupSortMode
+            groupingMode = settings.channelGroupingMode
             enabledGroups = settings.enabledGroups?.toMutableSet()
             favoriteGroupOrder = settings.favoriteGroupOrder.toMutableList()
             _accounts.value = persistenceService.loadAccounts()
@@ -195,7 +199,7 @@ class AccountManager @Inject constructor(
                         is AccountType.M3U -> m3uParser.parse(account.type.url)
                         is AccountType.XtreamCodes -> xtreamApi.getChannels(account.type)
                     }
-                    allChannels.addAll(channels)
+                    allChannels.addAll(channels.map { it.copy(accountName = account.name) })
                 } catch (e: Exception) {
                     _error.value = "Failed to load ${account.name}: ${UrlSanitizer.redact(e.message ?: "Unknown error")}"
                 }
@@ -266,6 +270,11 @@ class AccountManager @Inject constructor(
 
     fun updateGroupSortMode(mode: SortMode) {
         groupSortMode = mode
+        rebuildGroups()
+    }
+
+    fun updateGroupingMode(mode: ChannelGroupingMode) {
+        groupingMode = mode
         rebuildGroups()
     }
 
@@ -431,7 +440,16 @@ class AccountManager @Inject constructor(
     }
 
     private fun rebuildGroups() {
-        val allGrouped = _channels.value.groupBy { it.group }
+        val allGrouped = when (groupingMode) {
+            ChannelGroupingMode.ALL_GROUPS -> _channels.value.groupBy { it.group }
+            ChannelGroupingMode.BY_PROVIDER -> _channels.value.groupBy { it.accountName ?: "Unknown" }
+            ChannelGroupingMode.BY_SOURCE -> _channels.value.groupBy {
+                when {
+                    it.xtreamStreamId != null -> "Xtream Codes"
+                    else -> "M3U"
+                }
+            }
+        }
 
         // Track all raw group names for group management
         _allGroupNames.value = allGrouped.keys

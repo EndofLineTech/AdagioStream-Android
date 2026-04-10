@@ -5,6 +5,7 @@ import androidx.security.crypto.EncryptedFile
 import androidx.security.crypto.MasterKeys
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AppSettings
+import com.adagiostream.android.model.CustomPlaylist
 import com.adagiostream.android.model.LovedTrack
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -183,5 +184,24 @@ class PersistenceService(
         } catch (_: Exception) {
             null
         }
+    }
+
+    private val customPlaylistsFile: File
+        get() = File(context.filesDir, "custom_playlists.json")
+
+    suspend fun loadCustomPlaylists(): List<CustomPlaylist> = mutex.withLock {
+        try {
+            if (customPlaylistsFile.exists()) {
+                json.decodeFromString<List<CustomPlaylist>>(customPlaylistsFile.readText())
+            } else {
+                emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun saveCustomPlaylists(playlists: List<CustomPlaylist>) = mutex.withLock {
+        customPlaylistsFile.writeText(json.encodeToString(playlists))
     }
 }

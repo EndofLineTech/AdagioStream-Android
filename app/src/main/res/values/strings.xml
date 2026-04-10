@@ -14,4 +14,5 @@
     <string name="buffering">Buffering&#8230;</string>
     <string name="playback_notification_channel">Playback</string>
     <string name="playback_notification_channel_desc">Audio playback controls</string>
+    <string name="widget_description">Shows currently playing channel and playback controls</string>
 </resources>

@@ -10,11 +10,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -89,8 +93,35 @@ fun GroupManagementScreen(
             HorizontalDivider()
         }
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(groupItems, key = { it.name }) { group ->
+        val favoriteGroups = groupItems.filter { it.isFavorite }
+        val otherGroups = groupItems.filter { !it.isFavorite }
+        val lazyListState = rememberLazyListState()
+        val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+            viewModel.onReorder(from.index, to.index)
+        }
+
+        LazyColumn(
+            state = lazyListState,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(favoriteGroups, key = { "fav_${it.name}" }) { group ->
+                ReorderableItem(reorderableState, key = "fav_${group.name}") {
+                    GroupRow(
+                        group = group,
+                        onToggleEnabled = { viewModel.toggleEnabled(group.name) },
+                        onToggleFavorite = { viewModel.toggleFavorite(group.name) },
+                        dragHandle = {
+                            IconButton(
+                                modifier = Modifier.draggableHandle(),
+                                onClick = {},
+                            ) {
+                                Icon(Icons.Default.DragHandle, contentDescription = "Reorder")
+                            }
+                        },
+                    )
+                }
+            }
+            items(otherGroups, key = { "grp_${it.name}" }) { group ->
                 GroupRow(
                     group = group,
                     onToggleEnabled = { viewModel.toggleEnabled(group.name) },
@@ -106,6 +137,7 @@ private fun GroupRow(
     group: GroupItem,
     onToggleEnabled: () -> Unit,
     onToggleFavorite: () -> Unit,
+    dragHandle: @Composable (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -113,6 +145,10 @@ private fun GroupRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (dragHandle != null) {
+            dragHandle()
+        }
+
         Switch(
             checked = group.isEnabled,
             onCheckedChange = { onToggleEnabled() },

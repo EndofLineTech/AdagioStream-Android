@@ -7,8 +7,10 @@ import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.TrackMetadata
+import com.adagiostream.android.model.CustomPlaylist
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.player.VLCPlayerWrapper
+import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,7 +25,10 @@ import javax.inject.Inject
 class ChannelsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val vlcPlayer: VLCPlayerWrapper,
+    val playlistManager: CustomPlaylistManager,
 ) : ViewModel() {
+
+    val customPlaylists: StateFlow<List<CustomPlaylist>> = playlistManager.playlists
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()

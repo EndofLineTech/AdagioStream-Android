@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- Expose filesDir root so FileProvider can resolve log files stored there -->
+    <!-- FileProvider resolves individual files from filesDir; share intents grant per-file URIs only -->
     <files-path name="logs" path="." />
 </paths>

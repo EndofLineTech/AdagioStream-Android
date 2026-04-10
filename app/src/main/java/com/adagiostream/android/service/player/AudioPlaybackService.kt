@@ -18,6 +18,7 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import androidx.media3.session.CommandButton
 import com.adagiostream.android.R
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ESPNGameInfo
@@ -58,6 +59,7 @@ class AudioPlaybackService : MediaLibraryService() {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
         private const val ROOT_ID = "root"
         private const val FAVORITES_ID = "favorites"
+        private const val LOVED_SONGS_ID = "loved_songs"
         private val TOGGLE_FAVORITE_COMMAND = SessionCommand("TOGGLE_FAVORITE", Bundle.EMPTY)
         private val SEEK_TO_LIVE_COMMAND = SessionCommand("SEEK_TO_LIVE", Bundle.EMPTY)
         private val TOGGLE_LOVED_TRACK_COMMAND = SessionCommand("TOGGLE_LOVED_TRACK", Bundle.EMPTY)
@@ -132,13 +134,31 @@ class AudioPlaybackService : MediaLibraryService() {
             }
         }
 
-        // Stop foreground when playback goes idle
+        // Stop foreground when playback goes idle + update widget
         serviceScope.launch {
-            vlcPlayerWrapper.playbackState.collect { state ->
+            combine(
+                vlcPlayerWrapper.playbackState,
+                vlcPlayerWrapper.currentChannel,
+            ) { state, channel -> state to channel }.collect { (state, channel) ->
                 if (state is PlaybackState.Idle) {
                     DebugLogger.log("Playback idle — removing foreground", AUTO)
                     ServiceCompat.stopForeground(this@AudioPlaybackService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 }
+                // Update home screen widget
+                val statusText = when (state) {
+                    is PlaybackState.Playing -> "Playing"
+                    is PlaybackState.Paused -> "Paused"
+                    is PlaybackState.Buffering -> "Buffering..."
+                    is PlaybackState.CatchingUp -> "Catching up..."
+                    is PlaybackState.Error -> state.message
+                    else -> ""
+                }
+                com.adagiostream.android.widget.NowPlayingWidgetProvider.updateWidget(
+                    this@AudioPlaybackService,
+                    channel?.name,
+                    statusText,
+                    state is PlaybackState.Playing || state is PlaybackState.CatchingUp,
+                )
             }
         }
     }
@@ -228,15 +248,44 @@ class AudioPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
             DebugLogger.log("onConnect() - controller: pkg=${controller.packageName}, uid=${controller.uid}, pid=${controller.controllerVersion}", AUTO)
+
+            // Auto-play startup stream on Android Auto connect if nothing is playing
+            if (vlcPlayerWrapper.currentChannel.value == null) {
+                serviceScope.launch {
+                    val settings = persistenceService.loadSettings()
+                    val startupId = settings.startupStreamID
+                    if (startupId != null) {
+                        val channel = accountManager.channels.value.find { it.id == startupId }
+                        if (channel != null) {
+                            DebugLogger.log("onConnect() - auto-playing startup channel: ${channel.name}", AUTO)
+                            vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+                            vlcPlayerWrapper.play(channel)
+                        }
+                    }
+                }
+            }
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                 .buildUpon()
                 .add(TOGGLE_FAVORITE_COMMAND)
                 .add(SEEK_TO_LIVE_COMMAND)
                 .add(TOGGLE_LOVED_TRACK_COMMAND)
                 .build()
+            val customButtons = listOf(
+                CommandButton.Builder()
+                    .setDisplayName("Favorite")
+                    .setIconResId(R.drawable.ic_star)
+                    .setSessionCommand(TOGGLE_FAVORITE_COMMAND)
+                    .build(),
+                CommandButton.Builder()
+                    .setDisplayName("Love Track")
+                    .setIconResId(R.drawable.ic_heart)
+                    .setSessionCommand(TOGGLE_LOVED_TRACK_COMMAND)
+                    .build(),
+            )
             DebugLogger.log("onConnect() - accepting connection with custom commands: TOGGLE_FAVORITE, SEEK_TO_LIVE, TOGGLE_LOVED_TRACK", AUTO)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
+                .setCustomLayout(customButtons)
                 .build()
         }
 
@@ -381,6 +430,8 @@ class AudioPlaybackService : MediaLibraryService() {
                 lastBrowsedParentId = parentId
             }
 
+            val lovedTracks = accountManager.lovedTracks.value
+
             val items: List<MediaItem> = when (parentId) {
                 ROOT_ID -> {
                     val result = mutableListOf<MediaItem>()
@@ -390,6 +441,15 @@ class AudioPlaybackService : MediaLibraryService() {
                                 FAVORITES_ID,
                                 "Favorites",
                                 "${favorites.size} channels",
+                            )
+                        )
+                    }
+                    if (lovedTracks.isNotEmpty()) {
+                        result.add(
+                            buildBrowsableItem(
+                                LOVED_SONGS_ID,
+                                "Loved Songs",
+                                "${lovedTracks.size} tracks",
                             )
                         )
                     }
@@ -403,6 +463,22 @@ class AudioPlaybackService : MediaLibraryService() {
                     result
                 }
                 FAVORITES_ID -> favorites.map { buildPlayableItem(it) }
+                LOVED_SONGS_ID -> lovedTracks.map { track ->
+                    MediaItem.Builder()
+                        .setMediaId("loved_${track.artist}_${track.title}")
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(track.title)
+                                .setArtist(track.artist)
+                                .setSubtitle("${track.artist} \u2013 ${track.channelName}")
+                                .setIsPlayable(false)
+                                .setIsBrowsable(false)
+                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                .apply { track.albumArtURL?.let { setArtworkUri(Uri.parse(it)) } }
+                                .build()
+                        )
+                        .build()
+                }
                 else -> {
                     groups.find { it.name == parentId }
                         ?.channels

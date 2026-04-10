@@ -8,8 +8,10 @@ import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
+import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.util.DebugLogger
@@ -28,6 +30,7 @@ class SettingsViewModel @Inject constructor(
     private val persistenceService: PersistenceService,
     private val accountManager: AccountManager,
     private val vlcPlayerWrapper: VLCPlayerWrapper,
+    private val espnScoreService: ESPNScoreService,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(AppSettings())
@@ -61,6 +64,7 @@ class SettingsViewModel @Inject constructor(
                 bufferDurationSeconds = loaded.bufferDurationSeconds.coerceIn(5, 15),
             )
             DebugLogger.isEnabled = loaded.debugLoggingEnabled
+            espnScoreService.livePollIntervalMs = loaded.espnPollingIntervalSeconds * 1000L
         }
     }
 
@@ -104,6 +108,18 @@ class SettingsViewModel @Inject constructor(
         save()
     }
 
+    fun updateEspnPollingInterval(seconds: Int) {
+        _settings.value = _settings.value.copy(espnPollingIntervalSeconds = seconds)
+        espnScoreService.livePollIntervalMs = seconds * 1000L
+        save()
+    }
+
+    fun updateChannelGroupingMode(mode: ChannelGroupingMode) {
+        _settings.value = _settings.value.copy(channelGroupingMode = mode)
+        accountManager.updateGroupingMode(mode)
+        save()
+    }
+
     fun updateDebugLogging(enabled: Boolean) {
         _settings.value = _settings.value.copy(debugLoggingEnabled = enabled)
         DebugLogger.isEnabled = enabled
@@ -125,6 +141,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     val channels: StateFlow<List<Channel>> = accountManager.channels
+
+    fun reloadChannels() {
+        viewModelScope.launch {
+            accountManager.loadAllChannels()
+        }
+    }
 
     fun playStartupStream() {
         val streamId = _settings.value.startupStreamID ?: return

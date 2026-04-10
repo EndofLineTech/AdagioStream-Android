@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,8 +43,10 @@ fun MiniPlayerBar(
     trackMetadata: TrackMetadata? = null,
     espnGame: ESPNGameInfo? = null,
     artworkDisplayMode: ArtworkDisplayMode = ArtworkDisplayMode.COVER_ART,
+    isTimeShifted: Boolean = false,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
+    onSeekToLive: () -> Unit = {},
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -130,6 +133,17 @@ fun MiniPlayerBar(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+
+                if (isTimeShifted) {
+                    TextButton(
+                        onClick = onSeekToLive,
+                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Text("LIVE", style = MaterialTheme.typography.labelSmall)
                     }
                 }
 

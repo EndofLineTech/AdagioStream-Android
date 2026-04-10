@@ -216,6 +216,13 @@ fun NowPlayingSheet(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
+            if (playbackState is PlaybackState.Error) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(onClick = { viewModel.togglePlayPause() }) {
+                    Text("Retry")
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             Row(

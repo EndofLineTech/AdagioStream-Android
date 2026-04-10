@@ -43,6 +43,5 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.adagiostream.android
           releaseFiles: app/build/outputs/bundle/release/app-release.aab
-          debugSymbols: app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
           track: internal
           status: completed

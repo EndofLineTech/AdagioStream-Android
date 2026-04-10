@@ -12,4 +12,5 @@ data class Channel(
     val epgChannelID: String? = null,
     val isFavorite: Boolean = false,
     val xtreamStreamId: Long? = null,
+    val accountName: String? = null,
 )

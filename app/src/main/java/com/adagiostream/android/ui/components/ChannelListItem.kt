@@ -1,7 +1,8 @@
 package com.adagiostream.android.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.TrackMetadata
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChannelListItem(
     channel: Channel,
@@ -40,12 +42,13 @@ fun ChannelListItem(
     trackMetadata: TrackMetadata? = null,
     espnGame: ESPNGameInfo? = null,
     currentProgram: String? = null,
+    onLongClick: (() -> Unit)? = null,
     leadingContent: @Composable (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

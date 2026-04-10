@@ -54,6 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import com.adagiostream.android.BuildConfig
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
@@ -136,6 +137,31 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(start = 12.dp),
             )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ESPN Polling Interval
+        Text(
+            text = "ESPN Score Updates",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val espnOptions = listOf(5, 10, 15, 30)
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            espnOptions.forEachIndexed { index, seconds ->
+                SegmentedButton(
+                    selected = settings.espnPollingIntervalSeconds == seconds,
+                    onClick = { viewModel.updateEspnPollingInterval(seconds) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = espnOptions.size,
+                    ),
+                ) {
+                    Text(text = "${seconds}s")
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -238,6 +264,30 @@ fun SettingsScreen(
                     ),
                 ) {
                     Text(text = mode.displayName)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Channel Grouping Mode
+        Text(
+            text = "Channel Grouping",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            ChannelGroupingMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = settings.channelGroupingMode == mode,
+                    onClick = { viewModel.updateChannelGroupingMode(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = ChannelGroupingMode.entries.size,
+                    ),
+                ) {
+                    Text(text = mode.displayName, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -453,6 +503,15 @@ fun SettingsScreen(
                 StatRow("Channels", channelCount.toString())
                 StatRow("Favorites", favoritesCount.toString())
             }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = { viewModel.reloadChannels() },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Reload Channels")
         }
 
         Spacer(modifier = Modifier.height(24.dp))

@@ -38,6 +38,8 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.ui.components.ChannelListItem
 import com.adagiostream.android.ui.components.GroupHeader
 import com.adagiostream.android.ui.screens.epg.EPGBottomSheet
+import com.adagiostream.android.ui.screens.m3us.AddToPlaylistSheet
+import com.adagiostream.android.service.playlist.CustomPlaylistManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,8 +53,10 @@ fun ChannelsScreen(
     val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
     val espnGames by viewModel.espnGames.collectAsStateWithLifecycle()
     val epgEntries by viewModel.epgEntries.collectAsStateWithLifecycle()
+    val customPlaylists by viewModel.customPlaylists.collectAsStateWithLifecycle()
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
     var showEPGChannel by remember { mutableStateOf<Channel?>(null) }
+    var addToPlaylistChannel by remember { mutableStateOf<Channel?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -136,6 +140,7 @@ fun ChannelsScreen(
                                     trackMetadata = feedMetadata[channel.id],
                                     espnGame = espnGames[channel.id],
                                     currentProgram = epgProgram,
+                                    onLongClick = { addToPlaylistChannel = channel },
                                 )
                             }
                         }
@@ -156,6 +161,15 @@ fun ChannelsScreen(
             entries = epgEntries[channelEpgId] ?: emptyList(),
             channelName = epgChannel.name,
             onDismiss = { showEPGChannel = null },
+        )
+    }
+
+    addToPlaylistChannel?.let { channel ->
+        AddToPlaylistSheet(
+            channel = channel,
+            playlistManager = viewModel.playlistManager,
+            playlists = customPlaylists,
+            onDismiss = { addToPlaylistChannel = null },
         )
     }
 }

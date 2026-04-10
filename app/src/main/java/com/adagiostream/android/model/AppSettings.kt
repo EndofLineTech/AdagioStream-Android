@@ -16,6 +16,8 @@ data class AppSettings(
     val enabledGroups: Set<String>? = null,
     val favoriteGroupOrder: List<String> = emptyList(),
     val artworkDisplayMode: ArtworkDisplayMode = ArtworkDisplayMode.COVER_ART,
+    val espnPollingIntervalSeconds: Int = 15,
+    val channelGroupingMode: ChannelGroupingMode = ChannelGroupingMode.ALL_GROUPS,
 )
 
 @Serializable
@@ -37,6 +39,13 @@ enum class AppearanceMode {
     SYSTEM,
     LIGHT,
     DARK,
+}
+
+@Serializable
+enum class ChannelGroupingMode(val displayName: String) {
+    ALL_GROUPS("All Groups"),
+    BY_PROVIDER("By Provider"),
+    BY_SOURCE("By Source"),
 }
 
 @Serializable

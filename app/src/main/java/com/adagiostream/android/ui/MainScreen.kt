@@ -38,6 +38,8 @@ import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
 import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
 import com.adagiostream.android.ui.screens.licenses.LicensesScreen
 import com.adagiostream.android.ui.screens.loved.LovedTracksScreen
+import com.adagiostream.android.ui.screens.m3us.MyM3UsScreen
+import com.adagiostream.android.ui.screens.m3us.PlaylistDetailScreen
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingViewModel
 import com.adagiostream.android.ui.screens.settings.SettingsScreen
@@ -55,6 +57,7 @@ fun MainScreen(
     val listeningTimeMs by nowPlayingViewModel.listeningTimeMs.collectAsStateWithLifecycle()
     val trackMetadata by nowPlayingViewModel.currentTrackMetadata.collectAsStateWithLifecycle()
     val espnGame by nowPlayingViewModel.currentESPNGame.collectAsStateWithLifecycle()
+    val isTimeShifted by nowPlayingViewModel.isTimeShifted.collectAsStateWithLifecycle()
     val channels by settingsViewModel.channels.collectAsStateWithLifecycle()
     var showNowPlaying by remember { mutableStateOf(false) }
     var hasAttemptedStartupStream by remember { mutableStateOf(false) }
@@ -87,8 +90,10 @@ fun MainScreen(
                             trackMetadata = trackMetadata,
                             espnGame = espnGame,
                             artworkDisplayMode = settings.artworkDisplayMode,
+                            isTimeShifted = isTimeShifted,
                             onPlayPause = { nowPlayingViewModel.togglePlayPause() },
                             onStop = { nowPlayingViewModel.stop() },
+                            onSeekToLive = { nowPlayingViewModel.seekToLive() },
                             onClick = { showNowPlaying = true },
                         )
                     }
@@ -128,6 +133,23 @@ fun MainScreen(
                 }
                 composable(Screen.Loved.route) {
                     LovedTracksScreen()
+                }
+                composable(Screen.MyM3Us.route) {
+                    MyM3UsScreen(
+                        onPlaylistClick = { playlistId ->
+                            navController.navigate(Screen.PlaylistDetail.createRoute(playlistId))
+                        },
+                    )
+                }
+                composable(
+                    route = Screen.PlaylistDetail.route,
+                    arguments = listOf(
+                        navArgument("playlistId") { type = NavType.StringType },
+                    ),
+                ) {
+                    PlaylistDetailScreen(
+                        onBack = { navController.popBackStack() },
+                    )
                 }
                 composable(Screen.Accounts.route) {
                     AccountsScreen(
