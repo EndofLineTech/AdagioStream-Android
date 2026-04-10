@@ -40,6 +40,19 @@ bd create --title="Phase 2: Build" --type=epic --parent=<epic> --deps=<phase1>  
 
 For full workflow details: `bd prime`
 
+## "Ship It" — Version Bump & Release Tag
+
+When the user says **"ship it"**, execute this sequence immediately without asking:
+
+1. **Bump version** in `app/build.gradle.kts`:
+   - Increment `versionCode` by 1
+   - Update `versionName` to match (e.g. `"1.0(75)"`)
+2. **Commit** the version bump
+3. **Tag** the commit as `v1.0.<versionCode>` (e.g. `v1.0.75`)
+4. **Push** both the commit and the tag: `git push && git push origin <tag>`
+
+The tag triggers the CI/CD publish workflow. **Always bump versionCode before tagging** — Play Store rejects duplicate version codes.
+
 ## Building
 
 
