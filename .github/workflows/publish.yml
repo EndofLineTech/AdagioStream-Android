@@ -45,4 +45,4 @@ jobs:
           releaseFiles: app/build/outputs/bundle/release/app-release.aab
           debugSymbols: app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
           track: internal
-          status: draft
+          status: completed
