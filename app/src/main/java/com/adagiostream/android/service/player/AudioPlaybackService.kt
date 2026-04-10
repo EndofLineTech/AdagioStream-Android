@@ -33,6 +33,7 @@ import com.adagiostream.android.util.DebugLogger.Category.AUTO
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -254,6 +255,7 @@ class AudioPlaybackService : MediaLibraryService() {
             // Auto-play startup stream on Android Auto connect if nothing is playing
             if (vlcPlayerWrapper.currentChannel.value == null) {
                 serviceScope.launch {
+                    accountManager.awaitInitialLoad()
                     val settings = persistenceService.loadSettings()
                     val startupId = settings.startupStreamID
                     if (startupId != null) {
@@ -423,76 +425,82 @@ class AudioPlaybackService : MediaLibraryService() {
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             DebugLogger.log("onGetChildren() - parentId=$parentId, page=$page, pageSize=$pageSize, browser=${browser.packageName}", AUTO)
-            val groups = accountManager.groups.value
-            val channels = accountManager.channels.value
-            val favorites = channels.filter { it.isFavorite }
-            DebugLogger.log("onGetChildren() - ${groups.size} groups, ${channels.size} channels, ${favorites.size} favorites", AUTO)
 
-            if (parentId != ROOT_ID) {
-                lastBrowsedParentId = parentId
-            }
+            val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
+            serviceScope.launch {
+                // Wait for initial channel load so browse tree isn't empty
+                accountManager.awaitInitialLoad()
 
-            val lovedTracks = accountManager.lovedTracks.value
+                val groups = accountManager.groups.value
+                val channels = accountManager.channels.value
+                val favorites = channels.filter { it.isFavorite }
+                DebugLogger.log("onGetChildren() - ${groups.size} groups, ${channels.size} channels, ${favorites.size} favorites", AUTO)
 
-            val items: List<MediaItem> = when (parentId) {
-                ROOT_ID -> {
-                    val result = mutableListOf<MediaItem>()
-                    if (favorites.isNotEmpty()) {
-                        result.add(
-                            buildBrowsableItem(
-                                FAVORITES_ID,
-                                "Favorites",
-                                "${favorites.size} channels",
+                if (parentId != ROOT_ID) {
+                    lastBrowsedParentId = parentId
+                }
+
+                val lovedTracks = accountManager.lovedTracks.value
+
+                val items: List<MediaItem> = when (parentId) {
+                    ROOT_ID -> {
+                        val result = mutableListOf<MediaItem>()
+                        if (favorites.isNotEmpty()) {
+                            result.add(
+                                buildBrowsableItem(
+                                    FAVORITES_ID,
+                                    "Favorites",
+                                    "${favorites.size} channels",
+                                )
                             )
-                        )
-                    }
-                    if (lovedTracks.isNotEmpty()) {
-                        result.add(
-                            buildBrowsableItem(
-                                LOVED_SONGS_ID,
-                                "Loved Songs",
-                                "${lovedTracks.size} tracks",
+                        }
+                        if (lovedTracks.isNotEmpty()) {
+                            result.add(
+                                buildBrowsableItem(
+                                    LOVED_SONGS_ID,
+                                    "Loved Songs",
+                                    "${lovedTracks.size} tracks",
+                                )
                             )
-                        )
+                        }
+                        result.addAll(groups.map {
+                            buildBrowsableItem(
+                                it.name,
+                                it.name,
+                                "${it.channels.size} channels",
+                            )
+                        })
+                        result
                     }
-                    result.addAll(groups.map {
-                        buildBrowsableItem(
-                            it.name,
-                            it.name,
-                            "${it.channels.size} channels",
-                        )
-                    })
-                    result
+                    FAVORITES_ID -> favorites.map { buildPlayableItem(it) }
+                    LOVED_SONGS_ID -> lovedTracks.map { track ->
+                        MediaItem.Builder()
+                            .setMediaId("loved_${track.artist}_${track.title}")
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(track.title)
+                                    .setArtist(track.artist)
+                                    .setSubtitle("${track.artist} \u2013 ${track.channelName}")
+                                    .setIsPlayable(false)
+                                    .setIsBrowsable(false)
+                                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                    .apply { track.albumArtURL?.let { setArtworkUri(Uri.parse(it)) } }
+                                    .build()
+                            )
+                            .build()
+                    }
+                    else -> {
+                        groups.find { it.name == parentId }
+                            ?.channels
+                            ?.map { buildPlayableItem(it) }
+                            ?: emptyList()
+                    }
                 }
-                FAVORITES_ID -> favorites.map { buildPlayableItem(it) }
-                LOVED_SONGS_ID -> lovedTracks.map { track ->
-                    MediaItem.Builder()
-                        .setMediaId("loved_${track.artist}_${track.title}")
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(track.title)
-                                .setArtist(track.artist)
-                                .setSubtitle("${track.artist} \u2013 ${track.channelName}")
-                                .setIsPlayable(false)
-                                .setIsBrowsable(false)
-                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                                .apply { track.albumArtURL?.let { setArtworkUri(Uri.parse(it)) } }
-                                .build()
-                        )
-                        .build()
-                }
-                else -> {
-                    groups.find { it.name == parentId }
-                        ?.channels
-                        ?.map { buildPlayableItem(it) }
-                        ?: emptyList()
-                }
-            }
 
-            DebugLogger.log("onGetChildren() - returning ${items.size} items for parentId=$parentId", AUTO)
-            return Futures.immediateFuture(
-                LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
-            )
+                DebugLogger.log("onGetChildren() - returning ${items.size} items for parentId=$parentId", AUTO)
+                future.set(LibraryResult.ofItemList(ImmutableList.copyOf(items), params))
+            }
+            return future
         }
 
         override fun onSearch(

@@ -18,6 +18,7 @@ import com.adagiostream.android.service.parsing.XtreamCodesApi
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.UrlSanitizer
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -95,6 +96,11 @@ class AccountManager @Inject constructor(
 
     private var hasSxmChannels = false
 
+    private val _initialLoadComplete = CompletableDeferred<Unit>()
+
+    /** Suspends until the initial channel load from init has completed. */
+    suspend fun awaitInitialLoad() = _initialLoadComplete.await()
+
     init {
         scope.launch {
             val settings = persistenceService.loadSettings()
@@ -108,6 +114,7 @@ class AccountManager @Inject constructor(
             favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
             _lovedTracks.value = persistenceService.loadLovedTracks()
             loadAllChannels()
+            _initialLoadComplete.complete(Unit)
         }
     }
 
