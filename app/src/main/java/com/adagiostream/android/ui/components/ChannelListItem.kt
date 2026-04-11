@@ -99,13 +99,24 @@ fun ChannelListItem(
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             }
-            Text(
-                text = subtitleText,
-                style = MaterialTheme.typography.bodySmall,
-                color = subtitleColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (espnGame != null && espnGame.isMLBLive && trackMetadata == null) {
+                    BaseballDiamond(
+                        onFirst = espnGame.onFirst == true,
+                        onSecond = espnGame.onSecond == true,
+                        onThird = espnGame.onThird == true,
+                        size = 16.dp,
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                Text(
+                    text = subtitleText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = subtitleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         IconButton(onClick = onFavoriteToggle) {

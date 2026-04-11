@@ -43,6 +43,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.ui.components.BaseballDiamond
 import com.adagiostream.android.ui.components.RetryableAsyncImage
 import com.adagiostream.android.util.BitrateFormatter
 import com.adagiostream.android.util.rememberListeningTime
@@ -145,12 +146,27 @@ fun NowPlayingSheet(
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center,
                 )
-                Text(
-                    text = espnGame!!.nowPlayingSubtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (espnGame!!.isMLBLive) {
+                        BaseballDiamond(
+                            onFirst = espnGame!!.onFirst == true,
+                            onSecond = espnGame!!.onSecond == true,
+                            onThird = espnGame!!.onThird == true,
+                            size = 28.dp,
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+                    Text(
+                        text = espnGame!!.nowPlayingSubtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             } else if (trackMetadata == null && espnGame == null) {
                 val currentEPG = epgEntries.firstOrNull { it.isCurrentlyAiring }
                 if (currentEPG != null) {

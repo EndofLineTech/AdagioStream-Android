@@ -113,6 +113,11 @@ data class ESPNGameInfo(
     val period: Int?,                          // 1-4
     // MLB
     val outs: Int? = null,                     // 0-3 during live game
+    val balls: Int? = null,                    // 0-3
+    val strikes: Int? = null,                  // 0-2
+    val onFirst: Boolean? = null,
+    val onSecond: Boolean? = null,
+    val onThird: Boolean? = null,
     // NFL
     val possessionTeamAbbr: String? = null,    // "GB" — team with the ball
     val downDistanceText: String? = null,      // "1st & 10"
@@ -127,6 +132,8 @@ data class ESPNGameInfo(
                 entries.firstOrNull { it.apiValue == state } ?: PRE
         }
     }
+
+    val isMLBLive: Boolean get() = league == ESPNLeague.MLB && state == GameState.LIVE
 
     // MARK: - One-liner (channel row, mini player)
 
@@ -168,7 +175,7 @@ data class ESPNGameInfo(
 
     private val liveDetail: String
         get() = when (league) {
-            ESPNLeague.MLB -> "$statusDetail$outsText"
+            ESPNLeague.MLB -> "$statusDetail$countText$outsText$basesText"
             ESPNLeague.NBA, ESPNLeague.NHL -> {
                 val clock = displayClock ?: ""
                 val periodStr = period?.let { "${ordinal(it)} ${league.periodName}" } ?: ""
@@ -183,10 +190,26 @@ data class ESPNGameInfo(
             }
         }
 
+    private val countText: String
+        get() {
+            val b = balls ?: return ""
+            val s = strikes ?: return ""
+            return ", $b-$s"
+        }
+
     private val outsText: String
         get() {
             val o = outs ?: return ""
             return ", $o ${if (o == 1) "Out" else "Outs"}"
+        }
+
+    private val basesText: String
+        get() {
+            if (onFirst == null && onSecond == null && onThird == null) return ""
+            val b3 = if (onThird == true) "\u25C6" else "\u25C7"
+            val b2 = if (onSecond == true) "\u25C6" else "\u25C7"
+            val b1 = if (onFirst == true) "\u25C6" else "\u25C7"
+            return " $b3$b2$b1"
         }
 
     private fun recordText(record: String?): String =

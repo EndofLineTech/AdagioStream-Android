@@ -235,6 +235,11 @@ class ESPNScoreService(private val client: OkHttpClient) {
                 displayClock = comp.status.displayClock,
                 period = comp.status.period,
                 outs = comp.situation?.outs,
+                balls = comp.situation?.balls,
+                strikes = comp.situation?.strikes,
+                onFirst = comp.situation?.onFirst,
+                onSecond = comp.situation?.onSecond,
+                onThird = comp.situation?.onThird,
                 possessionTeamAbbr = possessionAbbr,
                 downDistanceText = comp.situation?.shortDownDistanceText
                     ?: comp.situation?.downDistanceText,

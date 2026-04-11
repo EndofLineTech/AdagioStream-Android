@@ -197,18 +197,27 @@ class VLCPlayerWrapper(
     private fun startBitratePolling() {
         bitrateJob?.cancel()
         bitrateJob = scope.launch {
+            var lastReadBytes: Long = -1L
+            var lastTimestamp: Long = 0L
             while (true) {
                 delay(5_000L)
                 val media = mediaPlayer.media ?: continue
                 val stats = media.stats ?: continue
-                // VLC reports bitrate in KB/s; convert to kbps (× 8)
-                val inputKbps = stats.inputBitrate * 8f
-                val demuxKbps = stats.demuxBitrate * 8f
-                val currentKbps = maxOf(inputKbps, demuxKbps)
-                if (currentKbps > peakBitrateKbps) {
-                    peakBitrateKbps = currentKbps
+                val now = System.currentTimeMillis()
+                val readBytes = stats.readBytes
+                if (lastReadBytes >= 0 && lastTimestamp > 0) {
+                    val elapsedMs = now - lastTimestamp
+                    if (elapsedMs > 0) {
+                        val bytesPerSec = (readBytes - lastReadBytes) * 1000f / elapsedMs
+                        val currentKbps = bytesPerSec * 8f / 1000f
+                        if (currentKbps > peakBitrateKbps) {
+                            peakBitrateKbps = currentKbps
+                        }
+                        _bitrateKbps.value = peakBitrateKbps
+                    }
                 }
-                _bitrateKbps.value = peakBitrateKbps
+                lastReadBytes = readBytes
+                lastTimestamp = now
             }
         }
     }
