@@ -375,24 +375,24 @@ class AudioPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
             DebugLogger.log("onPlaybackResumption() - from ${controller.packageName}", AUTO)
-            val lastPlayedId = kotlinx.coroutines.runBlocking {
-                persistenceService.loadLastPlayed()
+            val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            serviceScope.launch {
+                val lastPlayedId = persistenceService.loadLastPlayed()
+                DebugLogger.log("onPlaybackResumption() - lastPlayedId=$lastPlayedId", AUTO)
+                val channel = lastPlayedId?.let { id ->
+                    accountManager.channels.value.find { it.id == id }
+                }
+                if (channel != null) {
+                    DebugLogger.log("onPlaybackResumption() - resuming: ${channel.name}", AUTO)
+                    vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+                    vlcPlayerWrapper.play(channel)
+                } else {
+                    DebugLogger.log("onPlaybackResumption() - no channel found to resume", AUTO)
+                }
+                val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
+                future.set(MediaSession.MediaItemsWithStartPosition(items, 0, 0L))
             }
-            DebugLogger.log("onPlaybackResumption() - lastPlayedId=$lastPlayedId", AUTO)
-            val channel = lastPlayedId?.let { id ->
-                accountManager.channels.value.find { it.id == id }
-            }
-            if (channel != null) {
-                DebugLogger.log("onPlaybackResumption() - resuming: ${channel.name}", AUTO)
-                vlcPlayerWrapper.setChannelList(channelListForContext(channel))
-                vlcPlayerWrapper.play(channel)
-            } else {
-                DebugLogger.log("onPlaybackResumption() - no channel found to resume", AUTO)
-            }
-            val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
-            return Futures.immediateFuture(
-                MediaSession.MediaItemsWithStartPosition(items, 0, 0L)
-            )
+            return future
         }
 
         override fun onGetLibraryRoot(

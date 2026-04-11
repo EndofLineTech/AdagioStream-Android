@@ -118,6 +118,9 @@ class VLCSessionPlayer(
                     .addAll(
                         COMMAND_PLAY_PAUSE,
                         COMMAND_STOP,
+                        COMMAND_PREPARE,
+                        COMMAND_SET_MEDIA_ITEM,
+                        COMMAND_CHANGE_MEDIA_ITEMS,
                         COMMAND_SEEK_TO_NEXT,
                         COMMAND_SEEK_TO_PREVIOUS,
                         COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
