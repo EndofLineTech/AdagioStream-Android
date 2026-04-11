@@ -37,6 +37,7 @@ class VLCSessionPlayer(
     private var currentMediaItem: MediaItem? = null
     private var currentPlaybackState: Int = STATE_IDLE
     private var currentPlayWhenReady: Boolean = false
+    private var playbackStartTimeMs: Long = 0L
 
     init {
         DebugLogger.log("VLCSessionPlayer init", AUTO)
@@ -56,6 +57,13 @@ class VLCSessionPlayer(
                     is PlaybackState.Error -> STATE_IDLE
                 }
                 currentPlayWhenReady = state is PlaybackState.Playing || state is PlaybackState.Buffering || state is PlaybackState.CatchingUp
+
+                // Track when playback started so we can report stable elapsed time
+                if (currentPlaybackState == STATE_READY && prevState != STATE_READY) {
+                    playbackStartTimeMs = System.currentTimeMillis()
+                } else if (currentPlaybackState == STATE_IDLE) {
+                    playbackStartTimeMs = 0L
+                }
 
                 if (prevState != currentPlaybackState) {
                     DebugLogger.log("VLCSessionPlayer state: $state → media3State=$currentPlaybackState, playWhenReady=$currentPlayWhenReady", AUTO)
@@ -137,17 +145,56 @@ class VLCSessionPlayer(
         if (item != null) {
             val meta = item.mediaMetadata
             DebugLogger.log("getState() - mediaId=${item.mediaId}, title=${meta.title}, artist=${meta.artist}, station=${meta.station}, artworkUri=${meta.artworkUri}", AUTO)
-            builder.setPlaylist(listOf(SimpleBasePlayer.MediaItemData.Builder(item.mediaId.hashCode().toLong())
-                .setMediaItem(item)
-                .setMediaMetadata(item.mediaMetadata)
-                .setIsPlaceholder(false)
-                .setDefaultPositionUs(0)
-                .setDurationUs(androidx.media3.common.C.TIME_UNSET)
-                .setIsSeekable(false)
-                .setIsDynamic(true)
-                .build()))
-            builder.setCurrentMediaItemIndex(0)
-            builder.setContentPositionMs(androidx.media3.common.C.TIME_UNSET)
+
+            // Build playlist from channel list so Media3 exposes skip next/previous actions
+            val channels = vlcWrapper.channelList
+            val currentChannel = vlcWrapper.currentChannel.value
+            if (channels.size > 1 && currentChannel != null) {
+                val currentIndex = channels.indexOfFirst { it.id == currentChannel.id }.coerceAtLeast(0)
+                val playlistItems = channels.mapIndexed { index, ch ->
+                    val mediaItem = if (ch.id == currentChannel.id) item else {
+                        MediaItem.Builder()
+                            .setMediaId(ch.id)
+                            .setUri(ch.streamURL)
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(ch.name)
+                                    .setStation(ch.name)
+                                    .setArtist(ch.group)
+                                    .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                                    .setIsPlayable(true)
+                                    .build()
+                            )
+                            .build()
+                    }
+                    SimpleBasePlayer.MediaItemData.Builder(ch.id.hashCode().toLong())
+                        .setMediaItem(mediaItem)
+                        .setMediaMetadata(mediaItem.mediaMetadata)
+                        .setIsPlaceholder(index != currentIndex)
+                        .setDefaultPositionUs(0)
+                        .setDurationUs(androidx.media3.common.C.TIME_UNSET)
+                        .setIsSeekable(false)
+                        .setIsDynamic(true)
+                        .build()
+                }
+                builder.setPlaylist(playlistItems)
+                builder.setCurrentMediaItemIndex(currentIndex)
+            } else {
+                builder.setPlaylist(listOf(SimpleBasePlayer.MediaItemData.Builder(item.mediaId.hashCode().toLong())
+                    .setMediaItem(item)
+                    .setMediaMetadata(item.mediaMetadata)
+                    .setIsPlaceholder(false)
+                    .setDefaultPositionUs(0)
+                    .setDurationUs(androidx.media3.common.C.TIME_UNSET)
+                    .setIsSeekable(false)
+                    .setIsDynamic(true)
+                    .build()))
+                builder.setCurrentMediaItemIndex(0)
+            }
+
+            // Report stable elapsed time so the clock doesn't reset on every invalidateState()
+            val elapsedMs = if (playbackStartTimeMs > 0) System.currentTimeMillis() - playbackStartTimeMs else 0L
+            builder.setContentPositionMs(elapsedMs)
             builder.setIsLoading(currentPlaybackState == STATE_BUFFERING)
         } else {
             DebugLogger.log("getState() - no current media item, state=$currentPlaybackState", AUTO)
@@ -190,10 +237,24 @@ class VLCSessionPlayer(
         positionMs: Long,
         seekCommand: Int,
     ): ListenableFuture<*> {
-        DebugLogger.log("handleSeek() - index=$mediaItemIndex, command=$seekCommand", AUTO)
+        DebugLogger.log("handleSeek() - index=$mediaItemIndex, pos=$positionMs, command=$seekCommand, channelList=${vlcWrapper.channelList.size}", AUTO)
         when (seekCommand) {
-            COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> vlcWrapper.playNext()
-            COMMAND_SEEK_TO_PREVIOUS, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> vlcWrapper.playPrevious()
+            COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
+                DebugLogger.log("handleSeek() - skipping to next", AUTO)
+                vlcWrapper.playNext()
+            }
+            COMMAND_SEEK_TO_PREVIOUS, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
+                DebugLogger.log("handleSeek() - skipping to previous", AUTO)
+                vlcWrapper.playPrevious()
+            }
+            else -> {
+                // Media3 may send COMMAND_SEEK_TO_MEDIA_ITEM with a specific index
+                val channels = vlcWrapper.channelList
+                if (mediaItemIndex in channels.indices) {
+                    DebugLogger.log("handleSeek() - seeking to channel index $mediaItemIndex: ${channels[mediaItemIndex].name}", AUTO)
+                    vlcWrapper.play(channels[mediaItemIndex])
+                }
+            }
         }
         return Futures.immediateVoidFuture()
     }

@@ -128,11 +128,14 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
         }
 
-        // Persist last played channel
+        // Persist last played channel + start XM metadata polling for now-playing display
         serviceScope.launch {
             vlcPlayerWrapper.currentChannel.collect { channel ->
                 if (channel != null) {
                     persistenceService.saveLastPlayed(channel.id)
+                    accountManager.startTrackMetadataPolling(channel)
+                } else {
+                    accountManager.stopTrackMetadataPolling()
                 }
             }
         }
@@ -343,31 +346,37 @@ class AudioPlaybackService : MediaLibraryService() {
         ): ListenableFuture<List<MediaItem>> {
             DebugLogger.log("onAddMediaItems() - ${mediaItems.size} item(s) from ${controller.packageName}", AUTO)
             mediaItems.forEach { DebugLogger.log("  mediaId=${it.mediaId}, uri=${it.localConfiguration?.uri}", AUTO) }
-            val resolved = mediaItems.map { item ->
-                val channel = accountManager.channels.value.find { it.id == item.mediaId }
-                if (channel != null) {
-                    DebugLogger.log("  Resolved channel: ${channel.name} (group=${channel.group})", AUTO)
-                    vlcPlayerWrapper.setChannelList(channelListForContext(channel))
-                    vlcPlayerWrapper.play(channel)
-                    item.buildUpon()
-                        .setUri(channel.streamURL)
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(channel.name)
-                                .setStation(channel.name)
-                                .setArtist(channel.group)
-                                .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
-                                .setIsPlayable(true)
-                                .apply { channel.logoURL?.let { setArtworkUri(Uri.parse(it)) } }
-                                .build()
-                        )
-                        .build()
-                } else {
-                    DebugLogger.log("  WARN: No channel found for mediaId=${item.mediaId}", AUTO)
-                    item
+            val future = SettableFuture.create<List<MediaItem>>()
+            serviceScope.launch {
+                // Wait for channels to load before resolving media items
+                accountManager.awaitInitialLoad()
+                val resolved = mediaItems.map { item ->
+                    val channel = accountManager.channels.value.find { it.id == item.mediaId }
+                    if (channel != null) {
+                        DebugLogger.log("  Resolved channel: ${channel.name} (group=${channel.group})", AUTO)
+                        vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+                        vlcPlayerWrapper.play(channel)
+                        item.buildUpon()
+                            .setUri(channel.streamURL)
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(channel.name)
+                                    .setStation(channel.name)
+                                    .setArtist(channel.group)
+                                    .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                                    .setIsPlayable(true)
+                                    .apply { channel.logoURL?.let { setArtworkUri(Uri.parse(it)) } }
+                                    .build()
+                            )
+                            .build()
+                    } else {
+                        DebugLogger.log("  WARN: No channel found for mediaId=${item.mediaId}", AUTO)
+                        item
+                    }
                 }
+                future.set(resolved)
             }
-            return Futures.immediateFuture(resolved)
+            return future
         }
 
         override fun onPlaybackResumption(

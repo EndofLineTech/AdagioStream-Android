@@ -41,7 +41,8 @@ class VLCPlayerWrapper(
     private val _streamStartedAt = kotlinx.coroutines.flow.MutableStateFlow<Long?>(null)
     val streamStartedAt: kotlinx.coroutines.flow.StateFlow<Long?> = _streamStartedAt
 
-    private var channelList: List<Channel> = emptyList()
+    var channelList: List<Channel> = emptyList()
+        private set
 
     var bufferDurationSeconds: Int = initialBufferSeconds
         private set
@@ -331,9 +332,12 @@ class VLCPlayerWrapper(
         hasReceivedPlayingEvent = false
         retryJob?.cancel()
 
+        // Debounce rapid channel switches (e.g. repeated next/prev presses)
+        val isAlreadyPlaying = _currentChannel.value != null
         val timeSinceTeardown = System.currentTimeMillis() - lastTeardownTime
-        if (lastTeardownTime > 0 && timeSinceTeardown < DEBOUNCE_WINDOW_MS) {
-            DebugLogger.log("Debouncing play (${timeSinceTeardown}ms since last teardown)", DebugLogger.Category.PLAYER)
+        val shouldDebounce = isAlreadyPlaying || (lastTeardownTime > 0 && timeSinceTeardown < DEBOUNCE_WINDOW_MS)
+        if (shouldDebounce) {
+            DebugLogger.log("Debouncing play for ${channel.name} (alreadyPlaying=$isAlreadyPlaying, timeSinceTeardown=${timeSinceTeardown}ms)", DebugLogger.Category.PLAYER)
             _currentChannel.value = channel
             _playbackState.value = PlaybackState.Buffering
             pendingPlayJob = scope.launch {
@@ -457,7 +461,8 @@ class VLCPlayerWrapper(
 
     fun playNext() {
         val current = _currentChannel.value ?: return
-        val index = channelList.indexOfFirst { it.streamURL == current.streamURL }
+        val index = channelList.indexOfFirst { it.id == current.id }
+        DebugLogger.log("playNext(): current=${current.name}, index=$index, listSize=${channelList.size}", DebugLogger.Category.PLAYER)
         if (index >= 0 && index < channelList.size - 1) {
             play(channelList[index + 1])
         }
@@ -465,7 +470,8 @@ class VLCPlayerWrapper(
 
     fun playPrevious() {
         val current = _currentChannel.value ?: return
-        val index = channelList.indexOfFirst { it.streamURL == current.streamURL }
+        val index = channelList.indexOfFirst { it.id == current.id }
+        DebugLogger.log("playPrevious(): current=${current.name}, index=$index, listSize=${channelList.size}", DebugLogger.Category.PLAYER)
         if (index > 0) {
             play(channelList[index - 1])
         }
