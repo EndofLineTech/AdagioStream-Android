@@ -140,8 +140,15 @@ class VLCSessionPlayer(
             builder.setPlaylist(listOf(SimpleBasePlayer.MediaItemData.Builder(item.mediaId.hashCode().toLong())
                 .setMediaItem(item)
                 .setMediaMetadata(item.mediaMetadata)
+                .setIsPlaceholder(false)
+                .setDefaultPositionUs(0)
+                .setDurationUs(androidx.media3.common.C.TIME_UNSET)
+                .setIsSeekable(false)
+                .setIsDynamic(true)
                 .build()))
             builder.setCurrentMediaItemIndex(0)
+            builder.setContentPositionMs(androidx.media3.common.C.TIME_UNSET)
+            builder.setIsLoading(currentPlaybackState == STATE_BUFFERING)
         } else {
             DebugLogger.log("getState() - no current media item, state=$currentPlaybackState", AUTO)
         }
