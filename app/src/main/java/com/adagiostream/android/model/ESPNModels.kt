@@ -165,9 +165,9 @@ data class ESPNGameInfo(
     private val scoreLine: String
         get() = when (league) {
             ESPNLeague.NFL -> {
-                // Arrow points at team with possession
-                val awayPoss = if (possessionTeamAbbr == awayAbbr) "\u25B6 " else ""
-                val homePoss = if (possessionTeamAbbr == homeAbbr) "\u25B6 " else ""
+                // Football emoji next to team with possession
+                val awayPoss = if (possessionTeamAbbr == awayAbbr) "\uD83C\uDFC8 " else ""
+                val homePoss = if (possessionTeamAbbr == homeAbbr) "\uD83C\uDFC8 " else ""
                 "${awayPoss}${awayAbbr} $awayScore - ${homePoss}${homeAbbr} $homeScore"
             }
             else -> "$awayAbbr $awayScore - $homeAbbr $homeScore"
