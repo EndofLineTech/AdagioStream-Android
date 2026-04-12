@@ -64,9 +64,12 @@ class M3UParser(private val client: OkHttpClient) {
         val tvgLogo = extractAttribute(line, "tvg-logo")
         val groupTitle = extractAttribute(line, "group-title") ?: "Uncategorized"
 
+        val channelName = tvgName?.ifBlank { null } ?: name
+        val stableId = tvgId?.ifBlank { null }
+            ?: UUID.nameUUIDFromBytes("$channelName|$streamUrl".toByteArray()).toString()
         return Channel(
-            id = UUID.randomUUID().toString(),
-            name = tvgName?.ifBlank { null } ?: name,
+            id = stableId,
+            name = channelName,
             streamURL = streamUrl,
             logoURL = tvgLogo?.ifBlank { null },
             group = groupTitle.ifBlank { "Uncategorized" },

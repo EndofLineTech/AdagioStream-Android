@@ -145,17 +145,35 @@ class VLCSessionPlayer(
             .setPlaybackState(currentPlaybackState)
 
         val item = currentMediaItem
-        if (item != null) {
-            val meta = item.mediaMetadata
-            DebugLogger.log("getState() - mediaId=${item.mediaId}, title=${meta.title}, artist=${meta.artist}, station=${meta.station}, artworkUri=${meta.artworkUri}", AUTO)
+        val currentChannel = vlcWrapper.currentChannel.value
+        if (item != null && currentChannel != null) {
+            // If currentMediaItem is stale (e.g. combine flow hasn't caught up), use the
+            // actual current channel for the active slot so AA never shows wrong metadata.
+            val activeItem = if (item.mediaId == currentChannel.id) item else {
+                MediaItem.Builder()
+                    .setMediaId(currentChannel.id)
+                    .setUri(currentChannel.streamURL)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(currentChannel.name)
+                            .setStation(currentChannel.name)
+                            .setArtist(currentChannel.group)
+                            .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                            .setIsPlayable(true)
+                            .apply { currentChannel.logoURL?.let { setArtworkUri(android.net.Uri.parse(it)) } }
+                            .build()
+                    )
+                    .build()
+            }
+            val meta = activeItem.mediaMetadata
+            DebugLogger.log("getState() - mediaId=${activeItem.mediaId}, title=${meta.title}, artist=${meta.artist}, station=${meta.station}, artworkUri=${meta.artworkUri}", AUTO)
 
             // Build playlist from channel list so Media3 exposes skip next/previous actions
             val channels = vlcWrapper.channelList
-            val currentChannel = vlcWrapper.currentChannel.value
-            if (channels.size > 1 && currentChannel != null) {
+            if (channels.size > 1) {
                 val currentIndex = channels.indexOfFirst { it.id == currentChannel.id }.coerceAtLeast(0)
                 val playlistItems = channels.mapIndexed { index, ch ->
-                    val mediaItem = if (ch.id == currentChannel.id) item else {
+                    val mediaItem = if (ch.id == currentChannel.id) activeItem else {
                         MediaItem.Builder()
                             .setMediaId(ch.id)
                             .setUri(ch.streamURL)
@@ -183,9 +201,9 @@ class VLCSessionPlayer(
                 builder.setPlaylist(playlistItems)
                 builder.setCurrentMediaItemIndex(currentIndex)
             } else {
-                builder.setPlaylist(listOf(SimpleBasePlayer.MediaItemData.Builder(item.mediaId.hashCode().toLong())
-                    .setMediaItem(item)
-                    .setMediaMetadata(item.mediaMetadata)
+                builder.setPlaylist(listOf(SimpleBasePlayer.MediaItemData.Builder(activeItem.mediaId.hashCode().toLong())
+                    .setMediaItem(activeItem)
+                    .setMediaMetadata(activeItem.mediaMetadata)
                     .setIsPlaceholder(false)
                     .setDefaultPositionUs(0)
                     .setDurationUs(androidx.media3.common.C.TIME_UNSET)

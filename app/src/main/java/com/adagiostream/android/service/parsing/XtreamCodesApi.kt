@@ -52,7 +52,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
                 val streamUrl = "$baseUrl/live/${config.username}/${config.password}/${stream.streamId}.$ext"
 
                 Channel(
-                    id = UUID.randomUUID().toString(),
+                    id = stream.streamId.toString(),
                     name = stream.name,
                     streamURL = streamUrl,
                     logoURL = stream.streamIcon?.ifBlank { null },

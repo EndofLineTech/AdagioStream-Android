@@ -352,6 +352,10 @@ class AudioPlaybackService : MediaLibraryService() {
                 accountManager.awaitInitialLoad()
                 val resolved = mediaItems.map { item ->
                     val channel = accountManager.channels.value.find { it.id == item.mediaId }
+                        // Fallback: match by name if UUID is stale (e.g. AA cached old browse tree)
+                        ?: item.mediaMetadata.title?.let { title ->
+                            accountManager.channels.value.find { it.name == title.toString() }
+                        }
                     if (channel != null) {
                         DebugLogger.log("  Resolved channel: ${channel.name} (group=${channel.group})", AUTO)
                         vlcPlayerWrapper.setChannelList(channelListForContext(channel))
