@@ -150,6 +150,7 @@ class VLCSessionPlayer(
             // If currentMediaItem is stale (e.g. combine flow hasn't caught up), use the
             // actual current channel for the active slot so AA never shows wrong metadata.
             val activeItem = if (item.mediaId == currentChannel.id) item else {
+                DebugLogger.log("getState() - STALE currentMediaItem: item.mediaId=${item.mediaId} vs currentChannel.id=${currentChannel.id} (${currentChannel.name}), rebuilding", AUTO)
                 MediaItem.Builder()
                     .setMediaId(currentChannel.id)
                     .setUri(currentChannel.streamURL)

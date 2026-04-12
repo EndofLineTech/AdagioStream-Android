@@ -222,7 +222,7 @@ class AudioPlaybackService : MediaLibraryService() {
 
     private fun channelListForContext(channel: Channel): List<Channel> {
         val channels = accountManager.channels.value
-        return when (lastBrowsedParentId) {
+        val result = when (lastBrowsedParentId) {
             FAVORITES_ID -> channels.filter { it.isFavorite }
             null -> channels.filter { it.group == channel.group }
             else -> accountManager.groups.value
@@ -230,6 +230,8 @@ class AudioPlaybackService : MediaLibraryService() {
                 ?.channels
                 ?: channels.filter { it.group == channel.group }
         }
+        DebugLogger.log("channelListForContext() - lastBrowsedParentId=$lastBrowsedParentId, channel=${channel.name}, resultSize=${result.size}", AUTO)
+        return result
     }
 
     private fun createNotificationChannel() {
@@ -345,17 +347,26 @@ class AudioPlaybackService : MediaLibraryService() {
             mediaItems: List<MediaItem>,
         ): ListenableFuture<List<MediaItem>> {
             DebugLogger.log("onAddMediaItems() - ${mediaItems.size} item(s) from ${controller.packageName}", AUTO)
-            mediaItems.forEach { DebugLogger.log("  mediaId=${it.mediaId}, uri=${it.localConfiguration?.uri}", AUTO) }
+            mediaItems.forEach { DebugLogger.log("  mediaId=${it.mediaId}, title=${it.mediaMetadata.title}, uri=${it.localConfiguration?.uri}", AUTO) }
             val future = SettableFuture.create<List<MediaItem>>()
             serviceScope.launch {
                 // Wait for channels to load before resolving media items
                 accountManager.awaitInitialLoad()
+                val allChannels = accountManager.channels.value
+                DebugLogger.log("  Channel pool: ${allChannels.size} channels loaded", AUTO)
                 val resolved = mediaItems.map { item ->
-                    val channel = accountManager.channels.value.find { it.id == item.mediaId }
-                        // Fallback: match by name if UUID is stale (e.g. AA cached old browse tree)
-                        ?: item.mediaMetadata.title?.let { title ->
-                            accountManager.channels.value.find { it.name == title.toString() }
+                    val byId = allChannels.find { it.id == item.mediaId }
+                    val byName = if (byId == null) {
+                        item.mediaMetadata.title?.let { title ->
+                            allChannels.find { it.name == title.toString() }
                         }
+                    } else null
+                    val channel = byId ?: byName
+                    if (byId != null) {
+                        DebugLogger.log("  Matched by ID: ${channel!!.name} (id=${channel.id})", AUTO)
+                    } else if (byName != null) {
+                        DebugLogger.log("  Matched by NAME fallback: ${channel!!.name} (id=${channel.id}, requestedId=${item.mediaId})", AUTO)
+                    }
                     if (channel != null) {
                         DebugLogger.log("  Resolved channel: ${channel.name} (group=${channel.group})", AUTO)
                         vlcPlayerWrapper.setChannelList(channelListForContext(channel))
@@ -487,7 +498,10 @@ class AudioPlaybackService : MediaLibraryService() {
                         })
                         result
                     }
-                    FAVORITES_ID -> favorites.map { buildPlayableItem(it) }
+                    FAVORITES_ID -> {
+                        favorites.forEach { DebugLogger.log("  Favorite: id=${it.id}, name=${it.name}", AUTO) }
+                        favorites.map { buildPlayableItem(it) }
+                    }
                     LOVED_SONGS_ID -> lovedTracks.map { track ->
                         MediaItem.Builder()
                             .setMediaId("loved_${track.artist}_${track.title}")
