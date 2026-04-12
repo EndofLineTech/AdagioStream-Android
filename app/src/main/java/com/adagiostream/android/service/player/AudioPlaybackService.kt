@@ -356,13 +356,15 @@ class AudioPlaybackService : MediaLibraryService() {
                         DebugLogger.log("  Resolved channel: ${channel.name} (group=${channel.group})", AUTO)
                         vlcPlayerWrapper.setChannelList(channelListForContext(channel))
                         vlcPlayerWrapper.play(channel)
+                        val subtitle = channelSubtitle(channel)
                         item.buildUpon()
                             .setUri(channel.streamURL)
                             .setMediaMetadata(
                                 MediaMetadata.Builder()
                                     .setTitle(channel.name)
                                     .setStation(channel.name)
-                                    .setArtist(channel.group)
+                                    .setArtist(subtitle)
+                                    .setSubtitle(subtitle)
                                     .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
                                     .setIsPlayable(true)
                                     .apply { channel.logoURL?.let { setArtworkUri(Uri.parse(it)) } }

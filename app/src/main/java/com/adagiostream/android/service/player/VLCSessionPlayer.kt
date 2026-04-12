@@ -17,6 +17,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
@@ -41,12 +42,14 @@ class VLCSessionPlayer(
 
     init {
         DebugLogger.log("VLCSessionPlayer init", AUTO)
-        // Observe VLC state changes and invalidate SimpleBasePlayer state
+        // Observe VLC state changes + metadata updates and invalidate SimpleBasePlayer state
         scope.launch {
             combine(
                 vlcWrapper.playbackState,
                 vlcWrapper.currentChannel,
-            ) { state, channel -> state to channel }.collect { (state, channel) ->
+                accountManager?.trackMetadata ?: MutableStateFlow(emptyMap()),
+                espnScoreService?.gamesByChannel ?: MutableStateFlow(emptyMap()),
+            ) { state, channel, _, _ -> state to channel }.collect { (state, channel) ->
                 val prevState = currentPlaybackState
                 currentPlaybackState = when (state) {
                     is PlaybackState.Idle -> STATE_IDLE
