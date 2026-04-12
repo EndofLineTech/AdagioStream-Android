@@ -93,15 +93,13 @@ class AudioPlaybackService : MediaLibraryService() {
                 .debounce(500L)
                 .distinctUntilChanged()
                 .collect { (totalGroups, channelCount, favCount) ->
-                    val rootChildCount = totalGroups + if (favCount > 0) 1 else 0
+                    val rootChildCount = totalGroups + 1  // +1 for Favorites (always shown)
                     val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
                     DebugLogger.log("Browse tree data changed: $totalGroups groups, $channelCount channels, $favCount favorites, notifying ${controllers.size} controller(s)", AUTO)
                     controllers.forEach { controller ->
                         DebugLogger.log("  Notifying controller: pkg=${controller.packageName}, rootChildCount=$rootChildCount, favCount=$favCount", AUTO)
                         mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, rootChildCount, null)
-                        if (favCount > 0) {
-                            mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, favCount, null)
-                        }
+                        mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, favCount, null)
                     }
                 }
         }
@@ -514,15 +512,13 @@ class AudioPlaybackService : MediaLibraryService() {
                 val items: List<MediaItem> = when (parentId) {
                     ROOT_ID -> {
                         val result = mutableListOf<MediaItem>()
-                        if (favorites.isNotEmpty()) {
-                            result.add(
-                                buildBrowsableItem(
-                                    FAVORITES_ID,
-                                    "Favorites",
-                                    "${favorites.size} channels",
-                                )
+                        result.add(
+                            buildBrowsableItem(
+                                FAVORITES_ID,
+                                "Favorites",
+                                if (favorites.isNotEmpty()) "${favorites.size} channels" else "No favorites yet",
                             )
-                        }
+                        )
                         if (lovedTracks.isNotEmpty()) {
                             result.add(
                                 buildBrowsableItem(
