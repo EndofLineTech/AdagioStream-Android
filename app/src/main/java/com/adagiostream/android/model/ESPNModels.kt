@@ -1,5 +1,10 @@
 package com.adagiostream.android.model
 
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -13,6 +18,7 @@ data class ESPNScoreboardResponse(
 @Serializable
 data class ESPNEvent(
     val id: String,
+    val date: String = "",                    // ISO-8601: "2024-03-30T17:05Z"
     val shortName: String = "",               // "MIN @ BOS"
     val competitions: List<ESPNCompetition> = emptyList(),
 ) {
@@ -121,6 +127,8 @@ data class ESPNGameInfo(
     // NFL
     val possessionTeamAbbr: String? = null,    // "GB" — team with the ball
     val downDistanceText: String? = null,      // "1st & 10"
+    // Game date (parsed from ISO-8601 event date)
+    val gameDate: Date? = null,
 ) {
     enum class GameState(val apiValue: String) {
         PRE("pre"),
@@ -135,11 +143,33 @@ data class ESPNGameInfo(
 
     val isMLBLive: Boolean get() = league == ESPNLeague.MLB && state == GameState.LIVE
 
+    /**
+     * Formats the game start time in the user's local timezone.
+     * Shows "Today, 1:05 PM" or "3/30, 1:05 PM" depending on the date.
+     * Falls back to statusDetail if gameDate was not parsed.
+     */
+    private val localStartTime: String
+        get() {
+            val date = gameDate ?: return statusDetail
+            return if (Calendar.getInstance().let { cal ->
+                    val now = cal.time
+                    cal.time = date
+                    val gameDay = cal.get(Calendar.DAY_OF_YEAR)
+                    val gameYear = cal.get(Calendar.YEAR)
+                    cal.time = now
+                    gameDay == cal.get(Calendar.DAY_OF_YEAR) && gameYear == cal.get(Calendar.YEAR)
+                }) {
+                "Today, ${timeFormatter.format(date)}"
+            } else {
+                dateTimeFormatter.format(date)
+            }
+        }
+
     // MARK: - One-liner (channel row, mini player)
 
     val displayText: String
         get() = when (state) {
-            GameState.PRE -> "${awayAbbr}${recordText(awayRecord)} @ ${homeAbbr}${recordText(homeRecord)} · $statusDetail"
+            GameState.PRE -> "${awayAbbr}${recordText(awayRecord)} @ ${homeAbbr}${recordText(homeRecord)} · $localStartTime"
             GameState.LIVE -> "$scoreLine · $liveDetail"
             GameState.POST -> "$scoreLine · $statusDetail"
         }
@@ -157,7 +187,8 @@ data class ESPNGameInfo(
     val nowPlayingSubtitle: String
         get() = when (state) {
             GameState.LIVE -> liveDetail
-            GameState.PRE, GameState.POST -> statusDetail
+            GameState.PRE -> localStartTime
+            GameState.POST -> statusDetail
         }
 
     // MARK: - Private Formatting
@@ -220,5 +251,22 @@ data class ESPNGameInfo(
         2 -> "2nd"
         3 -> "3rd"
         else -> "${n}th"
+    }
+
+    companion object {
+        /** Parses ESPN's ISO-8601 event date (e.g. "2024-03-30T17:05Z") */
+        fun parseESPNDate(dateString: String): Date? {
+            if (dateString.isBlank()) return null
+            return try {
+                val formatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'", Locale.US)
+                formatter.timeZone = TimeZone.getTimeZone("UTC")
+                formatter.parse(dateString)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private val timeFormatter = SimpleDateFormat("h:mm a", Locale.US)
+        private val dateTimeFormatter = SimpleDateFormat("M/d, h:mm a", Locale.US)
     }
 }

@@ -243,6 +243,7 @@ class ESPNScoreService(private val client: OkHttpClient) {
                 possessionTeamAbbr = possessionAbbr,
                 downDistanceText = comp.situation?.shortDownDistanceText
                     ?: comp.situation?.downDistanceText,
+                gameDate = ESPNGameInfo.parseESPNDate(event.date),
             )
 
             // Match home team

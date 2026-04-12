@@ -225,10 +225,20 @@ class AudioPlaybackService : MediaLibraryService() {
         val result = when (lastBrowsedParentId) {
             FAVORITES_ID -> channels.filter { it.isFavorite }
             null -> channels.filter { it.group == channel.group }
-            else -> accountManager.groups.value
-                .find { it.name == lastBrowsedParentId }
-                ?.channels
-                ?: channels.filter { it.group == channel.group }
+            else -> {
+                val browseGroup = accountManager.groups.value
+                    .find { it.name == lastBrowsedParentId }
+                // Only use the browse group if the channel is actually in it;
+                // AA pre-fetches multiple groups in parallel, overwriting
+                // lastBrowsedParentId even when the user tapped from favorites.
+                if (browseGroup != null && browseGroup.channels.any { it.id == channel.id }) {
+                    browseGroup.channels
+                } else if (channel.isFavorite) {
+                    channels.filter { it.isFavorite }
+                } else {
+                    channels.filter { it.group == channel.group }
+                }
+            }
         }
         DebugLogger.log("channelListForContext() - lastBrowsedParentId=$lastBrowsedParentId, channel=${channel.name}, resultSize=${result.size}", AUTO)
         return result
