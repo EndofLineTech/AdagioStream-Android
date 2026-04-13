@@ -59,6 +59,7 @@ class AudioPlaybackService : MediaLibraryService() {
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastBrowsedParentId: String? = null
+    private var customButtonJob: kotlinx.coroutines.Job? = null
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
@@ -181,6 +182,45 @@ class AudioPlaybackService : MediaLibraryService() {
         mediaLibrarySession = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
             .build()
         DebugLogger.log("buildSession() - session created: token=${mediaLibrarySession?.token}", AUTO)
+
+        // Reactively update custom button icons when favorite/loved state changes
+        customButtonJob?.cancel()
+        customButtonJob = serviceScope.launch {
+            combine(
+                vlcPlayerWrapper.currentChannel,
+                accountManager.channels,
+                accountManager.trackMetadata,
+                accountManager.lovedTracks,
+            ) { current, channels, trackMeta, lovedTracks ->
+                val isFav = current != null && channels.find { it.id == current.id }?.isFavorite == true
+                val track = current?.let { trackMeta[it.name] }
+                val isLoved = track != null && lovedTracks.any { it.artist == track.artist && it.title == track.title }
+                isFav to isLoved
+            }
+                .distinctUntilChanged()
+                .collect { (isFav, isLoved) ->
+                    val buttons = buildCustomButtons(isFav, isLoved)
+                    mediaLibrarySession?.connectedControllers?.forEach { controller ->
+                        mediaLibrarySession?.setCustomLayout(controller, buttons)
+                    }
+                }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun buildCustomButtons(isFavorite: Boolean, isLoved: Boolean): List<CommandButton> {
+        return listOf(
+            CommandButton.Builder()
+                .setDisplayName("Favorite")
+                .setIconResId(if (isFavorite) R.drawable.ic_star else R.drawable.ic_star_outline)
+                .setSessionCommand(TOGGLE_FAVORITE_COMMAND)
+                .build(),
+            CommandButton.Builder()
+                .setDisplayName("Love Track")
+                .setIconResId(if (isLoved) R.drawable.ic_heart else R.drawable.ic_heart_outline)
+                .setSessionCommand(TOGGLE_LOVED_TRACK_COMMAND)
+                .build(),
+        )
     }
 
     @OptIn(UnstableApi::class)
@@ -315,18 +355,11 @@ class AudioPlaybackService : MediaLibraryService() {
                 .add(SEEK_TO_LIVE_COMMAND)
                 .add(TOGGLE_LOVED_TRACK_COMMAND)
                 .build()
-            val customButtons = listOf(
-                CommandButton.Builder()
-                    .setDisplayName("Favorite")
-                    .setIconResId(R.drawable.ic_star)
-                    .setSessionCommand(TOGGLE_FAVORITE_COMMAND)
-                    .build(),
-                CommandButton.Builder()
-                    .setDisplayName("Love Track")
-                    .setIconResId(R.drawable.ic_heart)
-                    .setSessionCommand(TOGGLE_LOVED_TRACK_COMMAND)
-                    .build(),
-            )
+            val channel = vlcPlayerWrapper.currentChannel.value
+            val isFav = channel != null && accountManager.channels.value.find { it.id == channel.id }?.isFavorite == true
+            val track = channel?.let { accountManager.trackMetadata.value[it.name] }
+            val isLoved = track != null && accountManager.lovedTracks.value.any { it.artist == track.artist && it.title == track.title }
+            val customButtons = buildCustomButtons(isFav, isLoved)
             DebugLogger.log("onConnect() - accepting connection with custom commands: TOGGLE_FAVORITE, SEEK_TO_LIVE, TOGGLE_LOVED_TRACK", AUTO)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
