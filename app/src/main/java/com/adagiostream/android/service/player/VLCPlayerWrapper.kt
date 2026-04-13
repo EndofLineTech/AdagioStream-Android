@@ -338,10 +338,9 @@ class VLCPlayerWrapper(
         val shouldDebounce = isAlreadyPlaying || (lastTeardownTime > 0 && timeSinceTeardown < DEBOUNCE_WINDOW_MS)
         if (shouldDebounce) {
             DebugLogger.log("Debouncing play for ${channel.name} (alreadyPlaying=$isAlreadyPlaying, timeSinceTeardown=${timeSinceTeardown}ms)", DebugLogger.Category.PLAYER)
-            // Stop the old stream immediately so stale VLC events are ignored
-            // during the debounce window (isSwitchingChannels gates the event handler)
+            // Guard against stale VLC events during the debounce window —
+            // doPlay() will handle the actual stop when the delay expires.
             isSwitchingChannels = true
-            mediaPlayer.stop()
             _currentChannel.value = channel
             _playbackState.value = PlaybackState.Buffering
             pendingPlayJob = scope.launch {
