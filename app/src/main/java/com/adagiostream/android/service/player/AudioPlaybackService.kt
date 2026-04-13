@@ -552,15 +552,8 @@ class AudioPlaybackService : MediaLibraryService() {
                                 if (favorites.isNotEmpty()) "${favorites.size} channels" else "No favorites yet",
                             )
                         )
-                        if (lovedTracks.isNotEmpty()) {
-                            result.add(
-                                buildBrowsableItem(
-                                    LOVED_SONGS_ID,
-                                    "Loved Songs",
-                                    "${lovedTracks.size} tracks",
-                                )
-                            )
-                        }
+                        // Loved Songs intentionally excluded from AA browse tree —
+                        // it's a reference list, not playable channels.
                         // Custom playlists
                         val playlists = customPlaylistManager.playlists.value
                         playlists.forEach { playlist ->
