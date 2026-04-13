@@ -40,6 +40,13 @@ class VLCSessionPlayer(
     private var currentPlayWhenReady: Boolean = false
     private var playbackStartTimeMs: Long = 0L
 
+    // Channel announcement: briefly show channel name on switch before showing track info
+    private var announcingChannelId: String? = null
+    private var announceJob: kotlinx.coroutines.Job? = null
+    private companion object {
+        const val CHANNEL_ANNOUNCE_MS = 2000L
+    }
+
     init {
         DebugLogger.log("VLCSessionPlayer init", AUTO)
         // Observe VLC state changes + metadata updates and invalidate SimpleBasePlayer state
@@ -73,6 +80,18 @@ class VLCSessionPlayer(
                 }
 
                 if (channel != null) {
+                    // Detect channel switch → announce channel name briefly
+                    val prevChannelId = currentMediaItem?.mediaId
+                    if (prevChannelId != null && prevChannelId != channel.id) {
+                        announcingChannelId = channel.id
+                        announceJob?.cancel()
+                        announceJob = scope.launch {
+                            kotlinx.coroutines.delay(CHANNEL_ANNOUNCE_MS)
+                            announcingChannelId = null
+                            invalidateState()
+                        }
+                    }
+
                     // Resolve dynamic artist text: SXM track > ESPN game > group name
                     val trackMeta = accountManager?.trackMetadata?.value?.get(channel.name)
                     val espnGame = espnScoreService?.gamesByChannel?.value?.get(channel.id)
@@ -81,7 +100,12 @@ class VLCSessionPlayer(
                     val displayArtist: String
                     val artworkUri: android.net.Uri?
 
-                    when {
+                    // During channel announcement, show channel name/group instead of track info
+                    if (announcingChannelId == channel.id) {
+                        displayTitle = channel.name
+                        displayArtist = channel.group
+                        artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
+                    } else when {
                         trackMeta != null -> {
                             displayTitle = trackMeta.title
                             displayArtist = trackMeta.artist
