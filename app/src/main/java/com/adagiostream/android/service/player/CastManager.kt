@@ -103,13 +103,14 @@ class CastManager(private val context: Context) {
 
     fun initialize() {
         try {
+            DebugLogger.log("CastManager: initializing...", DebugLogger.Category.PLAYER)
             castContext = CastContext.getSharedInstance(context)
             sessionManager = castContext?.sessionManager?.also {
                 it.addSessionManagerListener(sessionManagerListener, CastSession::class.java)
             }
-            DebugLogger.log("CastManager initialized", DebugLogger.Category.PLAYER)
+            DebugLogger.log("CastManager initialized successfully", DebugLogger.Category.PLAYER)
         } catch (e: Exception) {
-            DebugLogger.log("Cast unavailable: ${e.message}", DebugLogger.Category.PLAYER)
+            DebugLogger.log("Cast unavailable: ${e::class.simpleName} — ${e.message}", DebugLogger.Category.PLAYER)
         }
     }
 
