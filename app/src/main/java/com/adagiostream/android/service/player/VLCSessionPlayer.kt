@@ -56,7 +56,11 @@ class VLCSessionPlayer(
                 vlcWrapper.currentChannel,
                 accountManager?.trackMetadata ?: MutableStateFlow(emptyMap()),
                 espnScoreService?.gamesByChannel ?: MutableStateFlow(emptyMap()),
-            ) { state, channel, _, _ -> state to channel }.collect { (state, channel) ->
+                accountManager?.epgEntries ?: MutableStateFlow(emptyMap()),
+            ) { values ->
+                @Suppress("UNCHECKED_CAST")
+                (values[0] as PlaybackState) to (values[1] as com.adagiostream.android.model.Channel?)
+            }.collect { (state, channel) ->
                 val prevState = currentPlaybackState
                 currentPlaybackState = when (state) {
                     is PlaybackState.Idle -> STATE_IDLE
@@ -92,7 +96,7 @@ class VLCSessionPlayer(
                         }
                     }
 
-                    // Resolve dynamic artist text: SXM track > ESPN game > group name
+                    // Resolve dynamic artist text: SXM track > ESPN game > EPG program > channel name
                     val trackMeta = accountManager?.trackMetadata?.value?.get(channel.name)
                     val espnGame = espnScoreService?.gamesByChannel?.value?.get(channel.id)
 
@@ -105,21 +109,31 @@ class VLCSessionPlayer(
                         displayTitle = channel.name
                         displayArtist = channel.group
                         artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
-                    } else when {
-                        trackMeta != null -> {
-                            displayTitle = trackMeta.title
-                            displayArtist = trackMeta.artist
-                            artworkUri = (trackMeta.albumArtURL ?: channel.logoURL)?.let { android.net.Uri.parse(it) }
+                    } else {
+                        val epgEntry = channel.epgChannelID?.let { epgId ->
+                            accountManager?.epgEntries?.value?.get(epgId)?.firstOrNull { it.isCurrentlyAiring }
                         }
-                        espnGame != null -> {
-                            displayTitle = espnGame.nowPlayingTitle
-                            displayArtist = espnGame.nowPlayingSubtitle
-                            artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
-                        }
-                        else -> {
-                            displayTitle = channel.name
-                            displayArtist = channel.group
-                            artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
+                        when {
+                            trackMeta != null -> {
+                                displayTitle = trackMeta.title
+                                displayArtist = trackMeta.artist
+                                artworkUri = (trackMeta.albumArtURL ?: channel.logoURL)?.let { android.net.Uri.parse(it) }
+                            }
+                            espnGame != null -> {
+                                displayTitle = espnGame.nowPlayingTitle
+                                displayArtist = espnGame.nowPlayingSubtitle
+                                artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
+                            }
+                            epgEntry != null -> {
+                                displayTitle = epgEntry.title
+                                displayArtist = channel.name
+                                artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
+                            }
+                            else -> {
+                                displayTitle = channel.name
+                                displayArtist = channel.group
+                                artworkUri = channel.logoURL?.let { android.net.Uri.parse(it) }
+                            }
                         }
                     }
 
