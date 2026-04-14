@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.coroutines.FlowPreview::class)
+@file:kotlin.OptIn(kotlinx.coroutines.FlowPreview::class)
 
 package com.adagiostream.android.service.player
 
