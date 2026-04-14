@@ -206,10 +206,12 @@ class AccountManager @Inject constructor(
                         is AccountType.M3U -> m3uParser.parse(account.type.url)
                         is AccountType.XtreamCodes -> xtreamApi.getChannels(account.type)
                     }
+                    val strip = (account.type as? AccountType.XtreamCodes)?.stripStreamIDs == true
                     allChannels.addAll(channels.map {
                         it.copy(
                             id = "${account.id}:${it.id}",
                             accountName = account.name,
+                            name = if (strip) it.name.replace(Regex("""^\d+\s*\|\s*"""), "") else it.name,
                         )
                     })
                 } catch (e: Exception) {
@@ -228,6 +230,7 @@ class AccountManager @Inject constructor(
             xmPlaylistApi.matchChannels(withFavorites, sortPrefixes)
             hasSxmChannels = xmPlaylistApi.hasMappedChannels()
             startFeedPollingIfNeeded()
+            espnScoreService.epgDataProvider = { _epgEntries.value }
             espnScoreService.matchChannels(withFavorites, sortPrefixes)
             espnScoreService.setPollingEnabled(true)
         } catch (e: Exception) {
