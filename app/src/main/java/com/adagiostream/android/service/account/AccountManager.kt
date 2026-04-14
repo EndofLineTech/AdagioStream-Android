@@ -206,7 +206,12 @@ class AccountManager @Inject constructor(
                         is AccountType.M3U -> m3uParser.parse(account.type.url)
                         is AccountType.XtreamCodes -> xtreamApi.getChannels(account.type)
                     }
-                    allChannels.addAll(channels.map { it.copy(accountName = account.name) })
+                    allChannels.addAll(channels.map {
+                        it.copy(
+                            id = "${account.id}:${it.id}",
+                            accountName = account.name,
+                        )
+                    })
                 } catch (e: Exception) {
                     _error.value = "Failed to load ${account.name}: ${UrlSanitizer.redact(e.message ?: "Unknown error")}"
                 }
