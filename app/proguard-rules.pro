@@ -18,3 +18,7 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
+# Google Cast
+-keep class com.google.android.gms.cast.** { *; }
+-keep class com.adagiostream.android.service.player.CastOptionsProvider { *; }
+

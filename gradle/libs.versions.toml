@@ -23,6 +23,8 @@ palette = "1.0.0"
 reorderable = "2.4.3"
 robolectric = "4.14.1"
 libvlc = "4.0.0-eap23"
+castFramework = "22.0.0"
+mediarouter = "1.8.0"
 
 [libraries]
 # Compose BOM
@@ -75,6 +77,8 @@ robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "
 palette-ktx = { group = "androidx.palette", name = "palette-ktx", version.ref = "palette" }
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
 libvlc-all = { group = "org.videolan.android", name = "libvlc-all", version.ref = "libvlc" }
+cast-framework = { group = "com.google.android.gms", name = "play-services-cast-framework", version.ref = "castFramework" }
+mediarouter = { group = "androidx.mediarouter", name = "mediarouter", version.ref = "mediarouter" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

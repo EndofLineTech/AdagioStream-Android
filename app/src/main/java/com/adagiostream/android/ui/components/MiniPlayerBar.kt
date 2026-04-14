@@ -44,6 +44,8 @@ fun MiniPlayerBar(
     espnGame: ESPNGameInfo? = null,
     artworkDisplayMode: ArtworkDisplayMode = ArtworkDisplayMode.COVER_ART,
     isTimeShifted: Boolean = false,
+    isCasting: Boolean = false,
+    castDeviceName: String? = null,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onSeekToLive: () -> Unit = {},
@@ -120,12 +122,19 @@ fun MiniPlayerBar(
                             overflow = TextOverflow.Ellipsis,
                         )
                     } else {
-                        val statusText = when (playbackState) {
-                            is PlaybackState.Buffering -> "Buffering..."
-                            is PlaybackState.Playing -> if (listeningTime != null) "Playing \u00B7 $listeningTime" else "Playing"
-                            is PlaybackState.Paused -> if (listeningTime != null) "Paused \u00B7 $listeningTime" else "Paused"
-                            is PlaybackState.CatchingUp -> "Catching up..."
-                            is PlaybackState.Error -> "Error"
+                        val castPrefix = if (isCasting && castDeviceName != null) "Casting to $castDeviceName" else null
+                        val statusText = when {
+                            castPrefix != null && playbackState is PlaybackState.Playing -> castPrefix
+                            castPrefix != null -> "$castPrefix \u00B7 ${when (playbackState) {
+                                is PlaybackState.Buffering -> "Buffering..."
+                                is PlaybackState.Paused -> "Paused"
+                                else -> ""
+                            }}"
+                            playbackState is PlaybackState.Buffering -> "Buffering..."
+                            playbackState is PlaybackState.Playing -> if (listeningTime != null) "Playing \u00B7 $listeningTime" else "Playing"
+                            playbackState is PlaybackState.Paused -> if (listeningTime != null) "Paused \u00B7 $listeningTime" else "Paused"
+                            playbackState is PlaybackState.CatchingUp -> "Catching up..."
+                            playbackState is PlaybackState.Error -> "Error"
                             else -> ""
                         }
                         Text(
@@ -135,6 +144,8 @@ fun MiniPlayerBar(
                         )
                     }
                 }
+
+                CastButton(modifier = Modifier.size(36.dp))
 
                 if (isTimeShifted) {
                     TextButton(

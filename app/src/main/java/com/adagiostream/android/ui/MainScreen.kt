@@ -59,6 +59,8 @@ fun MainScreen(
     val trackMetadata by nowPlayingViewModel.currentTrackMetadata.collectAsStateWithLifecycle()
     val espnGame by nowPlayingViewModel.currentESPNGame.collectAsStateWithLifecycle()
     val isTimeShifted by nowPlayingViewModel.isTimeShifted.collectAsStateWithLifecycle()
+    val isCasting by nowPlayingViewModel.isCasting.collectAsStateWithLifecycle()
+    val castDeviceName by nowPlayingViewModel.castDeviceName.collectAsStateWithLifecycle()
     val channels by settingsViewModel.channels.collectAsStateWithLifecycle()
     var showNowPlaying by remember { mutableStateOf(false) }
     var hasAttemptedStartupStream by remember { mutableStateOf(false) }
@@ -95,6 +97,8 @@ fun MainScreen(
                                 espnGame = espnGame,
                                 artworkDisplayMode = settings.artworkDisplayMode,
                                 isTimeShifted = isTimeShifted,
+                                isCasting = isCasting,
+                                castDeviceName = castDeviceName,
                                 onPlayPause = { nowPlayingViewModel.togglePlayPause() },
                                 onStop = { nowPlayingViewModel.stop() },
                                 onSeekToLive = { nowPlayingViewModel.seekToLive() },

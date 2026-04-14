@@ -111,6 +111,10 @@ dependencies {
     // libVLC
     implementation(libs.libvlc.all)
 
+    // Chromecast
+    implementation(libs.cast.framework)
+    implementation(libs.mediarouter)
+
     // Coil
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)

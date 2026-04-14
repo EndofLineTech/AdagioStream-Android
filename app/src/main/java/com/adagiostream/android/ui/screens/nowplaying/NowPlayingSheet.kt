@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.ui.components.BaseballDiamond
+import com.adagiostream.android.ui.components.CastButton
 import com.adagiostream.android.ui.components.RetryableAsyncImage
 import com.adagiostream.android.util.BitrateFormatter
 import com.adagiostream.android.util.rememberListeningTime
@@ -64,6 +65,8 @@ fun NowPlayingSheet(
     val isTrackLoved by viewModel.isTrackLoved.collectAsStateWithLifecycle()
     val espnGame by viewModel.currentESPNGame.collectAsStateWithLifecycle()
     val epgEntries by viewModel.currentEPGEntries.collectAsStateWithLifecycle()
+    val isCasting by viewModel.isCasting.collectAsStateWithLifecycle()
+    val castDeviceName by viewModel.castDeviceName.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val channel = currentChannel ?: return
 
@@ -118,6 +121,14 @@ fun NowPlayingSheet(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            if (isCasting && castDeviceName != null) {
+                Text(
+                    text = "Casting to $castDeviceName",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -284,6 +295,8 @@ fun NowPlayingSheet(
                         tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+
+                CastButton(modifier = Modifier.size(36.dp))
 
                 IconButton(onClick = { viewModel.stop() }) {
                     Icon(
