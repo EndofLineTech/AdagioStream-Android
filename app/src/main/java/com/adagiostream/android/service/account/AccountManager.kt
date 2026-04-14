@@ -383,7 +383,19 @@ class AccountManager @Inject constructor(
                     }
                 }
                 is AccountType.XtreamCodes -> {
-                    // Xtream EPG is loaded on-demand per channel via loadXtreamEPGForChannel
+                    // Load full XMLTV EPG from the standard XC endpoint
+                    try {
+                        val baseUrl = type.host.trimEnd('/')
+                        val xmltvUrl = "$baseUrl/xmltv.php?username=${type.username}&password=${type.password}"
+                        val entries = epgParser.parse(xmltvUrl)
+                        allEntries.putAll(entries)
+                        DebugLogger.log(
+                            "Loaded ${entries.size} EPG channels from XC provider ${account.name}",
+                            DebugLogger.Category.GENERAL,
+                        )
+                    } catch (_: Exception) {
+                        // EPG loading is best-effort; on-demand fallback still available
+                    }
                 }
             }
         }
