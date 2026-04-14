@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class AppSettings(
+    val setupCompleted: Boolean = false,
     val bufferDurationSeconds: Int = 10,
     val appearanceMode: AppearanceMode = AppearanceMode.SYSTEM,
     val textSizeMode: TextSizeMode = TextSizeMode.M,

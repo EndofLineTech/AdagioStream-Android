@@ -26,6 +26,7 @@ sealed class Screen(
     data object PlaylistDetail : Screen("playlist_detail/{playlistId}", "Playlist", Icons.AutoMirrored.Filled.PlaylistPlay) {
         fun createRoute(playlistId: String): String = "playlist_detail/$playlistId"
     }
+    data object Setup : Screen("setup", "Setup", Icons.Default.Settings)
     data object Licenses : Screen("licenses", "Licenses", Icons.Default.Gavel)
     data object AddAccount : Screen("add_account?accountId={accountId}", "Add Account", Icons.Default.Storage) {
         fun createRoute(accountId: String? = null): String {

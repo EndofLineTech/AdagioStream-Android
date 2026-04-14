@@ -44,6 +44,7 @@ import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingViewModel
 import com.adagiostream.android.ui.screens.settings.SettingsScreen
 import com.adagiostream.android.ui.screens.settings.SettingsViewModel
+import com.adagiostream.android.ui.screens.setup.SetupScreen
 import com.adagiostream.android.ui.theme.AdagioStreamTheme
 
 @Composable
@@ -78,41 +79,45 @@ fun MainScreen(
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination
         val showMiniPlayer = currentChannel != null && playbackState !is PlaybackState.Idle
+        val isOnSetup = currentDestination?.route == Screen.Setup.route
+        val startDestination = if (settings.setupCompleted) Screen.Channels.route else Screen.Setup.route
 
         Scaffold(
             bottomBar = {
-                Column {
-                    if (showMiniPlayer && currentChannel != null) {
-                        MiniPlayerBar(
-                            channel = currentChannel!!,
-                            playbackState = playbackState,
-                            listeningTimeMs = listeningTimeMs,
-                            trackMetadata = trackMetadata,
-                            espnGame = espnGame,
-                            artworkDisplayMode = settings.artworkDisplayMode,
-                            isTimeShifted = isTimeShifted,
-                            onPlayPause = { nowPlayingViewModel.togglePlayPause() },
-                            onStop = { nowPlayingViewModel.stop() },
-                            onSeekToLive = { nowPlayingViewModel.seekToLive() },
-                            onClick = { showNowPlaying = true },
-                        )
-                    }
-                    NavigationBar {
-                        bottomNavItems.forEach { screen ->
-                            NavigationBarItem(
-                                icon = { Icon(screen.icon, contentDescription = screen.label) },
-                                label = { Text(screen.label) },
-                                selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
-                                onClick = {
-                                    navController.navigate(screen.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
+                if (!isOnSetup) {
+                    Column {
+                        if (showMiniPlayer && currentChannel != null) {
+                            MiniPlayerBar(
+                                channel = currentChannel!!,
+                                playbackState = playbackState,
+                                listeningTimeMs = listeningTimeMs,
+                                trackMetadata = trackMetadata,
+                                espnGame = espnGame,
+                                artworkDisplayMode = settings.artworkDisplayMode,
+                                isTimeShifted = isTimeShifted,
+                                onPlayPause = { nowPlayingViewModel.togglePlayPause() },
+                                onStop = { nowPlayingViewModel.stop() },
+                                onSeekToLive = { nowPlayingViewModel.seekToLive() },
+                                onClick = { showNowPlaying = true },
                             )
+                        }
+                        NavigationBar {
+                            bottomNavItems.forEach { screen ->
+                                NavigationBarItem(
+                                    icon = { Icon(screen.icon, contentDescription = screen.label) },
+                                    label = { Text(screen.label) },
+                                    selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
+                                    onClick = {
+                                        navController.navigate(screen.route) {
+                                            popUpTo(navController.graph.findStartDestination().id) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -120,11 +125,21 @@ fun MainScreen(
         ) { innerPadding ->
             NavHost(
                 navController = navController,
-                startDestination = Screen.Channels.route,
+                startDestination = startDestination,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
             ) {
+                composable(Screen.Setup.route) {
+                    SetupScreen(
+                        onSetupComplete = {
+                            settingsViewModel.reloadSettings()
+                            navController.navigate(Screen.Channels.route) {
+                                popUpTo(Screen.Setup.route) { inclusive = true }
+                            }
+                        },
+                    )
+                }
                 composable(Screen.Channels.route) {
                     ChannelsScreen()
                 }
