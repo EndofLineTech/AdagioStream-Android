@@ -114,42 +114,64 @@ class CastManager(private val context: Context) {
     }
 
     fun loadMedia(channel: Channel, trackMetadata: TrackMetadata? = null) {
-        val client = remoteMediaClient ?: return
-
-        val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
-            putString(MediaMetadata.KEY_TITLE, trackMetadata?.title ?: channel.name)
-            putString(MediaMetadata.KEY_ARTIST, trackMetadata?.artist ?: channel.group)
-            val artworkUrl = trackMetadata?.albumArtURL ?: channel.logoURL
-            if (artworkUrl != null) {
-                addImage(WebImage(android.net.Uri.parse(artworkUrl)))
-            }
+        val client = remoteMediaClient
+        if (client == null) {
+            DebugLogger.log("Cast: loadMedia failed — no RemoteMediaClient", DebugLogger.Category.PLAYER)
+            _remotePlaybackState.value = PlaybackState.Error("Cast not connected")
+            return
         }
 
-        val mediaInfo = MediaInfo.Builder(channel.streamURL)
-            .setStreamType(MediaInfo.STREAM_TYPE_LIVE)
-            .setContentType("audio/*")
-            .setMetadata(metadata)
-            .build()
+        try {
+            val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
+                putString(MediaMetadata.KEY_TITLE, trackMetadata?.title ?: channel.name)
+                putString(MediaMetadata.KEY_ARTIST, trackMetadata?.artist ?: channel.group)
+                val artworkUrl = trackMetadata?.albumArtURL ?: channel.logoURL
+                if (artworkUrl != null) {
+                    addImage(WebImage(android.net.Uri.parse(artworkUrl)))
+                }
+            }
 
-        val loadRequest = MediaLoadRequestData.Builder()
-            .setMediaInfo(mediaInfo)
-            .setAutoplay(true)
-            .build()
+            val mediaInfo = MediaInfo.Builder(channel.streamURL)
+                .setStreamType(MediaInfo.STREAM_TYPE_LIVE)
+                .setContentType("audio/*")
+                .setMetadata(metadata)
+                .build()
 
-        client.load(loadRequest)
-        DebugLogger.log("Cast: loading ${channel.name}", DebugLogger.Category.PLAYER)
+            val loadRequest = MediaLoadRequestData.Builder()
+                .setMediaInfo(mediaInfo)
+                .setAutoplay(true)
+                .build()
+
+            client.load(loadRequest)
+            DebugLogger.log("Cast: loading ${channel.name}", DebugLogger.Category.PLAYER)
+        } catch (e: Exception) {
+            DebugLogger.log("Cast: loadMedia error — ${e.message}", DebugLogger.Category.PLAYER)
+            _remotePlaybackState.value = PlaybackState.Error("Cast error: ${e.message}")
+        }
     }
 
     fun play() {
-        remoteMediaClient?.play()
+        try {
+            remoteMediaClient?.play()
+        } catch (e: Exception) {
+            DebugLogger.log("Cast: play() error — ${e.message}", DebugLogger.Category.PLAYER)
+        }
     }
 
     fun pause() {
-        remoteMediaClient?.pause()
+        try {
+            remoteMediaClient?.pause()
+        } catch (e: Exception) {
+            DebugLogger.log("Cast: pause() error — ${e.message}", DebugLogger.Category.PLAYER)
+        }
     }
 
     fun stop() {
-        remoteMediaClient?.stop()
+        try {
+            remoteMediaClient?.stop()
+        } catch (e: Exception) {
+            DebugLogger.log("Cast: stop() error — ${e.message}", DebugLogger.Category.PLAYER)
+        }
         _remotePlaybackState.value = PlaybackState.Idle
     }
 
@@ -157,27 +179,30 @@ class CastManager(private val context: Context) {
         val client = remoteMediaClient ?: return
         if (client.mediaInfo == null) return
 
-        val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
-            putString(MediaMetadata.KEY_TITLE, trackMetadata?.title ?: channel.name)
-            putString(MediaMetadata.KEY_ARTIST, trackMetadata?.artist ?: channel.group)
-            val artworkUrl = trackMetadata?.albumArtURL ?: channel.logoURL
-            if (artworkUrl != null) {
-                addImage(WebImage(android.net.Uri.parse(artworkUrl)))
+        try {
+            val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
+                putString(MediaMetadata.KEY_TITLE, trackMetadata?.title ?: channel.name)
+                putString(MediaMetadata.KEY_ARTIST, trackMetadata?.artist ?: channel.group)
+                val artworkUrl = trackMetadata?.albumArtURL ?: channel.logoURL
+                if (artworkUrl != null) {
+                    addImage(WebImage(android.net.Uri.parse(artworkUrl)))
+                }
             }
+
+            val updatedMediaInfo = MediaInfo.Builder(channel.streamURL)
+                .setStreamType(MediaInfo.STREAM_TYPE_LIVE)
+                .setContentType("audio/*")
+                .setMetadata(metadata)
+                .build()
+
+            val loadRequest = MediaLoadRequestData.Builder()
+                .setMediaInfo(updatedMediaInfo)
+                .setAutoplay(true)
+                .build()
+
+            client.load(loadRequest)
+        } catch (e: Exception) {
+            DebugLogger.log("Cast: updateMetadata error — ${e.message}", DebugLogger.Category.PLAYER)
         }
-
-        val updatedMediaInfo = MediaInfo.Builder(channel.streamURL)
-            .setStreamType(MediaInfo.STREAM_TYPE_LIVE)
-            .setContentType("audio/*")
-            .setMetadata(metadata)
-            .build()
-
-        val loadRequest = MediaLoadRequestData.Builder()
-            .setMediaInfo(updatedMediaInfo)
-            .setAutoplay(true)
-            .build()
-
-        // Reload with updated metadata to refresh the Cast receiver display
-        client.load(loadRequest)
     }
 }

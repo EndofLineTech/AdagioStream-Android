@@ -107,28 +107,36 @@ class VLCPlayerWrapper(
 
     private fun setupCastCallbacks() {
         castManager.onCastSessionStarted = {
-            // Transfer current local playback to Cast
-            val channel = _currentChannel.value
-            if (channel != null && _playbackState.value !is PlaybackState.Idle) {
-                DebugLogger.log("Cast connected — transferring ${channel.name} to Cast", DebugLogger.Category.PLAYER)
-                // Stop local VLC playback but keep current channel
-                isSwitchingChannels = true
-                mediaPlayer.stop()
-                stopBitratePolling()
-                accumulateListeningSegment()
-                audioManager.abandonAudioFocusRequest(audioFocusRequest)
-                wasPlayingBeforeFocusLoss = false
-                isDucking = false
-                // Send to Cast
-                castManager.loadMedia(channel)
+            try {
+                // Transfer current local playback to Cast
+                val channel = _currentChannel.value
+                if (channel != null && _playbackState.value !is PlaybackState.Idle) {
+                    DebugLogger.log("Cast connected — transferring ${channel.name} to Cast", DebugLogger.Category.PLAYER)
+                    // Stop local VLC playback but keep current channel
+                    isSwitchingChannels = true
+                    mediaPlayer.stop()
+                    stopBitratePolling()
+                    accumulateListeningSegment()
+                    audioManager.abandonAudioFocusRequest(audioFocusRequest)
+                    wasPlayingBeforeFocusLoss = false
+                    isDucking = false
+                    // Send to Cast
+                    castManager.loadMedia(channel)
+                }
+            } catch (e: Exception) {
+                DebugLogger.log("Cast session transfer error — ${e.message}", DebugLogger.Category.PLAYER)
             }
         }
         castManager.onCastSessionEnded = {
-            // Resume local playback if we had a channel
-            val channel = _currentChannel.value
-            if (channel != null) {
-                DebugLogger.log("Cast disconnected — resuming ${channel.name} locally", DebugLogger.Category.PLAYER)
-                doPlay(channel)
+            try {
+                // Resume local playback if we had a channel
+                val channel = _currentChannel.value
+                if (channel != null) {
+                    DebugLogger.log("Cast disconnected — resuming ${channel.name} locally", DebugLogger.Category.PLAYER)
+                    doPlay(channel)
+                }
+            } catch (e: Exception) {
+                DebugLogger.log("Cast session resume error — ${e.message}", DebugLogger.Category.PLAYER)
             }
         }
 
@@ -403,6 +411,11 @@ class VLCPlayerWrapper(
     }
 
     private fun doPlay(channel: Channel) {
+        // Guard against stale VLC events FIRST, before updating channel/state
+        isSwitchingChannels = true
+        mediaPlayer.stop()
+        stopBitratePolling()
+
         _currentChannel.value = channel
         _playbackState.value = PlaybackState.Buffering
         _bitrateKbps.value = 0f
@@ -419,10 +432,6 @@ class VLCPlayerWrapper(
 
         if (castManager.isCasting.value) {
             DebugLogger.log("doPlay(): casting ${channel.name} to Cast device", DebugLogger.Category.PLAYER)
-            // Stop local VLC if it was running
-            isSwitchingChannels = true
-            mediaPlayer.stop()
-            stopBitratePolling()
             castManager.loadMedia(channel)
             return
         }
@@ -431,11 +440,6 @@ class VLCPlayerWrapper(
         if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
             DebugLogger.log("Audio focus request denied", DebugLogger.Category.AUDIO)
         }
-
-        // Guard against stale EndReached/Error events from the old stream —
-        // VLC dispatches events asynchronously so they arrive after stop() returns.
-        isSwitchingChannels = true
-        mediaPlayer.stop()
 
         val cachingMs = (bufferDurationSeconds * 1000).toString()
         val media = Media(libVLC, Uri.parse(channel.streamURL))
