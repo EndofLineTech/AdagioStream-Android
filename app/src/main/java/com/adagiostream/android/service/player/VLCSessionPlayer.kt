@@ -54,9 +54,9 @@ class VLCSessionPlayer(
             combine(
                 vlcWrapper.playbackState,
                 vlcWrapper.currentChannel,
-                accountManager?.trackMetadata ?: MutableStateFlow(emptyMap()),
-                espnScoreService?.gamesByChannel ?: MutableStateFlow(emptyMap()),
-                accountManager?.epgEntries ?: MutableStateFlow(emptyMap()),
+                accountManager?.trackMetadata ?: MutableStateFlow<Map<String, com.adagiostream.android.model.TrackMetadata>>(emptyMap()),
+                espnScoreService?.gamesByChannel ?: MutableStateFlow<Map<String, com.adagiostream.android.model.ESPNGameInfo>>(emptyMap()),
+                accountManager?.epgEntries ?: MutableStateFlow<Map<String, List<com.adagiostream.android.model.EPGEntry>>>(emptyMap()),
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
                 (values[0] as PlaybackState) to (values[1] as com.adagiostream.android.model.Channel?)
