@@ -28,6 +28,7 @@ sealed class Screen(
     }
     data object Setup : Screen("setup", "Setup", Icons.Default.Settings)
     data object Licenses : Screen("licenses", "Licenses", Icons.Default.Gavel)
+    data object PrivacyPolicy : Screen("privacy_policy", "Privacy Policy", Icons.Default.Gavel)
     data object AddAccount : Screen("add_account?accountId={accountId}", "Add Account", Icons.Default.Storage) {
         fun createRoute(accountId: String? = null): String {
             return if (accountId != null) "add_account?accountId=$accountId" else "add_account"

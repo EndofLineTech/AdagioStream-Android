@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,28 +17,35 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Radio
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,11 +55,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -92,13 +98,16 @@ fun SetupScreen(
                 onSkip = { viewModel.skip() },
             )
             SetupStep.CONNECTION_TYPE -> ConnectionTypeStep(
-                viewModel = viewModel,
-                onNext = { viewModel.goToAccountDetails() },
+                onSelectM3U = { viewModel.selectConnectionTypeAndAdvance(false) },
+                onSelectXtream = { viewModel.selectConnectionTypeAndAdvance(true) },
                 onBack = { viewModel.goBack() },
             )
             SetupStep.ACCOUNT_DETAILS -> AccountDetailsStep(
                 viewModel = viewModel,
                 onBack = { viewModel.goBack() },
+            )
+            SetupStep.GROUP_SELECTION -> GroupSelectionStep(
+                viewModel = viewModel,
             )
         }
     }
@@ -169,103 +178,83 @@ private fun WelcomeStep(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConnectionTypeStep(
-    viewModel: SetupViewModel,
-    onNext: () -> Unit,
+    onSelectM3U: () -> Unit,
+    onSelectXtream: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val isXtream by viewModel.isXtream.collectAsStateWithLifecycle()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(modifier = Modifier.weight(1f))
-
-        Text(
-            text = "Choose Your Source",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "What type of connection will you be using?",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-
-        ConnectionCard(
-            title = "M3U Playlist",
-            description = "Connect using a playlist URL",
-            icon = Icons.AutoMirrored.Filled.QueueMusic,
-            isSelected = !isXtream,
-            onClick = { viewModel.setIsXtream(false) },
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        ConnectionCard(
-            title = "Xtream Codes",
-            description = "Connect with server URL, username, and password",
-            icon = Icons.Default.Dns,
-            isSelected = isXtream,
-            onClick = { viewModel.setIsXtream(true) },
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = {},
+            navigationIcon = {
+                TextButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Back")
+                }
+            },
         )
 
-        Spacer(modifier = Modifier.weight(1f))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(modifier = Modifier.weight(1f))
 
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
-                onClick = onBack,
-                modifier = Modifier.height(48.dp),
-            ) {
-                Text("Back")
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Button(
-                onClick = onNext,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-            ) {
-                Text("Continue")
-            }
+            Text(
+                text = "Choose Your Source",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "What type of connection will you be using?",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+
+            SourceCard(
+                title = "M3U Playlist",
+                description = "Connect using a playlist URL",
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                onClick = onSelectM3U,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            SourceCard(
+                title = "Xtream Codes",
+                description = "Connect with server URL, username, and password",
+                icon = Icons.Default.Dns,
+                onClick = onSelectXtream,
+            )
+
+            Spacer(modifier = Modifier.weight(1f))
         }
     }
 }
 
 @Composable
-private fun ConnectionCard(
+private fun SourceCard(
     title: String,
     description: String,
     icon: ImageVector,
-    isSelected: Boolean,
     onClick: () -> Unit,
 ) {
-    val containerColor = if (isSelected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh
-    }
-    val contentColor = if (isSelected) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-    val secondaryContentColor = if (isSelected) {
-        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = containerColor),
-        border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -275,31 +264,31 @@ private fun ConnectionCard(
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(36.dp),
-                tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = contentColor,
                 )
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodySmall,
-                    color = secondaryContentColor,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
             Icon(
-                imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outlineVariant,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AccountDetailsStep(
     viewModel: SetupViewModel,
@@ -315,114 +304,126 @@ private fun AccountDetailsStep(
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     var passwordVisible by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = if (isXtream) "Xtream Codes" else "M3U Playlist",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = {},
+            navigationIcon = {
+                TextButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Back")
+                }
+            },
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Enter your connection details",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(32.dp))
 
-        OutlinedTextField(
-            value = name,
-            onValueChange = { viewModel.setName(it) },
-            label = { Text("Account Name") },
-            placeholder = { Text("My Provider") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (isXtream) {
-            OutlinedTextField(
-                value = url,
-                onValueChange = { viewModel.setUrl(it) },
-                label = { Text("Server URL") },
-                placeholder = { Text("http://example.com:8080") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = if (isXtream) "Xtream Codes" else "M3U Playlist",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
             )
-            Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
-                value = username,
-                onValueChange = { viewModel.setUsername(it) },
-                label = { Text("Username") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
-                value = password,
-                onValueChange = { viewModel.setPassword(it) },
-                label = { Text("Password") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(
-                            imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                        )
-                    }
-                },
-            )
-        } else {
-            OutlinedTextField(
-                value = url,
-                onValueChange = { viewModel.setUrl(it) },
-                label = { Text("Playlist URL") },
-                placeholder = { Text("http://example.com/playlist.m3u") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
-                value = epgUrl,
-                onValueChange = { viewModel.setEpgUrl(it) },
-                label = { Text("EPG URL (Optional)") },
-                placeholder = { Text("http://example.com/epg.xml") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-        }
-
-        errorMessage?.let { msg ->
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = msg,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
+                text = "Enter your connection details",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
+            Spacer(modifier = Modifier.height(32.dp))
 
-        Spacer(modifier = Modifier.height(32.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { viewModel.setName(it) },
+                label = { Text("Account Name") },
+                placeholder = { Text("My Provider") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
 
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
-                onClick = onBack,
-                modifier = Modifier.height(48.dp),
-            ) {
-                Text("Back")
+            if (isXtream) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { viewModel.setUrl(it) },
+                    label = { Text("Server URL") },
+                    placeholder = { Text("http://example.com:8080") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { viewModel.setUsername(it) },
+                    label = { Text("Username") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { viewModel.setPassword(it) },
+                    label = { Text("Password") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        autoCorrectEnabled = false,
+                    ),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                            )
+                        }
+                    },
+                )
+            } else {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { viewModel.setUrl(it) },
+                    label = { Text("Playlist URL") },
+                    placeholder = { Text("http://example.com/playlist.m3u") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = epgUrl,
+                    onValueChange = { viewModel.setEpgUrl(it) },
+                    label = { Text("EPG URL (Optional)") },
+                    placeholder = { Text("http://example.com/epg.xml") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
             }
-            Spacer(modifier = Modifier.width(16.dp))
+
+            errorMessage?.let { msg ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = msg,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
             Button(
-                onClick = { viewModel.saveAndFinish() },
+                onClick = { viewModel.saveAccount() },
                 enabled = !isSaving && viewModel.isFormValid(),
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .height(48.dp),
             ) {
                 if (isSaving) {
@@ -435,6 +436,111 @@ private fun AccountDetailsStep(
                     Text("Add Account")
                 }
             }
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GroupSelectionStep(
+    viewModel: SetupViewModel,
+) {
+    val groupItems by viewModel.groupItems.collectAsStateWithLifecycle()
+    val addedGroupCount by viewModel.addedGroupCount.collectAsStateWithLifecycle()
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = {},
+            actions = {
+                TextButton(onClick = { viewModel.finishSetup() }) {
+                    Text("Skip")
+                }
+            },
+        )
+
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 24.dp),
+        ) {
+            Text(
+                text = "Enable Groups",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "We found ${groupItems.size} groups. Choose which ones to enable.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = { viewModel.setAllGroupsEnabled(true) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Enable All")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = { viewModel.setAllGroupsEnabled(false) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text("Disable All")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider()
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            items(groupItems, key = { it.name }) { group ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Switch(
+                        checked = group.isEnabled,
+                        onCheckedChange = { viewModel.toggleGroupEnabled(group.name) },
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = group.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = "${group.channelCount} channels",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        Button(
+            onClick = { viewModel.finishSetup() },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+                .height(48.dp),
+        ) {
+            Text("Done", style = MaterialTheme.typography.titleMedium)
         }
     }
 }

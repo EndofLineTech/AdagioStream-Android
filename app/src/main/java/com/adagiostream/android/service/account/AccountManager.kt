@@ -94,6 +94,23 @@ class AccountManager @Inject constructor(
 
     val espnGames: StateFlow<Map<String, ESPNGameInfo>> = espnScoreService.gamesByChannel
 
+    fun resetAll() {
+        _accounts.value = emptyList()
+        _channels.value = emptyList()
+        _groups.value = emptyList()
+        _allGroupNames.value = emptySet()
+        _lovedTracks.value = emptyList()
+        _trackMetadata.value = emptyMap()
+        favoriteIds = mutableListOf()
+        enabledGroups = null
+        favoriteGroupOrder = mutableListOf()
+        sortPrefixes = listOf("Radio: ", "TV: ")
+        sortMode = SortMode.ALPHABETICAL
+        groupSortMode = SortMode.ALPHABETICAL
+        groupingMode = ChannelGroupingMode.ALL_GROUPS
+        stopTrackMetadataPolling()
+    }
+
     private var hasSxmChannels = false
 
     private val _initialLoadComplete = CompletableDeferred<Unit>()
@@ -142,7 +159,7 @@ class AccountManager @Inject constructor(
         val newGroupCount: Int,
     )
 
-    suspend fun addAccount(account: Account): AddAccountResult {
+    suspend fun addAccount(account: Account, enableAllGroups: Boolean = false): AddAccountResult {
         val existingGroups = _allGroupNames.value.toSet()
         val updated = _accounts.value + account
         _accounts.value = updated
@@ -150,8 +167,12 @@ class AccountManager @Inject constructor(
         loadAllChannels()
 
         val newGroups = _allGroupNames.value - existingGroups
-        // Auto-disable new groups if there were existing groups
-        if (existingGroups.isNotEmpty() && newGroups.isNotEmpty()) {
+        // When enableAllGroups is true (first-time setup), ensure all groups are enabled
+        if (enableAllGroups) {
+            enabledGroups = null
+            saveGroupSettings()
+            rebuildGroups()
+        } else if (existingGroups.isNotEmpty() && newGroups.isNotEmpty()) {
             for (groupName in newGroups) {
                 if (enabledGroups == null) {
                     // Initialize enabledGroups with all existing groups (excluding new ones)
@@ -200,6 +221,7 @@ class AccountManager @Inject constructor(
 
         try {
             val allChannels = mutableListOf<Channel>()
+            val loadErrors = mutableListOf<String>()
             for (account in _accounts.value.filter { it.isEnabled }) {
                 try {
                     val channels = when (account.type) {
@@ -215,8 +237,12 @@ class AccountManager @Inject constructor(
                         )
                     })
                 } catch (e: Exception) {
-                    _error.value = "Failed to load ${account.name}: ${UrlSanitizer.redact(e.message ?: "Unknown error")}"
+                    loadErrors.add("Failed to load ${account.name}: ${UrlSanitizer.redact(e.message ?: "Unknown error")}")
                 }
+            }
+            // Only surface errors if no channels loaded at all
+            if (allChannels.isEmpty() && loadErrors.isNotEmpty()) {
+                _error.value = loadErrors.first()
             }
 
             val withFavorites = allChannels.map { channel ->

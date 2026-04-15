@@ -13,10 +13,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.RemoveCircle
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.material3.Button
@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,6 +59,14 @@ fun GroupManagementScreen(
         )
 
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+            Text(
+                text = "Tap (+) to add a group to your favorites. Favorite groups appear first in your channel list and Android Auto.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { viewModel.updateSearchQuery(it) },
@@ -69,24 +78,24 @@ fun GroupManagementScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = { viewModel.setAllEnabled(true) },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Enable All")
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = { viewModel.setAllEnabled(false) },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError,
-                    ),
-                ) {
-                    Text("Disable All")
-                }
+            Button(
+                onClick = { viewModel.setAllEnabled(true) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Enable All")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = { viewModel.setAllEnabled(false) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text("Disable All")
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -104,23 +113,52 @@ fun GroupManagementScreen(
             state = lazyListState,
             modifier = Modifier.fillMaxSize(),
         ) {
-            items(favoriteGroups, key = { "fav_${it.name}" }) { group ->
-                ReorderableItem(reorderableState, key = "fav_${group.name}") {
-                    GroupRow(
-                        group = group,
-                        onToggleEnabled = { viewModel.toggleEnabled(group.name) },
-                        onToggleFavorite = { viewModel.toggleFavorite(group.name) },
-                        dragHandle = {
-                            IconButton(
-                                modifier = Modifier.draggableHandle(),
-                                onClick = {},
-                            ) {
-                                Icon(Icons.Default.DragHandle, contentDescription = "Reorder")
-                            }
-                        },
+            if (favoriteGroups.isNotEmpty()) {
+                item(key = "favorites_header") {
+                    Text(
+                        text = "Favorites",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
+
+                items(favoriteGroups, key = { "fav_${it.name}" }) { group ->
+                    ReorderableItem(reorderableState, key = "fav_${group.name}") {
+                        GroupRow(
+                            group = group,
+                            onToggleEnabled = { viewModel.toggleEnabled(group.name) },
+                            onToggleFavorite = { viewModel.toggleFavorite(group.name) },
+                            dragHandle = {
+                                IconButton(
+                                    modifier = Modifier.draggableHandle(),
+                                    onClick = {},
+                                ) {
+                                    Icon(Icons.Default.DragHandle, contentDescription = "Reorder")
+                                }
+                            },
+                        )
+                    }
+                }
+
+                item(key = "favorites_footer") {
+                    Text(
+                        text = "Favorite groups appear first in your channel list and Android Auto. Drag to reorder them.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                }
             }
+
+            item(key = "other_groups_header") {
+                Text(
+                    text = if (favoriteGroups.isNotEmpty()) "Other Groups" else "Groups",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            }
+
             items(otherGroups, key = { "grp_${it.name}" }) { group ->
                 GroupRow(
                     group = group,
@@ -169,11 +207,19 @@ private fun GroupRow(
         }
 
         IconButton(onClick = onToggleFavorite) {
-            Icon(
-                imageVector = if (group.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                contentDescription = if (group.isFavorite) "Unfavorite" else "Favorite",
-                tint = if (group.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (group.isFavorite) {
+                Icon(
+                    imageVector = Icons.Default.RemoveCircle,
+                    contentDescription = "Remove from favorites",
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.AddCircle,
+                    contentDescription = "Add to favorites",
+                    tint = Color(0xFF4CAF50),
+                )
+            }
         }
     }
 }

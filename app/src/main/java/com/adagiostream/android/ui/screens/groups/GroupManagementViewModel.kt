@@ -31,8 +31,9 @@ class GroupManagementViewModel @Inject constructor(
     val groupItems: StateFlow<List<GroupItem>> = combine(
         accountManager.allGroupNames,
         accountManager.channels,
+        accountManager.groups,
         _searchQuery,
-    ) { allGroups, channels, query ->
+    ) { allGroups, channels, _, query ->
         val channelCounts = channels.groupBy { it.group }.mapValues { it.value.size }
         allGroups
             .filter { query.isBlank() || it.contains(query, ignoreCase = true) }

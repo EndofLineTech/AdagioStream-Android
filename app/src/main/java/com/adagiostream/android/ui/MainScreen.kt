@@ -37,6 +37,7 @@ import com.adagiostream.android.ui.screens.channels.ChannelsScreen
 import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
 import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
 import com.adagiostream.android.ui.screens.licenses.LicensesScreen
+import com.adagiostream.android.ui.screens.privacy.PrivacyPolicyScreen
 import com.adagiostream.android.ui.screens.loved.LovedTracksScreen
 import com.adagiostream.android.ui.screens.m3us.MyM3UsScreen
 import com.adagiostream.android.ui.screens.m3us.PlaylistDetailScreen
@@ -113,7 +114,7 @@ fun MainScreen(
                                     selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
                                     onClick = {
                                         navController.navigate(screen.route) {
-                                            popUpTo(navController.graph.findStartDestination().id) {
+                                            popUpTo(Screen.Channels.route) {
                                                 saveState = true
                                             }
                                             launchSingleTop = true
@@ -193,6 +194,15 @@ fun MainScreen(
                         onNavigateToLicenses = {
                             navController.navigate(Screen.Licenses.route)
                         },
+                        onNavigateToPrivacyPolicy = {
+                            navController.navigate(Screen.PrivacyPolicy.route)
+                        },
+                        onDataDeleted = {
+                            settingsViewModel.reloadSettings()
+                            navController.navigate(Screen.Setup.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        },
                     )
                 }
                 composable(Screen.Groups.route) {
@@ -202,6 +212,11 @@ fun MainScreen(
                 }
                 composable(Screen.Licenses.route) {
                     LicensesScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(Screen.PrivacyPolicy.route) {
+                    PrivacyPolicyScreen(
                         onBack = { navController.popBackStack() },
                     )
                 }

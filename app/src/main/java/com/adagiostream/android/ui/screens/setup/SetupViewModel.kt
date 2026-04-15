@@ -9,8 +9,13 @@ import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.util.UrlSanitizer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -19,7 +24,14 @@ enum class SetupStep {
     WELCOME,
     CONNECTION_TYPE,
     ACCOUNT_DETAILS,
+    GROUP_SELECTION,
 }
+
+data class SetupGroupItem(
+    val name: String,
+    val isEnabled: Boolean,
+    val channelCount: Int,
+)
 
 @HiltViewModel
 class SetupViewModel @Inject constructor(
@@ -63,12 +75,35 @@ class SetupViewModel @Inject constructor(
     private val _setupComplete = MutableStateFlow(false)
     val setupComplete: StateFlow<Boolean> = _setupComplete.asStateFlow()
 
+    private val _addedGroupCount = MutableStateFlow(0)
+    val addedGroupCount: StateFlow<Int> = _addedGroupCount.asStateFlow()
+
+    val groupItems: StateFlow<List<SetupGroupItem>> = combine(
+        accountManager.allGroupNames,
+        accountManager.channels,
+        accountManager.groups,
+    ) { allGroups, channels, _ ->
+        val channelCounts = channels.groupBy { it.group }.mapValues { it.value.size }
+        allGroups.map { name ->
+            SetupGroupItem(
+                name = name,
+                isEnabled = accountManager.isGroupEnabled(name),
+                channelCount = channelCounts[name] ?: 0,
+            )
+        }.sortedBy { it.name }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     fun setIsXtream(value: Boolean) { _isXtream.value = value }
     fun setName(value: String) { _name.value = value }
     fun setUrl(value: String) { _url.value = value }
     fun setUsername(value: String) { _username.value = value }
     fun setPassword(value: String) { _password.value = value }
     fun setEpgUrl(value: String) { _epgUrl.value = value }
+
+    fun selectConnectionTypeAndAdvance(isXtream: Boolean) {
+        _isXtream.value = isXtream
+        _currentStep.value = SetupStep.ACCOUNT_DETAILS
+    }
 
     fun goToConnectionType() {
         _currentStep.value = SetupStep.CONNECTION_TYPE
@@ -83,6 +118,7 @@ class SetupViewModel @Inject constructor(
             SetupStep.WELCOME -> SetupStep.WELCOME
             SetupStep.CONNECTION_TYPE -> SetupStep.WELCOME
             SetupStep.ACCOUNT_DETAILS -> SetupStep.CONNECTION_TYPE
+            SetupStep.GROUP_SELECTION -> SetupStep.ACCOUNT_DETAILS
         }
     }
 
@@ -103,7 +139,7 @@ class SetupViewModel @Inject constructor(
         }
     }
 
-    fun saveAndFinish() {
+    fun saveAccount() {
         if (!isFormValid()) {
             _errorMessage.value = "Please fill in all required fields"
             return
@@ -133,16 +169,46 @@ class SetupViewModel @Inject constructor(
                     type = type,
                 )
 
-                accountManager.addAccount(account)
+                val result = accountManager.addAccount(account, enableAllGroups = true)
+                _addedGroupCount.value = result.newGroupCount
 
-                val settings = persistenceService.loadSettings()
-                persistenceService.saveSettings(settings.copy(setupCompleted = true))
-                _setupComplete.value = true
+                if (result.newGroupCount > 0) {
+                    // Give the combine a moment to process the new data
+                    withTimeoutOrNull(3000) {
+                        groupItems.first { it.isNotEmpty() }
+                    }
+                    _currentStep.value = SetupStep.GROUP_SELECTION
+                } else {
+                    // No groups found, skip to finish
+                    val settings = persistenceService.loadSettings()
+                    persistenceService.saveSettings(settings.copy(setupCompleted = true))
+                    _setupComplete.value = true
+                }
             } catch (e: Exception) {
                 _errorMessage.value = UrlSanitizer.redact(e.message ?: "Failed to save account")
             } finally {
                 _isSaving.value = false
             }
+        }
+    }
+
+    fun toggleGroupEnabled(groupName: String) {
+        viewModelScope.launch {
+            accountManager.toggleGroupEnabled(groupName)
+        }
+    }
+
+    fun setAllGroupsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            accountManager.setAllGroupsEnabled(enabled)
+        }
+    }
+
+    fun finishSetup() {
+        viewModelScope.launch {
+            val settings = persistenceService.loadSettings()
+            persistenceService.saveSettings(settings.copy(setupCompleted = true))
+            _setupComplete.value = true
         }
     }
 }

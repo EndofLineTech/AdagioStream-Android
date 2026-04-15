@@ -2,6 +2,8 @@ package com.adagiostream.android.ui.screens.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.adagiostream.android.BuildConfig
+import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.AppearanceMode
 import com.adagiostream.android.model.ArtworkDisplayMode
@@ -23,6 +25,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 @HiltViewModel
@@ -33,7 +43,9 @@ class SettingsViewModel @Inject constructor(
     private val espnScoreService: ESPNScoreService,
 ) : ViewModel() {
 
-    private val _settings = MutableStateFlow(AppSettings())
+    private val _settings = MutableStateFlow(persistenceService.loadSettingsSync().let {
+        it.copy(bufferDurationSeconds = it.bufferDurationSeconds.coerceIn(5, 15))
+    })
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     val accountCount: StateFlow<Int> = accountManager.accounts
@@ -164,6 +176,103 @@ class SettingsViewModel @Inject constructor(
     fun clearAllFavorites() {
         viewModelScope.launch {
             accountManager.clearAllFavorites()
+        }
+    }
+
+    private val _isExporting = MutableStateFlow(false)
+    val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
+
+    private val _exportJson = MutableStateFlow<String?>(null)
+    val exportJson: StateFlow<String?> = _exportJson.asStateFlow()
+
+    fun clearExportJson() {
+        _exportJson.value = null
+    }
+
+    private val _dataDeleted = MutableStateFlow(false)
+    val dataDeleted: StateFlow<Boolean> = _dataDeleted.asStateFlow()
+
+    fun clearDataDeleted() {
+        _dataDeleted.value = false
+    }
+
+    fun exportMyData() {
+        _isExporting.value = true
+        viewModelScope.launch {
+            try {
+                val prettyJson = Json { prettyPrint = true }
+                val accounts = accountManager.accounts.value
+                val favorites = accountManager.channels.value.filter { it.isFavorite }.map { it.id }
+                val lovedTracks = persistenceService.loadLovedTracks()
+                val playlists = persistenceService.loadCustomPlaylists()
+                val settings = persistenceService.loadSettings()
+
+                val export = buildJsonObject {
+                    put("exportDate", JsonPrimitive(DateTimeFormatter.ISO_INSTANT.format(Instant.now())))
+                    put("appVersion", JsonPrimitive(BuildConfig.VERSION_NAME))
+                    put("appBuild", JsonPrimitive(BuildConfig.VERSION_CODE))
+
+                    put("accounts", buildJsonArray {
+                        accounts.forEach { account ->
+                            add(buildJsonObject {
+                                put("id", JsonPrimitive(account.id))
+                                put("name", JsonPrimitive(account.name))
+                                put("isEnabled", JsonPrimitive(account.isEnabled))
+                                when (val type = account.type) {
+                                    is AccountType.M3U -> {
+                                        put("type", JsonPrimitive("m3u"))
+                                        put("url", JsonPrimitive(type.url))
+                                        type.epgUrl?.let { put("epgUrl", JsonPrimitive(it)) }
+                                    }
+                                    is AccountType.XtreamCodes -> {
+                                        put("type", JsonPrimitive("xtream"))
+                                        put("host", JsonPrimitive(type.host))
+                                        put("username", JsonPrimitive(type.username))
+                                        // Password intentionally omitted
+                                    }
+                                }
+                            })
+                        }
+                    })
+
+                    put("favorites", buildJsonArray {
+                        favorites.forEach { add(JsonPrimitive(it)) }
+                    })
+
+                    put("lovedTracks", prettyJson.encodeToJsonElement(lovedTracks))
+                    put("customPlaylists", prettyJson.encodeToJsonElement(playlists))
+
+                    put("favoriteGroups", buildJsonArray {
+                        settings.favoriteGroupOrder.forEach { add(JsonPrimitive(it)) }
+                    })
+
+                    put("enabledGroups", if (settings.enabledGroups != null) {
+                        buildJsonArray {
+                            settings.enabledGroups!!.forEach { add(JsonPrimitive(it)) }
+                        }
+                    } else {
+                        JsonPrimitive("all")
+                    })
+
+                    put("settings", prettyJson.encodeToJsonElement(settings))
+                }
+
+                _exportJson.value = prettyJson.encodeToString(JsonObject.serializer(), export)
+            } catch (e: Exception) {
+                _exportJson.value = null
+            } finally {
+                _isExporting.value = false
+            }
+        }
+    }
+
+    fun deleteAllData() {
+        viewModelScope.launch {
+            vlcPlayerWrapper.stop()
+            accountManager.resetAll()
+            persistenceService.deleteAllData()
+            DebugLogger.clearLogs()
+            _dataDeleted.value = true
         }
     }
 

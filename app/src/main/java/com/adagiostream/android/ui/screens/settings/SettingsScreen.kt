@@ -3,6 +3,7 @@ package com.adagiostream.android.ui.screens.settings
 import android.content.Intent
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -71,6 +72,8 @@ fun SettingsScreen(
     onNavigateToAccounts: (() -> Unit)? = null,
     onNavigateToGroups: (() -> Unit)? = null,
     onNavigateToLicenses: (() -> Unit)? = null,
+    onNavigateToPrivacyPolicy: (() -> Unit)? = null,
+    onDataDeleted: (() -> Unit)? = null,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val accountCount by viewModel.accountCount.collectAsStateWithLifecycle()
@@ -80,6 +83,29 @@ fun SettingsScreen(
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val favoriteChannels by viewModel.favoriteChannels.collectAsStateWithLifecycle()
     var showClearFavoritesDialog by remember { mutableStateOf(false) }
+    var showDeleteStep1 by remember { mutableStateOf(false) }
+    var showDeleteStep2 by remember { mutableStateOf(false) }
+    val isExporting by viewModel.isExporting.collectAsStateWithLifecycle()
+    val exportJson by viewModel.exportJson.collectAsStateWithLifecycle()
+    val dataDeleted by viewModel.dataDeleted.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    if (dataDeleted && onDataDeleted != null) {
+        viewModel.clearDataDeleted()
+        onDataDeleted()
+        return
+    }
+
+    if (exportJson != null) {
+        val json = exportJson!!
+        viewModel.clearExportJson()
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_TEXT, json)
+            putExtra(Intent.EXTRA_SUBJECT, "AdagioStream Data Export")
+        }
+        context.startActivity(Intent.createChooser(sendIntent, "Export My Data"))
+    }
 
     Column(
         modifier = Modifier
@@ -92,83 +118,118 @@ fun SettingsScreen(
             style = MaterialTheme.typography.headlineMedium,
         )
 
-        // Stream Quality
-        Text(
-            text = "Stream Quality",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
+        // ── Accounts & Channels ──────────────────────────────
 
-        val qualityText = when (playbackState) {
-            is PlaybackState.Playing, is PlaybackState.Buffering -> {
-                val formatted = BitrateFormatter.format(bitrateKbps)
-                formatted.ifEmpty { "Measuring..." }
-            }
-            else -> "Not playing"
-        }
-        Text(
-            text = qualityText,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        SectionHeader("Accounts & Channels")
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Buffer Duration
-        Text(
-            text = "Buffer Duration",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Slider(
-                value = settings.bufferDurationSeconds.toFloat(),
-                onValueChange = { viewModel.updateBufferDuration(it.roundToInt()) },
-                valueRange = 5f..15f,
-                steps = 9,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = "${settings.bufferDurationSeconds}s",
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.padding(start = 12.dp),
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // ESPN Polling Interval
-        Text(
-            text = "ESPN Score Updates",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        val espnOptions = listOf(5, 10, 15, 30)
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            espnOptions.forEachIndexed { index, seconds ->
-                SegmentedButton(
-                    selected = settings.espnPollingIntervalSeconds == seconds,
-                    onClick = { viewModel.updateEspnPollingInterval(seconds) },
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = espnOptions.size,
-                    ),
+        if (onNavigateToAccounts != null) {
+            Card(
+                onClick = onNavigateToAccounts,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(text = "${seconds}s")
+                    Column {
+                        Text(
+                            text = "Manage Accounts",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = "$accountCount configured",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Go to Accounts",
+                    )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        if (onNavigateToGroups != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                onClick = onNavigateToGroups,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Manage Groups",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Go to Groups",
+                    )
+                }
+            }
+        }
 
-        // Appearance
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                StatRow("Channels Loaded", channelCount.toString())
+                StatRow("Favorites", favoritesCount.toString())
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = { viewModel.reloadChannels() },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Reload Channels")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = { showClearFavoritesDialog = true },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            enabled = favoritesCount > 0,
+        ) {
+            Text("Clear All Favorites ($favoritesCount)")
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider()
+
+        // ── Appearance ───────────────────────────────────────
+
+        SectionHeader("Appearance")
+
         Text(
-            text = "Appearance",
+            text = "Theme",
             style = MaterialTheme.typography.titleMedium,
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -194,9 +255,8 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Text Size
         Text(
             text = "Text Size",
             style = MaterialTheme.typography.titleMedium,
@@ -239,17 +299,11 @@ fun SettingsScreen(
             modifier = Modifier.padding(top = 8.dp),
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Artwork Display
         Text(
             text = "Artwork Display",
             style = MaterialTheme.typography.titleMedium,
-        )
-        Text(
-            text = "Choose whether to display track cover art or the channel logo",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -268,9 +322,10 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        FooterText("Choose whether to display track cover art or the channel logo.")
 
-        // Channel Grouping Mode
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
             text = "Channel Grouping",
             style = MaterialTheme.typography.titleMedium,
@@ -292,35 +347,16 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Group Sort
-        Text(
-            text = "Group Sort",
-            style = MaterialTheme.typography.titleMedium,
+        FooterText(
+            "All Groups merges channels from all accounts into shared groups. " +
+                "By Provider keeps each account's groups separate. " +
+                "By Source shows the original group from each account.",
         )
-        Spacer(modifier = Modifier.height(8.dp))
 
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            SortMode.entries.forEachIndexed { index, mode ->
-                SegmentedButton(
-                    selected = settings.groupSortMode == mode,
-                    onClick = { viewModel.updateGroupSortMode(mode) },
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = SortMode.entries.size,
-                    ),
-                ) {
-                    Text(text = mode.displayName)
-                }
-            }
-        }
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Channel Sort
         Text(
-            text = "Channel Sort",
+            text = "Channel Sorting",
             style = MaterialTheme.typography.titleMedium,
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -340,17 +376,38 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        FooterText("Controls the order channels appear within each group.")
 
-        // Sort Prefixes
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Group Sorting",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SortMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = settings.groupSortMode == mode,
+                    onClick = { viewModel.updateGroupSortMode(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = SortMode.entries.size,
+                    ),
+                ) {
+                    Text(text = mode.displayName)
+                }
+            }
+        }
+
+        FooterText("Controls the order groups appear in your channel list. Favorite groups always appear first.")
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
             text = "Sort Prefixes",
             style = MaterialTheme.typography.titleMedium,
-        )
-        Text(
-            text = "Prefixes stripped when sorting channels",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -359,18 +416,67 @@ fun SettingsScreen(
             onPrefixesChanged = { viewModel.updateSortPrefixes(it) },
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        FooterText("Channel names starting with these prefixes will be sorted by the text after the prefix (e.g. 'Radio: Jazz' sorts under J).")
 
-        // Startup Stream
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider()
+
+        // ── Playback ─────────────────────────────────────────
+
+        SectionHeader("Playback")
+
+        Text(
+            text = "Stream Quality",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val qualityText = when (playbackState) {
+            is PlaybackState.Playing, is PlaybackState.Buffering -> {
+                val formatted = BitrateFormatter.format(bitrateKbps)
+                formatted.ifEmpty { "Measuring..." }
+            }
+            else -> "Not playing"
+        }
+        Text(
+            text = qualityText,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Buffer Duration",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Slider(
+                value = settings.bufferDurationSeconds.toFloat(),
+                onValueChange = { viewModel.updateBufferDuration(it.roundToInt()) },
+                valueRange = 5f..15f,
+                steps = 9,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${settings.bufferDurationSeconds}s",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
             text = "Startup Stream",
             style = MaterialTheme.typography.titleMedium,
         )
-        Text(
-            text = "Auto-play a favorite channel on launch",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        FooterText("Auto-play a favorite channel on launch.")
         Spacer(modifier = Modifier.height(8.dp))
 
         StartupStreamPicker(
@@ -379,151 +485,87 @@ fun SettingsScreen(
             onSelected = { viewModel.updateStartupStream(it) },
         )
 
-        if (onNavigateToAccounts != null) {
-            Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-            // Accounts
-            Text(
-                text = "Accounts",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Live Sports Score Updates",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
 
-            Card(
-                onClick = onNavigateToAccounts,
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+        val espnOptions = listOf(5, 10, 15, 30)
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            espnOptions.forEachIndexed { index, seconds ->
+                SegmentedButton(
+                    selected = settings.espnPollingIntervalSeconds == seconds,
+                    onClick = { viewModel.updateEspnPollingInterval(seconds) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = espnOptions.size,
+                    ),
                 ) {
-                    Column {
-                        Text(
-                            text = "Manage Accounts",
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Text(
-                            text = "$accountCount configured",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "Go to Accounts",
-                    )
+                    Text(text = "${seconds}s")
                 }
             }
         }
 
-        if (onNavigateToGroups != null) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Card(
-                onClick = onNavigateToGroups,
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column {
-                        Text(
-                            text = "Manage Groups",
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Text(
-                            text = "Show, hide, and favorite groups",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "Go to Groups",
-                    )
-                }
-            }
-        }
+        FooterText("How often to refresh live sports scores from ESPN.com API. Lower values show scores sooner but use more data.")
 
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
-        Spacer(modifier = Modifier.height(24.dp))
 
-        // Clear All Favorites
+        // ── Advanced ─────────────────────────────────────────
+
+        SectionHeader("Advanced")
+
+        DebugLogsSection(viewModel)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Your Data",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
         Button(
-            onClick = { showClearFavoritesDialog = true },
+            onClick = { viewModel.exportMyData() },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isExporting,
+        ) {
+            if (isExporting) {
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(end = 8.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
+            Text("Export My Data")
+        }
+
+        FooterText("Exports your accounts (without passwords), favorites, saved songs, playlists, groups, and settings as a JSON file.")
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = { showDeleteStep1 = true },
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.error,
                 contentColor = MaterialTheme.colorScheme.onError,
             ),
             modifier = Modifier.fillMaxWidth(),
-            enabled = favoritesCount > 0,
         ) {
-            Text("Clear All Favorites ($favoritesCount)")
+            Text("Delete All My Data")
         }
+
+        FooterText("Permanently deletes all app data including accounts, favorites, playlists, settings, cached images, and logs. This cannot be undone.")
 
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
-        Spacer(modifier = Modifier.height(24.dp))
 
-        // Debug Logs
-        DebugLogsSection(viewModel)
+        // ── About ────────────────────────────────────────────
 
-        Spacer(modifier = Modifier.height(24.dp))
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Statistics
-        Text(
-            text = "Statistics",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                StatRow("Accounts", accountCount.toString())
-                StatRow("Channels", channelCount.toString())
-                StatRow("Favorites", favoritesCount.toString())
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Button(
-            onClick = { viewModel.reloadChannels() },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Reload Channels")
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // About
-        Text(
-            text = "About",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
+        SectionHeader("About")
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -535,6 +577,34 @@ fun SettingsScreen(
                 StatRow("App", "AdagioStream")
                 StatRow("Version", BuildConfig.VERSION_NAME)
                 StatRow("Build", BuildConfig.VERSION_CODE.toString())
+            }
+        }
+
+        if (onNavigateToPrivacyPolicy != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                onClick = onNavigateToPrivacyPolicy,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Privacy Policy",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Go to Privacy Policy",
+                    )
+                }
             }
         }
 
@@ -591,6 +661,75 @@ fun SettingsScreen(
             },
         )
     }
+
+    if (showDeleteStep1) {
+        AlertDialog(
+            onDismissRequest = { showDeleteStep1 = false },
+            title = { Text("Delete All Data?") },
+            text = {
+                Text("This will permanently erase all your accounts, favorites, saved songs, playlists, settings, cached images, and logs. This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteStep1 = false
+                        showDeleteStep2 = true
+                    },
+                ) {
+                    Text("Continue", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteStep1 = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    if (showDeleteStep2) {
+        AlertDialog(
+            onDismissRequest = { showDeleteStep2 = false },
+            title = { Text("Are you sure?") },
+            text = {
+                Text("This is your last chance. All data will be permanently deleted and the app will reset to its initial state.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteStep2 = false
+                        viewModel.deleteAllData()
+                    },
+                ) {
+                    Text("Delete Everything", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteStep2 = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleLarge,
+        modifier = Modifier.padding(top = 24.dp, bottom = 12.dp),
+    )
+}
+
+@Composable
+private fun FooterText(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp),
+    )
 }
 
 @Composable

@@ -109,6 +109,14 @@ fun AccountsScreen(
                             onToggleEnabled = { viewModel.toggleAccountEnabled(account.id) },
                         )
                     }
+                    item {
+                        Text(
+                            text = "Tap the pencil icon to edit an account. Tap the trash icon to delete.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
+                    }
                 }
             }
         }

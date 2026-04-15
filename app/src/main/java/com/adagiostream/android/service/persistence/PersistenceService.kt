@@ -206,4 +206,39 @@ class PersistenceService(
     suspend fun saveCustomPlaylists(playlists: List<CustomPlaylist>) = mutex.withLock {
         customPlaylistsFile.writeText(json.encodeToString(playlists))
     }
+
+    suspend fun deleteAllData() = mutex.withLock {
+        // Delete all data files
+        listOf(
+            encryptedAccountsFile,
+            accountsFile,
+            legacyProvidersFile,
+            favoritesFile,
+            settingsFile,
+            lovedTracksFile,
+            lastPlayedFile,
+            customPlaylistsFile,
+        ).forEach { file ->
+            if (file.exists()) {
+                if (file == encryptedAccountsFile || file == accountsFile) {
+                    secureDelete(file)
+                } else {
+                    file.delete()
+                }
+            }
+        }
+
+        // Clear image cache
+        val cacheDir = context.cacheDir
+        cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+
+        // Clear SharedPreferences
+        val prefsDir = File(context.applicationInfo.dataDir, "shared_prefs")
+        prefsDir.listFiles()?.forEach { it.delete() }
+
+        // Clear temp files
+        context.filesDir.listFiles()?.forEach { file ->
+            if (file.name.endsWith(".tmp")) file.delete()
+        }
+    }
 }
