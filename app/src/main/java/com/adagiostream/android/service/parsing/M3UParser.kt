@@ -15,7 +15,7 @@ class M3UParser(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code} from ${UrlSanitizer.redact(url)}")
-        val body = response.body?.string() ?: throw IllegalStateException("Empty response from ${UrlSanitizer.redact(url)}")
+        val body = response.body.string()
         parseContent(body)
     }
 

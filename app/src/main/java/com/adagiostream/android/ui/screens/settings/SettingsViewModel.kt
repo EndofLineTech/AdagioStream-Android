@@ -248,7 +248,7 @@ class SettingsViewModel @Inject constructor(
 
                     put("enabledGroups", if (settings.enabledGroups != null) {
                         buildJsonArray {
-                            settings.enabledGroups!!.forEach { add(JsonPrimitive(it)) }
+                            settings.enabledGroups.forEach { add(JsonPrimitive(it)) }
                         }
                     } else {
                         JsonPrimitive("all")

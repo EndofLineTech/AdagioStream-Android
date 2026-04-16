@@ -74,7 +74,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext emptyList()
-            val body = response.body?.string() ?: return@withContext emptyList()
+            val body = response.body.string()
             val epgResponse = json.decodeFromString<XtreamEPGResponse>(body)
 
             epgResponse.epgListings.mapNotNull { listing ->
@@ -107,7 +107,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return null
-            val body = response.body?.string() ?: return null
+            val body = response.body.string()
             json.decodeFromString<AuthResponse>(body)
         } catch (_: Exception) {
             null
@@ -123,7 +123,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) return emptyList()
-        val body = response.body?.string() ?: return emptyList()
+        val body = response.body.string()
         return json.decodeFromString<List<XtreamCategory>>(body)
     }
 
@@ -136,7 +136,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) return emptyList()
-        val body = response.body?.string() ?: return emptyList()
+        val body = response.body.string()
         return json.decodeFromString<List<XtreamStream>>(body)
     }
 

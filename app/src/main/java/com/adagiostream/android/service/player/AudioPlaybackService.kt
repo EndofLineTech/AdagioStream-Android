@@ -210,14 +210,12 @@ class AudioPlaybackService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     private fun buildCustomButtons(isFavorite: Boolean, isLoved: Boolean): List<CommandButton> {
         return listOf(
-            CommandButton.Builder()
+            CommandButton.Builder(if (isFavorite) CommandButton.ICON_STAR_FILLED else CommandButton.ICON_STAR_UNFILLED)
                 .setDisplayName("Favorite")
-                .setIconResId(if (isFavorite) R.drawable.ic_star else R.drawable.ic_star_outline)
                 .setSessionCommand(TOGGLE_FAVORITE_COMMAND)
                 .build(),
-            CommandButton.Builder()
+            CommandButton.Builder(if (isLoved) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
                 .setDisplayName("Love Track")
-                .setIconResId(if (isLoved) R.drawable.ic_heart else R.drawable.ic_heart_outline)
                 .setSessionCommand(TOGGLE_LOVED_TRACK_COMMAND)
                 .build(),
         )
@@ -470,6 +468,7 @@ class AudioPlaybackService : MediaLibraryService() {
             return future
         }
 
+        @Deprecated("Deprecated in Media3", ReplaceWith("onPlaybackResumption(mediaSession, controller)"))
         override fun onPlaybackResumption(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,

@@ -170,7 +170,7 @@ class ESPNScoreService(private val client: OkHttpClient) {
                             val request = Request.Builder().url(url).build()
                             val response = client.newCall(request).execute()
                             if (!response.isSuccessful) return@async null
-                            val body = response.body?.string() ?: return@async null
+                            val body = response.body.string()
                             val scoreboard = json.decodeFromString<ESPNScoreboardResponse>(body)
                             league to scoreboard.events
                         } catch (_: Exception) {
