@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
@@ -15,14 +14,14 @@ val localProps = rootProject.file("local.properties").takeIf { it.exists() }?.le
 
 android {
     namespace = "com.adagiostream.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.adagiostream.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 107
-        versionName = "1.0(107)"
+        versionCode = 108
+        versionName = "1.0(108)"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -57,10 +56,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         compose = true
         buildConfig = true
@@ -72,13 +67,18 @@ android {
         }
     }
 
-    applicationVariants.all {
-        outputs.all {
-            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            val safeVersion = versionName?.replace("(", "-")?.replace(")", "") ?: "unknown"
-            output.outputFileName = "AdagioStream-${safeVersion}-${buildType.name}.apk"
-        }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
+}
+
+base {
+    val safeVersion = android.defaultConfig.versionName
+        ?.replace("(", "-")?.replace(")", "") ?: "unknown"
+    archivesName = "AdagioStream-$safeVersion"
 }
 
 dependencies {
