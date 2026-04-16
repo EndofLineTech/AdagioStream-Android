@@ -88,6 +88,8 @@ class AccountManager @Inject constructor(
 
     // Group management
     private var enabledGroups: MutableSet<String>? = null  // null = all enabled
+    private val _enabledGroupNames = MutableStateFlow<Set<String>?>(null)
+    val enabledGroupNames: StateFlow<Set<String>?> = _enabledGroupNames.asStateFlow()
     private var favoriteGroupOrder = mutableListOf<String>()
     private val _allGroupNames = MutableStateFlow<Set<String>>(emptySet())
     val allGroupNames: StateFlow<Set<String>> = _allGroupNames.asStateFlow()
@@ -105,6 +107,7 @@ class AccountManager @Inject constructor(
         _trackMetadata.value = emptyMap()
         favoriteIds = mutableListOf()
         enabledGroups = null
+        _enabledGroupNames.value = null
         favoriteGroupOrder = mutableListOf()
         sortPrefixes = listOf("Radio: ", "TV: ")
         sortMode = SortMode.ALPHABETICAL
@@ -128,6 +131,7 @@ class AccountManager @Inject constructor(
             groupSortMode = settings.groupSortMode
             groupingMode = settings.channelGroupingMode
             enabledGroups = settings.enabledGroups?.toMutableSet()
+            _enabledGroupNames.value = enabledGroups?.toSet()
             favoriteGroupOrder = settings.favoriteGroupOrder.toMutableList()
             _favoriteGroupNames.value = favoriteGroupOrder.toSet()
             _accounts.value = persistenceService.loadAccounts()
@@ -173,6 +177,7 @@ class AccountManager @Inject constructor(
         // When enableAllGroups is true (first-time setup), ensure all groups are enabled
         if (enableAllGroups) {
             enabledGroups = null
+            _enabledGroupNames.value = null
             saveGroupSettings()
             rebuildGroups()
         } else if (existingGroups.isNotEmpty() && newGroups.isNotEmpty()) {
@@ -184,6 +189,7 @@ class AccountManager @Inject constructor(
                     // New groups are already not in enabledGroups, so they're disabled
                 }
             }
+            _enabledGroupNames.value = enabledGroups?.toSet()
             saveGroupSettings()
             rebuildGroups()
         }
@@ -339,6 +345,7 @@ class AccountManager @Inject constructor(
         } else {
             enabledGroups!!.add(groupName)
         }
+        _enabledGroupNames.value = enabledGroups?.toSet()
         saveGroupSettings()
         rebuildGroups()
     }
@@ -363,6 +370,7 @@ class AccountManager @Inject constructor(
 
     suspend fun setAllGroupsEnabled(enabled: Boolean) {
         enabledGroups = if (enabled) null else mutableSetOf()
+        _enabledGroupNames.value = enabledGroups?.toSet()
         saveGroupSettings()
         rebuildGroups()
     }
