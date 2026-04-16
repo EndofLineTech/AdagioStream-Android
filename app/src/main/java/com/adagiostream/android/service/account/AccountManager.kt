@@ -91,6 +91,8 @@ class AccountManager @Inject constructor(
     private var favoriteGroupOrder = mutableListOf<String>()
     private val _allGroupNames = MutableStateFlow<Set<String>>(emptySet())
     val allGroupNames: StateFlow<Set<String>> = _allGroupNames.asStateFlow()
+    private val _favoriteGroupNames = MutableStateFlow<Set<String>>(emptySet())
+    val favoriteGroupNames: StateFlow<Set<String>> = _favoriteGroupNames.asStateFlow()
 
     val espnGames: StateFlow<Map<String, ESPNGameInfo>> = espnScoreService.gamesByChannel
 
@@ -127,6 +129,7 @@ class AccountManager @Inject constructor(
             groupingMode = settings.channelGroupingMode
             enabledGroups = settings.enabledGroups?.toMutableSet()
             favoriteGroupOrder = settings.favoriteGroupOrder.toMutableList()
+            _favoriteGroupNames.value = favoriteGroupOrder.toSet()
             _accounts.value = persistenceService.loadAccounts()
             favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
             _lovedTracks.value = persistenceService.loadLovedTracks()
@@ -346,12 +349,14 @@ class AccountManager @Inject constructor(
         } else {
             favoriteGroupOrder.add(groupName)
         }
+        _favoriteGroupNames.value = favoriteGroupOrder.toSet()
         saveGroupSettings()
         rebuildGroups()
     }
 
     suspend fun updateFavoriteGroupOrder(order: List<String>) {
         favoriteGroupOrder = order.toMutableList()
+        _favoriteGroupNames.value = favoriteGroupOrder.toSet()
         saveGroupSettings()
         rebuildGroups()
     }
