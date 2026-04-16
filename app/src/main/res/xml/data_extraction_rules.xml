@@ -2,6 +2,7 @@
 <!-- dataExtractionRules for Android 12+ -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="file" path="accounts_v2.enc" />
         <exclude domain="file" path="accounts_encrypted.json" />
         <exclude domain="file" path="accounts.json" />
         <exclude domain="file" path="settings.json" />
@@ -13,6 +14,7 @@
         <exclude domain="file" path="adagiostream-debug-prev.log" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="file" path="accounts_v2.enc" />
         <exclude domain="file" path="accounts_encrypted.json" />
         <exclude domain="file" path="accounts.json" />
     </device-transfer>

@@ -58,6 +58,7 @@ class M3UParser(private val client: OkHttpClient) {
     }
 
     private fun parseExtInf(line: String, streamUrl: String): Channel? {
+        if (!UrlSanitizer.isHttpUrl(streamUrl)) return null
         val name = extractDisplayName(line) ?: return null
         val tvgId = extractAttribute(line, "tvg-id")
         val tvgName = extractAttribute(line, "tvg-name")
@@ -71,7 +72,7 @@ class M3UParser(private val client: OkHttpClient) {
             id = stableId,
             name = channelName,
             streamURL = streamUrl,
-            logoURL = tvgLogo?.ifBlank { null },
+            logoURL = tvgLogo?.ifBlank { null }?.takeIf { UrlSanitizer.isHttpUrl(it) },
             group = groupTitle.ifBlank { "Uncategorized" },
             epgChannelID = tvgId?.ifBlank { null },
         )

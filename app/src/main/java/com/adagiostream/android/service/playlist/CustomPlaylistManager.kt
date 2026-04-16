@@ -156,13 +156,19 @@ class CustomPlaylistManager @Inject constructor(
         val sb = StringBuilder("#EXTM3U\n")
         for (group in playlist.groups) {
             for (entry in group.entries) {
-                val logo = entry.logoURL?.let { " tvg-logo=\"$it\"" } ?: ""
-                sb.append("#EXTINF:-1$logo group-title=\"${group.name}\",${entry.name}\n")
-                sb.append("${entry.streamURL}\n")
+                val logo = entry.logoURL?.let { " tvg-logo=\"${sanitizeM3UAttribute(it)}\"" } ?: ""
+                sb.append("#EXTINF:-1$logo group-title=\"${sanitizeM3UAttribute(group.name)}\",${sanitizeM3UValue(entry.name)}\n")
+                sb.append("${sanitizeM3UValue(entry.streamURL)}\n")
             }
         }
         return sb.toString()
     }
+
+    private fun sanitizeM3UAttribute(value: String): String =
+        value.replace("\"", "").replace("\n", " ").replace("\r", " ")
+
+    private fun sanitizeM3UValue(value: String): String =
+        value.replace("\n", " ").replace("\r", " ")
 
     // Internal helper
 

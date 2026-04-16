@@ -41,6 +41,7 @@ import com.adagiostream.android.model.CustomPlaylistGroup
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import com.adagiostream.android.ui.screens.m3us.TextInputDialog
 import com.adagiostream.android.ui.theme.AdagioStreamTheme
+import com.adagiostream.android.util.UrlSanitizer
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -70,7 +71,8 @@ class ShareReceiverActivity : ComponentActivity() {
 
     private fun extractUrl(): String? {
         if (intent?.action != Intent.ACTION_SEND) return null
-        return intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
+        val url = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim() ?: return null
+        return if (UrlSanitizer.isHttpUrl(url)) url else null
     }
 }
 

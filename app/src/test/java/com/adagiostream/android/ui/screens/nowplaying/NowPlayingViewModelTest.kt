@@ -4,7 +4,8 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.service.account.AccountManager
-import com.adagiostream.android.service.player.ExoPlayerWrapper
+import com.adagiostream.android.service.player.CastManager
+import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.testutil.MainDispatcherRule
 import com.adagiostream.android.testutil.TestFixtures
 import io.mockk.every
@@ -32,7 +33,7 @@ class NowPlayingViewModelTest {
     private val streamStartedAtFlow = MutableStateFlow<Long?>(null)
     private val epgEntriesFlow = MutableStateFlow<Map<String, List<EPGEntry>>>(emptyMap())
 
-    private val exoPlayer = mockk<ExoPlayerWrapper>(relaxed = true) {
+    private val vlcPlayer = mockk<VLCPlayerWrapper>(relaxed = true) {
         every { currentChannel } returns currentChannelFlow
         every { playbackState } returns playbackStateFlow
         every { bitrateKbps } returns bitrateFlow
@@ -43,8 +44,10 @@ class NowPlayingViewModelTest {
         every { epgEntries } returns epgEntriesFlow
     }
 
+    private val castManager = mockk<CastManager>(relaxed = true)
+
     private fun createViewModel(): NowPlayingViewModel {
-        return NowPlayingViewModel(exoPlayer, accountManager)
+        return NowPlayingViewModel(vlcPlayer, accountManager, castManager)
     }
 
     @Test
@@ -83,30 +86,30 @@ class NowPlayingViewModelTest {
     }
 
     @Test
-    fun `togglePlayPause delegates to ExoPlayerWrapper`() = runTest {
+    fun `togglePlayPause delegates to VLCPlayerWrapper`() = runTest {
         val vm = createViewModel()
         vm.togglePlayPause()
-        verify { exoPlayer.togglePlayPause() }
+        verify { vlcPlayer.togglePlayPause() }
     }
 
     @Test
-    fun `stop delegates to ExoPlayerWrapper`() = runTest {
+    fun `stop delegates to VLCPlayerWrapper`() = runTest {
         val vm = createViewModel()
         vm.stop()
-        verify { exoPlayer.stop() }
+        verify { vlcPlayer.stop() }
     }
 
     @Test
-    fun `playNext delegates to ExoPlayerWrapper`() = runTest {
+    fun `playNext delegates to VLCPlayerWrapper`() = runTest {
         val vm = createViewModel()
         vm.playNext()
-        verify { exoPlayer.playNext() }
+        verify { vlcPlayer.playNext() }
     }
 
     @Test
-    fun `playPrevious delegates to ExoPlayerWrapper`() = runTest {
+    fun `playPrevious delegates to VLCPlayerWrapper`() = runTest {
         val vm = createViewModel()
         vm.playPrevious()
-        verify { exoPlayer.playPrevious() }
+        verify { vlcPlayer.playPrevious() }
     }
 }

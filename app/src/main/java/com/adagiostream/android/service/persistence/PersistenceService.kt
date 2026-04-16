@@ -1,8 +1,8 @@
 package com.adagiostream.android.service.persistence
 
 import android.content.Context
-import androidx.security.crypto.EncryptedFile
-import androidx.security.crypto.MasterKey
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.CustomPlaylist
@@ -12,6 +12,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 class PersistenceService(
     private val context: Context,
@@ -19,16 +24,43 @@ class PersistenceService(
 ) {
     private val mutex = Mutex()
 
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    companion object {
+        private const val KEYSTORE_ALIAS = "adagio_master_key"
+        private const val GCM_TAG_LENGTH = 128
+        private const val GCM_IV_LENGTH = 12
+    }
 
-    private val accountsFile: File
-        get() = File(context.filesDir, "accounts.json")
+    private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+
+    private fun getOrCreateKey(): SecretKey {
+        keyStore.getEntry(KEYSTORE_ALIAS, null)?.let { entry ->
+            return (entry as KeyStore.SecretKeyEntry).secretKey
+        }
+        val keyGenerator = KeyGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_AES,
+            "AndroidKeyStore",
+        )
+        keyGenerator.init(
+            KeyGenParameterSpec.Builder(
+                KEYSTORE_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return keyGenerator.generateKey()
+    }
 
     private val encryptedAccountsFile: File
-        get() = File(context.filesDir, "accounts_encrypted.json")
+        get() = File(context.filesDir, "accounts_v2.enc")
 
+    // Legacy files for cleanup
+    private val legacyEncryptedFile: File
+        get() = File(context.filesDir, "accounts_encrypted.json")
+    private val legacyAccountsFile: File
+        get() = File(context.filesDir, "accounts.json")
     private val legacyProvidersFile: File
         get() = File(context.filesDir, "providers.json")
 
@@ -38,31 +70,31 @@ class PersistenceService(
     private val settingsFile: File
         get() = File(context.filesDir, "settings.json")
 
-    private fun migrateProvidersFile() {
-        if (!accountsFile.exists() && legacyProvidersFile.exists()) {
-            legacyProvidersFile.renameTo(accountsFile)
-        }
+    private fun encrypt(plaintext: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val iv = cipher.iv // GCM generates a random IV
+        val ciphertext = cipher.doFinal(plaintext)
+        // Format: [IV (12 bytes)] [ciphertext + GCM tag]
+        return iv + ciphertext
     }
 
-    private fun buildEncryptedFile(): EncryptedFile {
-        return EncryptedFile.Builder(
-            context,
-            encryptedAccountsFile,
-            masterKey,
-            EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB,
-        ).build()
+    private fun decrypt(data: ByteArray): ByteArray {
+        val iv = data.copyOfRange(0, GCM_IV_LENGTH)
+        val ciphertext = data.copyOfRange(GCM_IV_LENGTH, data.size)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_LENGTH, iv))
+        return cipher.doFinal(ciphertext)
     }
 
     private fun readEncrypted(): String {
-        return buildEncryptedFile().openFileInput().bufferedReader().use { it.readText() }
+        val data = encryptedAccountsFile.readBytes()
+        return String(decrypt(data), Charsets.UTF_8)
     }
 
     private fun writeEncrypted(content: String) {
-        // EncryptedFile doesn't support overwriting — delete first
-        if (encryptedAccountsFile.exists()) {
-            encryptedAccountsFile.delete()
-        }
-        buildEncryptedFile().openFileOutput().bufferedWriter().use { it.write(content) }
+        val encrypted = encrypt(content.toByteArray(Charsets.UTF_8))
+        encryptedAccountsFile.writeBytes(encrypted)
     }
 
     private fun secureDelete(file: File) {
@@ -84,22 +116,17 @@ class PersistenceService(
         file.delete()
     }
 
+    private fun cleanupLegacyFiles() {
+        if (legacyEncryptedFile.exists()) secureDelete(legacyEncryptedFile)
+        if (legacyAccountsFile.exists()) secureDelete(legacyAccountsFile)
+        if (legacyProvidersFile.exists()) secureDelete(legacyProvidersFile)
+    }
+
     suspend fun loadAccounts(): List<Account> = mutex.withLock {
         try {
-            migrateProvidersFile()
+            // Clean up any old-format files (prerelease — no migration)
+            cleanupLegacyFiles()
 
-            // Try plaintext first (migration path)
-            if (accountsFile.exists()) {
-                val plaintext = accountsFile.readText()
-                val accounts = json.decodeFromString<List<Account>>(plaintext)
-                // Migrate to encrypted
-                writeEncrypted(plaintext)
-                // Overwrite plaintext with zeros before deleting (defense-in-depth)
-                secureDelete(accountsFile)
-                return@withLock accounts
-            }
-
-            // Try encrypted
             if (encryptedAccountsFile.exists()) {
                 return@withLock json.decodeFromString<List<Account>>(readEncrypted())
             }
@@ -208,10 +235,10 @@ class PersistenceService(
     }
 
     suspend fun deleteAllData() = mutex.withLock {
-        // Delete all data files
         listOf(
             encryptedAccountsFile,
-            accountsFile,
+            legacyEncryptedFile,
+            legacyAccountsFile,
             legacyProvidersFile,
             favoritesFile,
             settingsFile,
@@ -220,7 +247,7 @@ class PersistenceService(
             customPlaylistsFile,
         ).forEach { file ->
             if (file.exists()) {
-                if (file == encryptedAccountsFile || file == accountsFile) {
+                if (file == encryptedAccountsFile || file == legacyEncryptedFile || file == legacyAccountsFile) {
                     secureDelete(file)
                 } else {
                     file.delete()

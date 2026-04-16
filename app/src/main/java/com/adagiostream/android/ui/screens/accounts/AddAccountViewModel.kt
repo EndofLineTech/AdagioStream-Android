@@ -116,6 +116,14 @@ class AddAccountViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
+                if (_isXtream.value) {
+                    UrlSanitizer.requireHttpUrl(_host.value.trim())
+                } else {
+                    UrlSanitizer.requireHttpUrl(_m3uUrl.value.trim())
+                    val epg = _epgUrl.value.trim()
+                    if (epg.isNotBlank()) UrlSanitizer.requireHttpUrl(epg)
+                }
+
                 val type = if (_isXtream.value) {
                     AccountType.XtreamCodes(
                         host = _host.value.trim(),

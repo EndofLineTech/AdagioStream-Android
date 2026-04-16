@@ -3,6 +3,7 @@ package com.adagiostream.android.service.metadata
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.util.DebugLogger
+import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -149,7 +150,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                     artist = artists.joinToString(", "),
                     title = title,
                     album = null,
-                    albumArtURL = entry.spotify?.albumImageLarge,
+                    albumArtURL = entry.spotify?.albumImageLarge?.takeIf { UrlSanitizer.isHttpUrl(it) },
                     timestamp = 0L,
                 )
             }
@@ -192,7 +193,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                 artist = artists.joinToString(", "),
                 title = title,
                 album = null,
-                albumArtURL = latest.spotify?.albumImageLarge,
+                albumArtURL = latest.spotify?.albumImageLarge?.takeIf { UrlSanitizer.isHttpUrl(it) },
                 timestamp = 0L,
             )
         } catch (e: Exception) {

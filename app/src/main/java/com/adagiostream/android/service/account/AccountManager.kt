@@ -233,7 +233,7 @@ class AccountManager @Inject constructor(
                         it.copy(
                             id = "${account.id}:${it.id}",
                             accountName = account.name,
-                            name = if (strip) it.name.replace(Regex("""^\d+\s*\|\s*"""), "") else it.name,
+                            name = if (strip) it.name.replace(Regex("""^\d+\s*[|:\-.]+\s*"""), "") else it.name,
                         )
                     })
                 } catch (e: Exception) {

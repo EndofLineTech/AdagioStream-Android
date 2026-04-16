@@ -181,11 +181,11 @@ fun AddAccountScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Strip Stream IDs",
+                            text = "Clean up channel names",
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Text(
-                            text = "Enable if channel names start with a number and pipe (e.g. \"5204 | Radio: ...\")",
+                            text = "Remove number prefixes from channel names (e.g. \"5204 | ESPN\", \"5204 - ESPN\" become \"ESPN\")",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

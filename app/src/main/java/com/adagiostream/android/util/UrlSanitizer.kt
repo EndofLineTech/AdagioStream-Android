@@ -1,6 +1,6 @@
 package com.adagiostream.android.util
 
-import android.net.Uri
+import java.net.URI
 
 object UrlSanitizer {
 
@@ -26,9 +26,14 @@ object UrlSanitizer {
     }
 
     fun requireHttpUrl(url: String) {
-        val scheme = Uri.parse(url).scheme?.lowercase()
-        if (scheme != "http" && scheme != "https") {
+        if (!isHttpUrl(url)) {
             throw IllegalArgumentException("Invalid URL scheme: only http and https are allowed")
         }
+    }
+
+    /** Returns true if the URL uses http or https scheme. Safe for logo/artwork URLs that should be silently dropped if invalid. */
+    fun isHttpUrl(url: String): Boolean {
+        val scheme = try { URI(url).scheme?.lowercase() } catch (_: Exception) { null }
+        return scheme == "http" || scheme == "https"
     }
 }

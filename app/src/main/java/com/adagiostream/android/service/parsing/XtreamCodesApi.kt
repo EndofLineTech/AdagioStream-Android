@@ -55,7 +55,7 @@ class XtreamCodesApi(private val client: OkHttpClient) {
                     id = stream.streamId.toString(),
                     name = stream.name,
                     streamURL = streamUrl,
-                    logoURL = stream.streamIcon?.ifBlank { null },
+                    logoURL = stream.streamIcon?.ifBlank { null }?.takeIf { UrlSanitizer.isHttpUrl(it) },
                     group = group,
                     epgChannelID = stream.epgChannelId?.ifBlank { null },
                     xtreamStreamId = stream.streamId,

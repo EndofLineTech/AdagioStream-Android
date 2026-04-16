@@ -21,8 +21,8 @@ android {
         applicationId = "com.adagiostream.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 106
-        versionName = "1.0(106)"
+        versionCode = 107
+        versionName = "1.0(107)"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -119,9 +119,6 @@ dependencies {
     // Coil
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
-
-    // Security
-    implementation(libs.security.crypto)
 
     // OkHttp
     implementation(libs.okhttp)
