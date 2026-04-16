@@ -2,11 +2,13 @@ package com.adagiostream.android.ui.screens.m3us
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.CustomPlaylist
 import com.adagiostream.android.model.CustomPlaylistEntry
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -24,8 +26,8 @@ class PlaylistDetailViewModel @Inject constructor(
     val playlist: StateFlow<CustomPlaylist?> = playlistManager.playlists
         .map { list -> list.find { it.id == playlistId } }
         .stateIn(
-            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.SupervisorJob()),
-            started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
             initialValue = playlistManager.playlists.value.find { it.id == playlistId },
         )
 
