@@ -77,6 +77,8 @@ class AccountManager @Inject constructor(
     val lovedTracks: StateFlow<List<LovedTrack>> = _lovedTracks.asStateFlow()
 
     private var favoriteIds = mutableListOf<String>()
+    private val _favoriteKeys = MutableStateFlow<Set<String>>(emptySet())
+    val favoriteKeys: StateFlow<Set<String>> = _favoriteKeys.asStateFlow()
     var sortPrefixes: List<String> = listOf("Radio: ", "TV: ")
         private set
     var sortMode: SortMode = SortMode.ALPHABETICAL
@@ -85,6 +87,7 @@ class AccountManager @Inject constructor(
         private set
     var groupingMode: ChannelGroupingMode = ChannelGroupingMode.ALL_GROUPS
         private set
+    var espnPollingIntervalSeconds: Int = 15
 
     // Group management
     private var enabledGroups: MutableSet<String>? = null  // null = all enabled
@@ -106,6 +109,7 @@ class AccountManager @Inject constructor(
         _lovedTracks.value = emptyList()
         _trackMetadata.value = emptyMap()
         favoriteIds = mutableListOf()
+        _favoriteKeys.value = emptySet()
         enabledGroups = null
         _enabledGroupNames.value = null
         favoriteGroupOrder = mutableListOf()
@@ -130,12 +134,14 @@ class AccountManager @Inject constructor(
             sortMode = settings.sortMode
             groupSortMode = settings.groupSortMode
             groupingMode = settings.channelGroupingMode
+            espnPollingIntervalSeconds = settings.espnPollingIntervalSeconds
             enabledGroups = settings.enabledGroups?.toMutableSet()
             _enabledGroupNames.value = enabledGroups?.toSet()
             favoriteGroupOrder = settings.favoriteGroupOrder.toMutableList()
             _favoriteGroupNames.value = favoriteGroupOrder.toSet()
             _accounts.value = persistenceService.loadAccounts()
             favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
+            _favoriteKeys.value = favoriteIds.toSet()
             _lovedTracks.value = persistenceService.loadLovedTracks()
             loadAllChannels()
             _initialLoadComplete.complete(Unit)
@@ -267,7 +273,9 @@ class AccountManager @Inject constructor(
             startFeedPollingIfNeeded()
             espnScoreService.epgDataProvider = { _epgEntries.value }
             espnScoreService.matchChannels(withFavorites, sortPrefixes)
-            espnScoreService.setPollingEnabled(true)
+            if (espnPollingIntervalSeconds > 0) {
+                espnScoreService.setPollingEnabled(true)
+            }
         } catch (e: Exception) {
             _error.value = UrlSanitizer.redact(e.message ?: "Unknown error")
         } finally {
@@ -283,6 +291,7 @@ class AccountManager @Inject constructor(
             favoriteIds.add(key)
         }
         persistenceService.saveFavoriteIds(favoriteIds.toList())
+        _favoriteKeys.value = favoriteIds.toSet()
 
         _channels.value = _channels.value.map {
             if (favoriteKey(it) == key) it.copy(isFavorite = key in favoriteIds) else it
@@ -303,6 +312,7 @@ class AccountManager @Inject constructor(
 
     suspend fun clearAllFavorites() {
         favoriteIds.clear()
+        _favoriteKeys.value = emptySet()
         persistenceService.clearAllFavorites()
         _channels.value = _channels.value.map { it.copy(isFavorite = false) }
         rebuildGroups()
@@ -605,6 +615,6 @@ class AccountManager @Inject constructor(
         return chunks
     }
 
-    private fun favoriteKey(channel: Channel): String =
+    fun favoriteKey(channel: Channel): String =
         "${channel.name}|${channel.streamURL}"
 }

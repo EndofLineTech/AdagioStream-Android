@@ -76,7 +76,11 @@ class SettingsViewModel @Inject constructor(
                 bufferDurationSeconds = loaded.bufferDurationSeconds.coerceIn(5, 15),
             )
             DebugLogger.isEnabled = loaded.debugLoggingEnabled
-            espnScoreService.livePollIntervalMs = loaded.espnPollingIntervalSeconds * 1000L
+            if (loaded.espnPollingIntervalSeconds == 0) {
+                espnScoreService.setPollingEnabled(false)
+            } else {
+                espnScoreService.livePollIntervalMs = loaded.espnPollingIntervalSeconds * 1000L
+            }
         }
     }
 
@@ -128,7 +132,13 @@ class SettingsViewModel @Inject constructor(
 
     fun updateEspnPollingInterval(seconds: Int) {
         _settings.value = _settings.value.copy(espnPollingIntervalSeconds = seconds)
-        espnScoreService.livePollIntervalMs = seconds * 1000L
+        accountManager.espnPollingIntervalSeconds = seconds
+        if (seconds == 0) {
+            espnScoreService.setPollingEnabled(false)
+        } else {
+            espnScoreService.livePollIntervalMs = seconds * 1000L
+            espnScoreService.setPollingEnabled(true)
+        }
         save()
     }
 

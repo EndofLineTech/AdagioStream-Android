@@ -493,7 +493,7 @@ fun SettingsScreen(
         )
         Spacer(modifier = Modifier.height(8.dp))
 
-        val espnOptions = listOf(5, 10, 15, 30)
+        val espnOptions = listOf(0, 5, 10, 15, 30)
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             espnOptions.forEachIndexed { index, seconds ->
                 SegmentedButton(
@@ -504,12 +504,12 @@ fun SettingsScreen(
                         count = espnOptions.size,
                     ),
                 ) {
-                    Text(text = "${seconds}s")
+                    Text(text = if (seconds == 0) "Off" else "${seconds}s")
                 }
             }
         }
 
-        FooterText("How often to refresh live sports scores from ESPN.com API. Lower values show scores sooner but use more data.")
+        FooterText("How often to refresh live sports scores from ESPN.com API. Off disables score updates entirely. Lower values show scores sooner but use more data.")
 
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
