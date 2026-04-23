@@ -438,7 +438,9 @@ class VLCPlayerWrapper(
 
         val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
         if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            DebugLogger.log("Audio focus request denied", DebugLogger.Category.AUDIO)
+            DebugLogger.log("Play blocked — audio focus denied (another app has focus)", DebugLogger.Category.AUDIO)
+            _playbackState.value = PlaybackState.Idle
+            return
         }
 
         val cachingMs = (bufferDurationSeconds * 1000).toString()
@@ -479,11 +481,17 @@ class VLCPlayerWrapper(
     }
 
     fun resume() {
-        listeningSegmentStartTime = System.currentTimeMillis()
         if (castManager.isCasting.value) {
+            listeningSegmentStartTime = System.currentTimeMillis()
             castManager.play()
             return
         }
+        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
+        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            DebugLogger.log("Resume blocked — audio focus denied (another app has focus)", DebugLogger.Category.AUDIO)
+            return
+        }
+        listeningSegmentStartTime = System.currentTimeMillis()
         if (pausedAtSystemTime > 0L) {
             val pauseDuration = System.currentTimeMillis() - pausedAtSystemTime
             _timeShiftMs.value += pauseDuration
