@@ -714,7 +714,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SectionHeader(title: String) {
+internal fun SectionHeader(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.titleLarge,
@@ -733,7 +733,7 @@ private fun FooterText(text: String) {
 }
 
 @Composable
-private fun DebugLogsSection(viewModel: SettingsViewModel) {
+internal fun DebugLogsSection(viewModel: SettingsViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val logSize by viewModel.debugLogSize.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -914,7 +914,7 @@ private fun StartupStreamPicker(
 }
 
 @Composable
-private fun SortPrefixEditor(
+internal fun SortPrefixEditor(
     prefixes: List<String>,
     onPrefixesChanged: (List<String>) -> Unit,
 ) {
