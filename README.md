@@ -146,4 +146,8 @@ Adagio Stream does not collect, store, or transmit any personal data.
 
 ## License
 
-Copyright (c) 2026 Adagio Stream. All rights reserved.
+Copyright (c) 2026 End of Line Technologies.
+
+Licensed under the **GNU Affero General Public License v3.0** with additional permissions under section 7 covering (1) distribution through Android application stores subject to standard store end-user terms (Google Play, Amazon Appstore, Samsung Galaxy Store, F-Droid, direct APK), and (2) linking with proprietary Android platform components such as Google Play Services / Cast Framework.
+
+See [LICENSE](LICENSE) for the full license text and additional permissions. Downstream recipients may remove the additional permissions per AGPL §7.
