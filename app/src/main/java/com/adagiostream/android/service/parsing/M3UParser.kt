@@ -15,7 +15,7 @@ class M3UParser(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code} from ${UrlSanitizer.redact(url)}")
-        val body = response.body?.string() ?: throw IllegalStateException("Empty response from ${UrlSanitizer.redact(url)}")
+        val body = response.body.string()
         parseContent(body)
     }
 
@@ -58,17 +58,21 @@ class M3UParser(private val client: OkHttpClient) {
     }
 
     private fun parseExtInf(line: String, streamUrl: String): Channel? {
+        if (!UrlSanitizer.isHttpUrl(streamUrl)) return null
         val name = extractDisplayName(line) ?: return null
         val tvgId = extractAttribute(line, "tvg-id")
         val tvgName = extractAttribute(line, "tvg-name")
         val tvgLogo = extractAttribute(line, "tvg-logo")
         val groupTitle = extractAttribute(line, "group-title") ?: "Uncategorized"
 
+        val channelName = tvgName?.ifBlank { null } ?: name
+        val stableId = tvgId?.ifBlank { null }
+            ?: UUID.nameUUIDFromBytes("$channelName|$streamUrl".toByteArray()).toString()
         return Channel(
-            id = UUID.randomUUID().toString(),
-            name = tvgName?.ifBlank { null } ?: name,
+            id = stableId,
+            name = channelName,
             streamURL = streamUrl,
-            logoURL = tvgLogo?.ifBlank { null },
+            logoURL = tvgLogo?.ifBlank { null }?.takeIf { UrlSanitizer.isHttpUrl(it) },
             group = groupTitle.ifBlank { "Uncategorized" },
             epgChannelID = tvgId?.ifBlank { null },
         )

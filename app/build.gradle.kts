@@ -1,24 +1,38 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
 
+val localProps = rootProject.file("local.properties").takeIf { it.exists() }?.let { file ->
+    Properties().apply { file.inputStream().use { load(it) } }
+}
+
 android {
     namespace = "com.adagiostream.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.adagiostream.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 64
-        versionName = "1.0(64)"
+        versionCode = 117
+        versionName = "1.0(117)"
         ndk {
             abiFilters += "arm64-v8a"
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = (System.getenv("KEYSTORE_FILE") ?: localProps?.getProperty("release.storeFile"))?.let { file(it) }
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: localProps?.getProperty("release.storePassword") ?: ""
+            keyAlias = System.getenv("KEY_ALIAS") ?: localProps?.getProperty("release.keyAlias") ?: ""
+            keyPassword = System.getenv("KEY_PASSWORD") ?: localProps?.getProperty("release.keyPassword") ?: ""
         }
     }
 
@@ -26,21 +40,20 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     buildFeatures {
@@ -54,13 +67,18 @@ android {
         }
     }
 
-    applicationVariants.all {
-        outputs.all {
-            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            val safeVersion = versionName?.replace("(", "-")?.replace(")", "") ?: "unknown"
-            output.outputFileName = "AdagioStream-${safeVersion}-${buildType.name}.apk"
-        }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
+}
+
+base {
+    val safeVersion = android.defaultConfig.versionName
+        ?.replace("(", "-")?.replace(")", "") ?: "unknown"
+    archivesName = "AdagioStream-$safeVersion"
 }
 
 dependencies {
@@ -78,6 +96,7 @@ dependencies {
     implementation(libs.lifecycle.runtime.ktx)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.lifecycle.viewmodel.compose)
+    implementation(libs.appcompat)
     implementation(libs.activity.compose)
     implementation(libs.navigation.compose)
 
@@ -93,12 +112,13 @@ dependencies {
     // libVLC
     implementation(libs.libvlc.all)
 
+    // Chromecast
+    implementation(libs.cast.framework)
+    implementation(libs.mediarouter)
+
     // Coil
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
-
-    // Security
-    implementation(libs.security.crypto)
 
     // OkHttp
     implementation(libs.okhttp)

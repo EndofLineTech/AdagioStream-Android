@@ -2,15 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <uses-feature
-        android:name="android.hardware.type.automotive"
-        android:required="false" />
 
     <application
         android:name=".AdagioStreamApp"
@@ -38,6 +35,18 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ShareReceiverActivity"
+            android:exported="true"
+            android:theme="@style/Theme.AdagioStream"
+            android:label="Add to AdagioStream">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".service.player.AudioPlaybackService"
             android:exported="true"
@@ -59,12 +68,23 @@
         </provider>
 
         <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.adagiostream.android.service.player.CastOptionsProvider" />
+
+        <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
 
-        <meta-data
-            android:name="com.android.automotive"
-            android:resource="@xml/automotive_app_desc" />
+        <receiver
+            android:name=".widget.NowPlayingWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/now_playing_widget_info" />
+        </receiver>
 
     </application>
 

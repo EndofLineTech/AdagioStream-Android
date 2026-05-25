@@ -1,12 +1,11 @@
 package com.adagiostream.android.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 
-@RunWith(RobolectricTestRunner::class)
 class UrlSanitizerTest {
 
     // --- redact() tests (pure string operations) ---
@@ -81,7 +80,7 @@ class UrlSanitizerTest {
         assertEquals(input, result)
     }
 
-    // --- requireHttpUrl() tests (needs Android Uri) ---
+    // --- requireHttpUrl() tests ---
 
     @Test
     fun `requireHttpUrl accepts http`() {
@@ -105,5 +104,42 @@ class UrlSanitizerTest {
         assertThrows(IllegalArgumentException::class.java) {
             UrlSanitizer.requireHttpUrl("")
         }
+    }
+
+    // --- isHttpUrl() tests ---
+
+    @Test
+    fun `isHttpUrl returns true for http`() {
+        assertTrue(UrlSanitizer.isHttpUrl("http://example.com/logo.png"))
+    }
+
+    @Test
+    fun `isHttpUrl returns true for https`() {
+        assertTrue(UrlSanitizer.isHttpUrl("https://example.com/logo.png"))
+    }
+
+    @Test
+    fun `isHttpUrl returns false for ftp`() {
+        assertFalse(UrlSanitizer.isHttpUrl("ftp://example.com/file"))
+    }
+
+    @Test
+    fun `isHttpUrl returns false for file scheme`() {
+        assertFalse(UrlSanitizer.isHttpUrl("file:///etc/passwd"))
+    }
+
+    @Test
+    fun `isHttpUrl returns false for content scheme`() {
+        assertFalse(UrlSanitizer.isHttpUrl("content://com.example/data"))
+    }
+
+    @Test
+    fun `isHttpUrl returns false for empty string`() {
+        assertFalse(UrlSanitizer.isHttpUrl(""))
+    }
+
+    @Test
+    fun `isHttpUrl returns false for garbage input`() {
+        assertFalse(UrlSanitizer.isHttpUrl("not a url at all"))
     }
 }

@@ -27,5 +27,6 @@ sealed interface AccountType {
         val host: String,
         val username: String,
         val password: String,
+        val stripStreamIDs: Boolean = false,
     ) : AccountType
 }

@@ -2,6 +2,7 @@ package com.adagiostream.android.ui.screens.channels
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,12 +33,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.ui.components.ChannelListItem
 import com.adagiostream.android.ui.components.GroupHeader
 import com.adagiostream.android.ui.screens.epg.EPGBottomSheet
+import com.adagiostream.android.ui.screens.m3us.AddToPlaylistSheet
+import com.adagiostream.android.service.playlist.CustomPlaylistManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,8 +54,10 @@ fun ChannelsScreen(
     val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
     val espnGames by viewModel.espnGames.collectAsStateWithLifecycle()
     val epgEntries by viewModel.epgEntries.collectAsStateWithLifecycle()
+    val customPlaylists by viewModel.customPlaylists.collectAsStateWithLifecycle()
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
     var showEPGChannel by remember { mutableStateOf<Channel?>(null) }
+    var addToPlaylistChannel by remember { mutableStateOf<Channel?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -92,15 +97,19 @@ fun ChannelsScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
             if (groups.isEmpty() && !isLoading) {
-                Box(
+                LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
-                    Text(
-                        text = "No channels available",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    item {
+                        Text(
+                            text = if (error != null) "Pull down to retry"
+                                   else "No channels available",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -136,6 +145,7 @@ fun ChannelsScreen(
                                     trackMetadata = feedMetadata[channel.id],
                                     espnGame = espnGames[channel.id],
                                     currentProgram = epgProgram,
+                                    onLongClick = { addToPlaylistChannel = channel },
                                 )
                             }
                         }
@@ -156,6 +166,15 @@ fun ChannelsScreen(
             entries = epgEntries[channelEpgId] ?: emptyList(),
             channelName = epgChannel.name,
             onDismiss = { showEPGChannel = null },
+        )
+    }
+
+    addToPlaylistChannel?.let { channel ->
+        AddToPlaylistSheet(
+            channel = channel,
+            playlistManager = viewModel.playlistManager,
+            playlists = customPlaylists,
+            onDismiss = { addToPlaylistChannel = null },
         )
     }
 }

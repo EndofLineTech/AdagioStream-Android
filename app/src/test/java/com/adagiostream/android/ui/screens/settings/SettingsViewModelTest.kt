@@ -5,8 +5,9 @@ import com.adagiostream.android.model.AppearanceMode
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.persistence.PersistenceService
-import com.adagiostream.android.service.player.ExoPlayerWrapper
+import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.testutil.MainDispatcherRule
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -29,10 +30,11 @@ class SettingsViewModelTest {
         coEvery { loadSettings() } returns AppSettings()
     }
     private val accountManager = mockk<AccountManager>(relaxed = true)
-    private val exoPlayerWrapper = mockk<ExoPlayerWrapper>(relaxed = true)
+    private val vlcPlayerWrapper = mockk<VLCPlayerWrapper>(relaxed = true)
+    private val espnScoreService = mockk<ESPNScoreService>(relaxed = true)
 
     private fun createViewModel(): SettingsViewModel {
-        return SettingsViewModel(persistenceService, accountManager, exoPlayerWrapper)
+        return SettingsViewModel(persistenceService, accountManager, vlcPlayerWrapper, espnScoreService)
     }
 
     // --- Buffer Duration ---
@@ -62,11 +64,11 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `updateBufferDuration notifies ExoPlayerWrapper`() = runTest {
+    fun `updateBufferDuration notifies VLCPlayerWrapper`() = runTest {
         val vm = createViewModel()
         advanceUntilIdle()
         vm.updateBufferDuration(12)
-        verify { exoPlayerWrapper.updateBufferDuration(12) }
+        verify { vlcPlayerWrapper.updateBufferDuration(12) }
     }
 
     @Test

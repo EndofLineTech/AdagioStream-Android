@@ -24,7 +24,7 @@ class ITunesSearchApi(private val client: OkHttpClient) {
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext null
-            val body = response.body?.string() ?: return@withContext null
+            val body = response.body.string()
             val result = json.decodeFromString<ITunesSearchResponse>(body)
             result.results.firstOrNull()?.trackViewUrl
         } catch (e: Exception) {

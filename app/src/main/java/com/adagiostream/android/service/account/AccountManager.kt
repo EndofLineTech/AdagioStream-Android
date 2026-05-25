@@ -6,6 +6,7 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.LovedTrack
+import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.model.ESPNGameInfo
@@ -17,6 +18,7 @@ import com.adagiostream.android.service.parsing.XtreamCodesApi
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.UrlSanitizer
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -75,22 +77,55 @@ class AccountManager @Inject constructor(
     val lovedTracks: StateFlow<List<LovedTrack>> = _lovedTracks.asStateFlow()
 
     private var favoriteIds = mutableListOf<String>()
+    private val _favoriteKeys = MutableStateFlow<Set<String>>(emptySet())
+    val favoriteKeys: StateFlow<Set<String>> = _favoriteKeys.asStateFlow()
     var sortPrefixes: List<String> = listOf("Radio: ", "TV: ")
         private set
     var sortMode: SortMode = SortMode.ALPHABETICAL
         private set
     var groupSortMode: SortMode = SortMode.ALPHABETICAL
         private set
+    var groupingMode: ChannelGroupingMode = ChannelGroupingMode.ALL_GROUPS
+        private set
+    var espnPollingIntervalSeconds: Int = 15
 
     // Group management
     private var enabledGroups: MutableSet<String>? = null  // null = all enabled
+    private val _enabledGroupNames = MutableStateFlow<Set<String>?>(null)
+    val enabledGroupNames: StateFlow<Set<String>?> = _enabledGroupNames.asStateFlow()
     private var favoriteGroupOrder = mutableListOf<String>()
     private val _allGroupNames = MutableStateFlow<Set<String>>(emptySet())
     val allGroupNames: StateFlow<Set<String>> = _allGroupNames.asStateFlow()
+    private val _favoriteGroupNames = MutableStateFlow<Set<String>>(emptySet())
+    val favoriteGroupNames: StateFlow<Set<String>> = _favoriteGroupNames.asStateFlow()
 
     val espnGames: StateFlow<Map<String, ESPNGameInfo>> = espnScoreService.gamesByChannel
 
+    fun resetAll() {
+        _accounts.value = emptyList()
+        _channels.value = emptyList()
+        _groups.value = emptyList()
+        _allGroupNames.value = emptySet()
+        _lovedTracks.value = emptyList()
+        _trackMetadata.value = emptyMap()
+        favoriteIds = mutableListOf()
+        _favoriteKeys.value = emptySet()
+        enabledGroups = null
+        _enabledGroupNames.value = null
+        favoriteGroupOrder = mutableListOf()
+        sortPrefixes = listOf("Radio: ", "TV: ")
+        sortMode = SortMode.ALPHABETICAL
+        groupSortMode = SortMode.ALPHABETICAL
+        groupingMode = ChannelGroupingMode.ALL_GROUPS
+        stopTrackMetadataPolling()
+    }
+
     private var hasSxmChannels = false
+
+    private val _initialLoadComplete = CompletableDeferred<Unit>()
+
+    /** Suspends until the initial channel load from init has completed. */
+    suspend fun awaitInitialLoad() = _initialLoadComplete.await()
 
     init {
         scope.launch {
@@ -98,12 +133,18 @@ class AccountManager @Inject constructor(
             sortPrefixes = settings.sortPrefixes
             sortMode = settings.sortMode
             groupSortMode = settings.groupSortMode
+            groupingMode = settings.channelGroupingMode
+            espnPollingIntervalSeconds = settings.espnPollingIntervalSeconds
             enabledGroups = settings.enabledGroups?.toMutableSet()
+            _enabledGroupNames.value = enabledGroups?.toSet()
             favoriteGroupOrder = settings.favoriteGroupOrder.toMutableList()
+            _favoriteGroupNames.value = favoriteGroupOrder.toSet()
             _accounts.value = persistenceService.loadAccounts()
             favoriteIds = persistenceService.loadFavoriteIds().toMutableList()
+            _favoriteKeys.value = favoriteIds.toSet()
             _lovedTracks.value = persistenceService.loadLovedTracks()
             loadAllChannels()
+            _initialLoadComplete.complete(Unit)
         }
     }
 
@@ -131,7 +172,7 @@ class AccountManager @Inject constructor(
         val newGroupCount: Int,
     )
 
-    suspend fun addAccount(account: Account): AddAccountResult {
+    suspend fun addAccount(account: Account, enableAllGroups: Boolean = false): AddAccountResult {
         val existingGroups = _allGroupNames.value.toSet()
         val updated = _accounts.value + account
         _accounts.value = updated
@@ -139,8 +180,13 @@ class AccountManager @Inject constructor(
         loadAllChannels()
 
         val newGroups = _allGroupNames.value - existingGroups
-        // Auto-disable new groups if there were existing groups
-        if (existingGroups.isNotEmpty() && newGroups.isNotEmpty()) {
+        // When enableAllGroups is true (first-time setup), ensure all groups are enabled
+        if (enableAllGroups) {
+            enabledGroups = null
+            _enabledGroupNames.value = null
+            saveGroupSettings()
+            rebuildGroups()
+        } else if (existingGroups.isNotEmpty() && newGroups.isNotEmpty()) {
             for (groupName in newGroups) {
                 if (enabledGroups == null) {
                     // Initialize enabledGroups with all existing groups (excluding new ones)
@@ -149,6 +195,7 @@ class AccountManager @Inject constructor(
                     // New groups are already not in enabledGroups, so they're disabled
                 }
             }
+            _enabledGroupNames.value = enabledGroups?.toSet()
             saveGroupSettings()
             rebuildGroups()
         }
@@ -189,16 +236,28 @@ class AccountManager @Inject constructor(
 
         try {
             val allChannels = mutableListOf<Channel>()
+            val loadErrors = mutableListOf<String>()
             for (account in _accounts.value.filter { it.isEnabled }) {
                 try {
                     val channels = when (account.type) {
                         is AccountType.M3U -> m3uParser.parse(account.type.url)
                         is AccountType.XtreamCodes -> xtreamApi.getChannels(account.type)
                     }
-                    allChannels.addAll(channels)
+                    val strip = (account.type as? AccountType.XtreamCodes)?.stripStreamIDs == true
+                    allChannels.addAll(channels.map {
+                        it.copy(
+                            id = "${account.id}:${it.id}",
+                            accountName = account.name,
+                            name = if (strip) it.name.replace(Regex("""^\d+\s*[|:\-.]+\s*"""), "") else it.name,
+                        )
+                    })
                 } catch (e: Exception) {
-                    _error.value = "Failed to load ${account.name}: ${UrlSanitizer.redact(e.message ?: "Unknown error")}"
+                    loadErrors.add("Failed to load ${account.name}: ${UrlSanitizer.redact(e.message ?: "Unknown error")}")
                 }
+            }
+            // Only surface errors if no channels loaded at all
+            if (allChannels.isEmpty() && loadErrors.isNotEmpty()) {
+                _error.value = loadErrors.first()
             }
 
             val withFavorites = allChannels.map { channel ->
@@ -212,8 +271,11 @@ class AccountManager @Inject constructor(
             xmPlaylistApi.matchChannels(withFavorites, sortPrefixes)
             hasSxmChannels = xmPlaylistApi.hasMappedChannels()
             startFeedPollingIfNeeded()
+            espnScoreService.epgDataProvider = { _epgEntries.value }
             espnScoreService.matchChannels(withFavorites, sortPrefixes)
-            espnScoreService.setPollingEnabled(true)
+            if (espnPollingIntervalSeconds > 0) {
+                espnScoreService.setPollingEnabled(true)
+            }
         } catch (e: Exception) {
             _error.value = UrlSanitizer.redact(e.message ?: "Unknown error")
         } finally {
@@ -229,6 +291,7 @@ class AccountManager @Inject constructor(
             favoriteIds.add(key)
         }
         persistenceService.saveFavoriteIds(favoriteIds.toList())
+        _favoriteKeys.value = favoriteIds.toSet()
 
         _channels.value = _channels.value.map {
             if (favoriteKey(it) == key) it.copy(isFavorite = key in favoriteIds) else it
@@ -249,6 +312,7 @@ class AccountManager @Inject constructor(
 
     suspend fun clearAllFavorites() {
         favoriteIds.clear()
+        _favoriteKeys.value = emptySet()
         persistenceService.clearAllFavorites()
         _channels.value = _channels.value.map { it.copy(isFavorite = false) }
         rebuildGroups()
@@ -269,6 +333,11 @@ class AccountManager @Inject constructor(
         rebuildGroups()
     }
 
+    fun updateGroupingMode(mode: ChannelGroupingMode) {
+        groupingMode = mode
+        rebuildGroups()
+    }
+
     fun isGroupEnabled(groupName: String): Boolean {
         return enabledGroups?.contains(groupName) ?: true
     }
@@ -286,6 +355,7 @@ class AccountManager @Inject constructor(
         } else {
             enabledGroups!!.add(groupName)
         }
+        _enabledGroupNames.value = enabledGroups?.toSet()
         saveGroupSettings()
         rebuildGroups()
     }
@@ -296,18 +366,21 @@ class AccountManager @Inject constructor(
         } else {
             favoriteGroupOrder.add(groupName)
         }
+        _favoriteGroupNames.value = favoriteGroupOrder.toSet()
         saveGroupSettings()
         rebuildGroups()
     }
 
     suspend fun updateFavoriteGroupOrder(order: List<String>) {
         favoriteGroupOrder = order.toMutableList()
+        _favoriteGroupNames.value = favoriteGroupOrder.toSet()
         saveGroupSettings()
         rebuildGroups()
     }
 
     suspend fun setAllGroupsEnabled(enabled: Boolean) {
         enabledGroups = if (enabled) null else mutableSetOf()
+        _enabledGroupNames.value = enabledGroups?.toSet()
         saveGroupSettings()
         rebuildGroups()
     }
@@ -359,7 +432,19 @@ class AccountManager @Inject constructor(
                     }
                 }
                 is AccountType.XtreamCodes -> {
-                    // Xtream EPG is loaded on-demand per channel via loadXtreamEPGForChannel
+                    // Load full XMLTV EPG from the standard XC endpoint
+                    try {
+                        val baseUrl = type.host.trimEnd('/')
+                        val xmltvUrl = "$baseUrl/xmltv.php?username=${type.username}&password=${type.password}"
+                        val entries = epgParser.parse(xmltvUrl)
+                        allEntries.putAll(entries)
+                        DebugLogger.log(
+                            "Loaded ${entries.size} EPG channels from XC provider ${account.name}",
+                            DebugLogger.Category.GENERAL,
+                        )
+                    } catch (_: Exception) {
+                        // EPG loading is best-effort; on-demand fallback still available
+                    }
                 }
             }
         }
@@ -431,7 +516,16 @@ class AccountManager @Inject constructor(
     }
 
     private fun rebuildGroups() {
-        val allGrouped = _channels.value.groupBy { it.group }
+        val allGrouped = when (groupingMode) {
+            ChannelGroupingMode.ALL_GROUPS -> _channels.value.groupBy { it.group }
+            ChannelGroupingMode.BY_PROVIDER -> _channels.value.groupBy { it.accountName ?: "Unknown" }
+            ChannelGroupingMode.BY_SOURCE -> _channels.value.groupBy {
+                when {
+                    it.xtreamStreamId != null -> "Xtream Codes"
+                    else -> "M3U"
+                }
+            }
+        }
 
         // Track all raw group names for group management
         _allGroupNames.value = allGrouped.keys
@@ -521,6 +615,6 @@ class AccountManager @Inject constructor(
         return chunks
     }
 
-    private fun favoriteKey(channel: Channel): String =
+    fun favoriteKey(channel: Channel): String =
         "${channel.name}|${channel.streamURL}"
 }

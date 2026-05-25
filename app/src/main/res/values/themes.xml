@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.AdagioStream" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.AdagioStream" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="mediaRouteButtonStyle">@style/AdagioCastButton</item>
+    </style>
+
+    <style name="AdagioCastButton" parent="Widget.MediaRouter.MediaRouteButton">
+        <item name="mediaRouteButtonTint">?attr/colorControlNormal</item>
     </style>
 </resources>

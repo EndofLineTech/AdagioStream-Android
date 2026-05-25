@@ -1,7 +1,7 @@
 {
   "database": "dolt",
-  "jsonl_export": "issues.jsonl",
   "backend": "dolt",
-  "dolt_mode": "server",
-  "dolt_database": "beads_adagio"
+  "dolt_mode": "embedded",
+  "dolt_database": "beads_adagio",
+  "project_id": "944bfbd1-3d59-42a9-82ba-a82407669f00"
 }

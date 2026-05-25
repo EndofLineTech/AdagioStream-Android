@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- fullBackupContent rules for Android 11 and below -->
 <full-backup-content>
+    <exclude domain="file" path="accounts_v2.enc" />
     <exclude domain="file" path="accounts_encrypted.json" />
     <exclude domain="file" path="accounts.json" />
     <exclude domain="file" path="settings.json" />
     <exclude domain="file" path="favorites.json" />
     <exclude domain="file" path="loved_tracks.json" />
     <exclude domain="file" path="last_played.txt" />
-    <exclude domain="file" path="debug_log.txt" />
+    <exclude domain="file" path="custom_playlists.json" />
+    <exclude domain="file" path="adagiostream-debug.log" />
+    <exclude domain="file" path="adagiostream-debug-prev.log" />
 </full-backup-content>

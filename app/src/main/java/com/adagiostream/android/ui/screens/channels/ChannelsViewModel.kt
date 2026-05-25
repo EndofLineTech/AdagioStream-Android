@@ -7,8 +7,10 @@ import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.TrackMetadata
+import com.adagiostream.android.model.CustomPlaylist
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.player.VLCPlayerWrapper
+import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,7 +25,10 @@ import javax.inject.Inject
 class ChannelsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val vlcPlayer: VLCPlayerWrapper,
+    val playlistManager: CustomPlaylistManager,
 ) : ViewModel() {
+
+    val customPlaylists: StateFlow<List<CustomPlaylist>> = playlistManager.playlists
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -36,12 +41,24 @@ class ChannelsViewModel @Inject constructor(
 
     val filteredGroups: StateFlow<List<ChannelGroup>> = combine(
         accountManager.groups,
+        playlistManager.playlists,
+        accountManager.favoriteKeys,
         _searchQuery,
-    ) { groups, query ->
+    ) { groups, playlists, favKeys, query ->
+        val customGroups = playlists.flatMap { playlist ->
+            playlist.groups.mapNotNull { group ->
+                val channels = group.entries.map { entry ->
+                    val ch = entry.asChannel().copy(group = group.name)
+                    ch.copy(isFavorite = accountManager.favoriteKey(ch) in favKeys)
+                }
+                if (channels.isNotEmpty()) ChannelGroup(name = group.name, channels = channels) else null
+            }
+        }
+        val allGroups = groups + customGroups
         if (query.isBlank()) {
-            groups
+            allGroups
         } else {
-            groups.mapNotNull { group ->
+            allGroups.mapNotNull { group ->
                 val filtered = group.channels.filter {
                     it.name.contains(query, ignoreCase = true)
                 }
@@ -64,6 +81,11 @@ class ChannelsViewModel @Inject constructor(
         val groupChannels = accountManager.groups.value
             .find { it.name == channel.group }
             ?.channels
+            ?: playlistManager.playlists.value
+                .flatMap { it.groups }
+                .find { it.name == channel.group }
+                ?.entries
+                ?.map { it.asChannel().copy(group = channel.group) }
             ?: emptyList()
         vlcPlayer.setChannelList(groupChannels)
         vlcPlayer.play(channel)

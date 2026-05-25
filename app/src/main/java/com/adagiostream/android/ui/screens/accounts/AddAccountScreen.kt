@@ -21,6 +21,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.SegmentedButton
@@ -35,9 +37,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Switch
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,6 +59,7 @@ fun AddAccountScreen(
     val username by viewModel.username.collectAsStateWithLifecycle()
     val password by viewModel.password.collectAsStateWithLifecycle()
     val epgUrl by viewModel.epgUrl.collectAsStateWithLifecycle()
+    val stripStreamIDs by viewModel.stripStreamIDs.collectAsStateWithLifecycle()
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
     val saveComplete by viewModel.saveComplete.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
@@ -153,6 +160,10 @@ fun AddAccountScreen(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        autoCorrectEnabled = false,
+                    ),
                     trailingIcon = {
                         IconButton(onClick = { passwordVisible = !passwordVisible }) {
                             Icon(
@@ -162,6 +173,28 @@ fun AddAccountScreen(
                         }
                     },
                 )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Clean up channel names",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = "Remove number prefixes from channel names (e.g. \"5204 | ESPN\", \"5204 - ESPN\" become \"ESPN\")",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = stripStreamIDs,
+                        onCheckedChange = { viewModel.setStripStreamIDs(it) },
+                    )
+                }
             } else {
                 OutlinedTextField(
                     value = m3uUrl,

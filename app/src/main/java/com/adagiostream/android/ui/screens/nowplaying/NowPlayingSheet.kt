@@ -39,10 +39,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.ui.components.BaseballDiamond
+import com.adagiostream.android.ui.components.CastButton
 import com.adagiostream.android.ui.components.RetryableAsyncImage
 import com.adagiostream.android.util.BitrateFormatter
 import com.adagiostream.android.util.rememberListeningTime
@@ -63,6 +65,8 @@ fun NowPlayingSheet(
     val isTrackLoved by viewModel.isTrackLoved.collectAsStateWithLifecycle()
     val espnGame by viewModel.currentESPNGame.collectAsStateWithLifecycle()
     val epgEntries by viewModel.currentEPGEntries.collectAsStateWithLifecycle()
+    val isCasting by viewModel.isCasting.collectAsStateWithLifecycle()
+    val castDeviceName by viewModel.castDeviceName.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val channel = currentChannel ?: return
 
@@ -118,6 +122,14 @@ fun NowPlayingSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            if (isCasting && castDeviceName != null) {
+                Text(
+                    text = "Casting to $castDeviceName",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
             val isActive = playbackState is PlaybackState.Playing || playbackState is PlaybackState.CatchingUp
@@ -145,12 +157,27 @@ fun NowPlayingSheet(
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center,
                 )
-                Text(
-                    text = espnGame!!.nowPlayingSubtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (espnGame!!.isMLBLive) {
+                        BaseballDiamond(
+                            onFirst = espnGame!!.onFirst == true,
+                            onSecond = espnGame!!.onSecond == true,
+                            onThird = espnGame!!.onThird == true,
+                            size = 28.dp,
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+                    Text(
+                        text = espnGame!!.nowPlayingSubtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             } else if (trackMetadata == null && espnGame == null) {
                 val currentEPG = epgEntries.firstOrNull { it.isCurrentlyAiring }
                 if (currentEPG != null) {
@@ -216,6 +243,13 @@ fun NowPlayingSheet(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
+            if (playbackState is PlaybackState.Error) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(onClick = { viewModel.togglePlayPause() }) {
+                    Text("Retry")
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             Row(
@@ -261,6 +295,8 @@ fun NowPlayingSheet(
                         tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+
+                CastButton(modifier = Modifier.size(36.dp))
 
                 IconButton(onClick = { viewModel.stop() }) {
                     Icon(

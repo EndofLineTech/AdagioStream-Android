@@ -18,7 +18,7 @@ class EPGParser(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) return@withContext emptyMap()
-        val body = response.body?.string() ?: return@withContext emptyMap()
+        val body = response.body.string()
         parseContent(body)
     }
 

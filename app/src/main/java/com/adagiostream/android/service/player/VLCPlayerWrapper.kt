@@ -5,6 +5,10 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import androidx.core.content.ContextCompat
 import com.adagiostream.android.model.Channel
@@ -26,6 +30,7 @@ import org.videolan.libvlc.MediaPlayer
 class VLCPlayerWrapper(
     private val context: Context,
     initialBufferSeconds: Int = 10,
+    val castManager: CastManager,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -41,7 +46,8 @@ class VLCPlayerWrapper(
     private val _streamStartedAt = kotlinx.coroutines.flow.MutableStateFlow<Long?>(null)
     val streamStartedAt: kotlinx.coroutines.flow.StateFlow<Long?> = _streamStartedAt
 
-    private var channelList: List<Channel> = emptyList()
+    var channelList: List<Channel> = emptyList()
+        private set
 
     var bufferDurationSeconds: Int = initialBufferSeconds
         private set
@@ -76,10 +82,23 @@ class VLCPlayerWrapper(
     private var retryCount: Int = 0
     private var hasReceivedPlayingEvent: Boolean = false
     private var retryJob: Job? = null
+    private var stablePlaybackJob: Job? = null
     private companion object {
         const val MAX_RETRIES = 3
         const val DEBOUNCE_WINDOW_MS = 10_000L
         const val DEBOUNCE_DELAY_MS = 1_500L
+        // Reset retry budget after this much continuous playback so a long
+        // listening session that hits one network swap gets a full retry budget.
+        const val STABLE_PLAYBACK_RESET_MS = 30_000L
+    }
+
+    // Network change monitoring — triggers immediate reconnect on wifi↔mobile swap
+    private val connectivityManager =
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            scope.launch { handleNetworkAvailable() }
+        }
     }
 
     // Audio focus
@@ -100,6 +119,88 @@ class VLCPlayerWrapper(
 
     init {
         attachEventListener()
+        setupCastCallbacks()
+        registerNetworkCallback()
+    }
+
+    private fun registerNetworkCallback() {
+        try {
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            connectivityManager.registerNetworkCallback(request, networkCallback)
+        } catch (e: Exception) {
+            DebugLogger.log("Failed to register network callback — ${e.message}", DebugLogger.Category.PLAYER)
+        }
+    }
+
+    private fun handleNetworkAvailable() {
+        val channel = _currentChannel.value ?: return
+        if (isSwitchingChannels) return
+        if (castManager.isCasting.value) return
+        // Only auto-reconnect from a terminal Error. Other states either resolve
+        // on their own (Buffering/Playing) or are user-driven (Idle/Paused).
+        if (_playbackState.value !is PlaybackState.Error) return
+        DebugLogger.log("Network available — auto-reconnecting ${channel.name}", DebugLogger.Category.PLAYER)
+        retryCount = 0
+        retryJob?.cancel()
+        doPlay(channel)
+    }
+
+    private fun setupCastCallbacks() {
+        castManager.onCastSessionStarted = {
+            try {
+                // Transfer current local playback to Cast
+                val channel = _currentChannel.value
+                if (channel != null && _playbackState.value !is PlaybackState.Idle) {
+                    DebugLogger.log("Cast connected — transferring ${channel.name} to Cast", DebugLogger.Category.PLAYER)
+                    // Stop local VLC playback but keep current channel
+                    isSwitchingChannels = true
+                    mediaPlayer.stop()
+                    stopBitratePolling()
+                    accumulateListeningSegment()
+                    audioManager.abandonAudioFocusRequest(audioFocusRequest)
+                    wasPlayingBeforeFocusLoss = false
+                    isDucking = false
+                    // Send to Cast
+                    castManager.loadMedia(channel)
+                }
+            } catch (e: Exception) {
+                DebugLogger.log("Cast session transfer error — ${e.message}", DebugLogger.Category.PLAYER)
+            }
+        }
+        castManager.onCastSessionEnded = {
+            try {
+                // Resume local playback if we had a channel
+                val channel = _currentChannel.value
+                if (channel != null) {
+                    DebugLogger.log("Cast disconnected — resuming ${channel.name} locally", DebugLogger.Category.PLAYER)
+                    doPlay(channel)
+                }
+            } catch (e: Exception) {
+                DebugLogger.log("Cast session resume error — ${e.message}", DebugLogger.Category.PLAYER)
+            }
+        }
+
+        // Observe remote playback state to keep _playbackState in sync
+        scope.launch {
+            castManager.remotePlaybackState.collect { remoteState ->
+                if (castManager.isCasting.value) {
+                    _playbackState.value = remoteState
+                    when (remoteState) {
+                        is PlaybackState.Playing -> {
+                            if (listeningSegmentStartTime == 0L) {
+                                listeningSegmentStartTime = System.currentTimeMillis()
+                            }
+                        }
+                        is PlaybackState.Paused, is PlaybackState.Idle, is PlaybackState.Error -> {
+                            accumulateListeningSegment()
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
     }
 
     private fun buildLibVLC(): LibVLC {
@@ -141,11 +242,20 @@ class VLCPlayerWrapper(
             MediaPlayer.Event.Playing -> {
                 DebugLogger.log("Playing ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
                 hasReceivedPlayingEvent = true
-                retryCount = 0
                 retryJob?.cancel()
                 _playbackState.value = if (isPlayingBufferedFile) PlaybackState.CatchingUp else PlaybackState.Playing
                 startBitratePolling()
                 listeningSegmentStartTime = System.currentTimeMillis()
+                // Reset retry budget only after sustained playback — protects against
+                // a flaky stream that briefly connects between failures.
+                stablePlaybackJob?.cancel()
+                stablePlaybackJob = scope.launch {
+                    delay(STABLE_PLAYBACK_RESET_MS)
+                    val s = _playbackState.value
+                    if (s is PlaybackState.Playing || s is PlaybackState.CatchingUp) {
+                        retryCount = 0
+                    }
+                }
             }
             MediaPlayer.Event.Paused -> {
                 DebugLogger.log("Paused", DebugLogger.Category.VLC)
@@ -171,10 +281,12 @@ class VLCPlayerWrapper(
                             _timeShiftMs.value = 0L
                             doPlay(liveChannel)
                         }
-                    } else if (!hasReceivedPlayingEvent && retryCount < MAX_RETRIES) {
-                        retryConnection("Stream ended before playing")
+                    } else if (retryCount < MAX_RETRIES) {
+                        // Live streams shouldn't legitimately end — treat as a transient
+                        // failure (typical cause: network swap, e.g. wifi → mobile).
+                        retryConnection("Stream ended")
                     } else {
-                        DebugLogger.log("EndReached — stream ended for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
+                        DebugLogger.log("EndReached — stream ended for ${_currentChannel.value?.name} (retries exhausted)", DebugLogger.Category.VLC)
                         _playbackState.value = PlaybackState.Error("Stream ended")
                         stopBitratePolling()
                     }
@@ -182,10 +294,10 @@ class VLCPlayerWrapper(
             }
             MediaPlayer.Event.EncounteredError -> {
                 if (!isSwitchingChannels && _currentChannel.value != null) {
-                    if (!hasReceivedPlayingEvent && retryCount < MAX_RETRIES) {
+                    if (retryCount < MAX_RETRIES) {
                         retryConnection("Playback error")
                     } else {
-                        DebugLogger.log("EncounteredError for ${_currentChannel.value?.name}", DebugLogger.Category.VLC)
+                        DebugLogger.log("EncounteredError for ${_currentChannel.value?.name} (retries exhausted)", DebugLogger.Category.VLC)
                         _playbackState.value = PlaybackState.Error("Playback error")
                         stopBitratePolling()
                     }
@@ -197,18 +309,27 @@ class VLCPlayerWrapper(
     private fun startBitratePolling() {
         bitrateJob?.cancel()
         bitrateJob = scope.launch {
+            var lastReadBytes: Long = -1L
+            var lastTimestamp: Long = 0L
             while (true) {
                 delay(5_000L)
                 val media = mediaPlayer.media ?: continue
                 val stats = media.stats ?: continue
-                // VLC reports bitrate in KB/s; convert to kbps (× 8)
-                val inputKbps = stats.inputBitrate * 8f
-                val demuxKbps = stats.demuxBitrate * 8f
-                val currentKbps = maxOf(inputKbps, demuxKbps)
-                if (currentKbps > peakBitrateKbps) {
-                    peakBitrateKbps = currentKbps
+                val now = System.currentTimeMillis()
+                val readBytes = stats.readBytes
+                if (lastReadBytes >= 0 && lastTimestamp > 0) {
+                    val elapsedMs = now - lastTimestamp
+                    if (elapsedMs > 0) {
+                        val bytesPerSec = (readBytes - lastReadBytes) * 1000f / elapsedMs
+                        val currentKbps = bytesPerSec * 8f / 1000f
+                        if (currentKbps > peakBitrateKbps) {
+                            peakBitrateKbps = currentKbps
+                        }
+                        _bitrateKbps.value = peakBitrateKbps
+                    }
                 }
-                _bitrateKbps.value = peakBitrateKbps
+                lastReadBytes = readBytes
+                lastTimestamp = now
             }
         }
     }
@@ -322,9 +443,15 @@ class VLCPlayerWrapper(
         hasReceivedPlayingEvent = false
         retryJob?.cancel()
 
+        // Debounce rapid channel switches (e.g. repeated next/prev presses)
+        val isAlreadyPlaying = _currentChannel.value != null
         val timeSinceTeardown = System.currentTimeMillis() - lastTeardownTime
-        if (lastTeardownTime > 0 && timeSinceTeardown < DEBOUNCE_WINDOW_MS) {
-            DebugLogger.log("Debouncing play (${timeSinceTeardown}ms since last teardown)", DebugLogger.Category.PLAYER)
+        val shouldDebounce = isAlreadyPlaying || (lastTeardownTime > 0 && timeSinceTeardown < DEBOUNCE_WINDOW_MS)
+        if (shouldDebounce) {
+            DebugLogger.log("Debouncing play for ${channel.name} (alreadyPlaying=$isAlreadyPlaying, timeSinceTeardown=${timeSinceTeardown}ms)", DebugLogger.Category.PLAYER)
+            // Guard against stale VLC events during the debounce window —
+            // doPlay() will handle the actual stop when the delay expires.
+            isSwitchingChannels = true
             _currentChannel.value = channel
             _playbackState.value = PlaybackState.Buffering
             pendingPlayJob = scope.launch {
@@ -337,15 +464,10 @@ class VLCPlayerWrapper(
     }
 
     private fun doPlay(channel: Channel) {
-        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
-        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            DebugLogger.log("Audio focus request denied", DebugLogger.Category.AUDIO)
-        }
-
-        // Guard against stale EndReached/Error events from the old stream —
-        // VLC dispatches events asynchronously so they arrive after stop() returns.
+        // Guard against stale VLC events FIRST, before updating channel/state
         isSwitchingChannels = true
         mediaPlayer.stop()
+        stopBitratePolling()
 
         _currentChannel.value = channel
         _playbackState.value = PlaybackState.Buffering
@@ -360,6 +482,19 @@ class VLCPlayerWrapper(
         ContextCompat.startForegroundService(
             context, Intent(context, AudioPlaybackService::class.java)
         )
+
+        if (castManager.isCasting.value) {
+            DebugLogger.log("doPlay(): casting ${channel.name} to Cast device", DebugLogger.Category.PLAYER)
+            castManager.loadMedia(channel)
+            return
+        }
+
+        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
+        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            DebugLogger.log("Play blocked — audio focus denied (another app has focus)", DebugLogger.Category.AUDIO)
+            _playbackState.value = PlaybackState.Idle
+            return
+        }
 
         val cachingMs = (bufferDurationSeconds * 1000).toString()
         val media = Media(libVLC, Uri.parse(channel.streamURL))
@@ -386,6 +521,11 @@ class VLCPlayerWrapper(
     }
 
     fun pause() {
+        if (castManager.isCasting.value) {
+            accumulateListeningSegment()
+            castManager.pause()
+            return
+        }
         if (mediaPlayer.isPlaying) {
             pausedAtSystemTime = System.currentTimeMillis()
             accumulateListeningSegment()
@@ -394,6 +534,16 @@ class VLCPlayerWrapper(
     }
 
     fun resume() {
+        if (castManager.isCasting.value) {
+            listeningSegmentStartTime = System.currentTimeMillis()
+            castManager.play()
+            return
+        }
+        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
+        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            DebugLogger.log("Resume blocked — audio focus denied (another app has focus)", DebugLogger.Category.AUDIO)
+            return
+        }
         listeningSegmentStartTime = System.currentTimeMillis()
         if (pausedAtSystemTime > 0L) {
             val pauseDuration = System.currentTimeMillis() - pausedAtSystemTime
@@ -424,6 +574,7 @@ class VLCPlayerWrapper(
         DebugLogger.log("stop(): channel=${_currentChannel.value?.name}", DebugLogger.Category.PLAYER)
         pendingPlayJob?.cancel()
         retryJob?.cancel()
+        stablePlaybackJob?.cancel()
         timeShiftCaptureJob?.cancel()
         timeShiftBuffer.cleanup()
         isPlayingBufferedFile = false
@@ -432,6 +583,9 @@ class VLCPlayerWrapper(
         hasReceivedPlayingEvent = false
         lastTeardownTime = System.currentTimeMillis()
         _currentChannel.value = null  // Clear before stop so async events are ignored
+        if (castManager.isCasting.value) {
+            castManager.stop()
+        }
         mediaPlayer.stop()
         stopBitratePolling()
         _playbackState.value = PlaybackState.Idle
@@ -448,7 +602,8 @@ class VLCPlayerWrapper(
 
     fun playNext() {
         val current = _currentChannel.value ?: return
-        val index = channelList.indexOfFirst { it.streamURL == current.streamURL }
+        val index = channelList.indexOfFirst { it.id == current.id }
+        DebugLogger.log("playNext(): current=${current.name}, index=$index, listSize=${channelList.size}", DebugLogger.Category.PLAYER)
         if (index >= 0 && index < channelList.size - 1) {
             play(channelList[index + 1])
         }
@@ -456,7 +611,8 @@ class VLCPlayerWrapper(
 
     fun playPrevious() {
         val current = _currentChannel.value ?: return
-        val index = channelList.indexOfFirst { it.streamURL == current.streamURL }
+        val index = channelList.indexOfFirst { it.id == current.id }
+        DebugLogger.log("playPrevious(): current=${current.name}, index=$index, listSize=${channelList.size}", DebugLogger.Category.PLAYER)
         if (index > 0) {
             play(channelList[index - 1])
         }
@@ -481,6 +637,7 @@ class VLCPlayerWrapper(
         stopBitratePolling()
         _listeningTimeMs.value = 0L
         listeningSegmentStartTime = 0L
+        try { connectivityManager.unregisterNetworkCallback(networkCallback) } catch (_: Exception) {}
         scope.cancel()
         audioManager.abandonAudioFocusRequest(audioFocusRequest)
         mediaPlayer.release()

@@ -31,7 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
@@ -107,6 +107,14 @@ fun AccountsScreen(
                             onEdit = { onEditAccount(account.id) },
                             onDelete = { viewModel.deleteAccount(account.id) },
                             onToggleEnabled = { viewModel.toggleAccountEnabled(account.id) },
+                        )
+                    }
+                    item {
+                        Text(
+                            text = "Tap the pencil icon to edit an account. Tap the trash icon to delete.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         )
                     }
                 }

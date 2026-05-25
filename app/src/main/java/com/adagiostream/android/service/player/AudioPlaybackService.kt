@@ -1,3 +1,5 @@
+@file:kotlin.OptIn(kotlinx.coroutines.FlowPreview::class)
+
 package com.adagiostream.android.service.player
 
 import android.app.NotificationChannel
@@ -18,6 +20,7 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import androidx.media3.session.CommandButton
 import com.adagiostream.android.R
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ESPNGameInfo
@@ -25,11 +28,13 @@ import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.DebugLogger.Category.AUTO
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,21 +54,26 @@ class AudioPlaybackService : MediaLibraryService() {
     @Inject lateinit var accountManager: AccountManager
     @Inject lateinit var persistenceService: PersistenceService
     @Inject lateinit var espnScoreService: ESPNScoreService
+    @Inject lateinit var customPlaylistManager: CustomPlaylistManager
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastBrowsedParentId: String? = null
+    private var customButtonJob: kotlinx.coroutines.Job? = null
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
         private const val ROOT_ID = "root"
         private const val FAVORITES_ID = "favorites"
+        private const val LOVED_SONGS_ID = "loved_songs"
+        private const val CUSTOM_PLAYLIST_PREFIX = "custom_playlist_"
+        private const val CUSTOM_GROUP_PREFIX = "custom_group_"
         private val TOGGLE_FAVORITE_COMMAND = SessionCommand("TOGGLE_FAVORITE", Bundle.EMPTY)
         private val SEEK_TO_LIVE_COMMAND = SessionCommand("SEEK_TO_LIVE", Bundle.EMPTY)
         private val TOGGLE_LOVED_TRACK_COMMAND = SessionCommand("TOGGLE_LOVED_TRACK", Bundle.EMPTY)
     }
 
-    @OptIn(UnstableApi::class, FlowPreview::class)
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         DebugLogger.log("AudioPlaybackService.onCreate()", AUTO)
@@ -76,22 +86,21 @@ class AudioPlaybackService : MediaLibraryService() {
             combine(
                 accountManager.groups,
                 accountManager.channels,
-            ) { groups, channels ->
+                customPlaylistManager.playlists,
+            ) { groups, channels, playlists ->
                 val favorites = channels.filter { it.isFavorite }
-                Triple(groups.size, channels.size, favorites.size)
+                Triple(groups.size + playlists.size, channels.size, favorites.size)
             }
                 .debounce(500L)
                 .distinctUntilChanged()
-                .collect { (groupCount, channelCount, favCount) ->
-                    val rootChildCount = groupCount + if (favCount > 0) 1 else 0
+                .collect { (totalGroups, channelCount, favCount) ->
+                    val rootChildCount = totalGroups + 1  // +1 for Favorites (always shown)
                     val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
-                    DebugLogger.log("Browse tree data changed: $groupCount groups, $channelCount channels, $favCount favorites, notifying ${controllers.size} controller(s)", AUTO)
+                    DebugLogger.log("Browse tree data changed: $totalGroups groups, $channelCount channels, $favCount favorites, notifying ${controllers.size} controller(s)", AUTO)
                     controllers.forEach { controller ->
                         DebugLogger.log("  Notifying controller: pkg=${controller.packageName}, rootChildCount=$rootChildCount, favCount=$favCount", AUTO)
                         mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, rootChildCount, null)
-                        if (favCount > 0) {
-                            mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, favCount, null)
-                        }
+                        mediaLibrarySession?.notifyChildrenChanged(controller, FAVORITES_ID, favCount, null)
                     }
                 }
         }
@@ -123,22 +132,43 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
         }
 
-        // Persist last played channel
+        // Persist last played channel + start XM metadata polling for now-playing display
         serviceScope.launch {
             vlcPlayerWrapper.currentChannel.collect { channel ->
                 if (channel != null) {
                     persistenceService.saveLastPlayed(channel.id)
+                    accountManager.startTrackMetadataPolling(channel)
+                } else {
+                    accountManager.stopTrackMetadataPolling()
                 }
             }
         }
 
-        // Stop foreground when playback goes idle
+        // Stop foreground when playback goes idle + update widget
         serviceScope.launch {
-            vlcPlayerWrapper.playbackState.collect { state ->
+            combine(
+                vlcPlayerWrapper.playbackState,
+                vlcPlayerWrapper.currentChannel,
+            ) { state, channel -> state to channel }.collect { (state, channel) ->
                 if (state is PlaybackState.Idle) {
                     DebugLogger.log("Playback idle — removing foreground", AUTO)
                     ServiceCompat.stopForeground(this@AudioPlaybackService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 }
+                // Update home screen widget
+                val statusText = when (state) {
+                    is PlaybackState.Playing -> "Playing"
+                    is PlaybackState.Paused -> "Paused"
+                    is PlaybackState.Buffering -> "Buffering..."
+                    is PlaybackState.CatchingUp -> "Catching up..."
+                    is PlaybackState.Error -> state.message
+                    else -> ""
+                }
+                com.adagiostream.android.widget.NowPlayingWidgetProvider.updateWidget(
+                    this@AudioPlaybackService,
+                    channel?.name,
+                    statusText,
+                    state is PlaybackState.Playing || state is PlaybackState.CatchingUp,
+                )
             }
         }
     }
@@ -152,6 +182,43 @@ class AudioPlaybackService : MediaLibraryService() {
         mediaLibrarySession = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
             .build()
         DebugLogger.log("buildSession() - session created: token=${mediaLibrarySession?.token}", AUTO)
+
+        // Reactively update custom button icons when favorite/loved state changes
+        customButtonJob?.cancel()
+        customButtonJob = serviceScope.launch {
+            combine(
+                vlcPlayerWrapper.currentChannel,
+                accountManager.channels,
+                accountManager.trackMetadata,
+                accountManager.lovedTracks,
+            ) { current, channels, trackMeta, lovedTracks ->
+                val isFav = current != null && channels.find { it.id == current.id }?.isFavorite == true
+                val track = current?.let { trackMeta[it.name] }
+                val isLoved = track != null && lovedTracks.any { it.artist == track.artist && it.title == track.title }
+                isFav to isLoved
+            }
+                .distinctUntilChanged()
+                .collect { (isFav, isLoved) ->
+                    val buttons = buildCustomButtons(isFav, isLoved)
+                    mediaLibrarySession?.connectedControllers?.forEach { controller ->
+                        mediaLibrarySession?.setCustomLayout(controller, buttons)
+                    }
+                }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun buildCustomButtons(isFavorite: Boolean, isLoved: Boolean): List<CommandButton> {
+        return listOf(
+            CommandButton.Builder(if (isFavorite) CommandButton.ICON_STAR_FILLED else CommandButton.ICON_STAR_UNFILLED)
+                .setDisplayName("Favorite")
+                .setSessionCommand(TOGGLE_FAVORITE_COMMAND)
+                .build(),
+            CommandButton.Builder(if (isLoved) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
+                .setDisplayName("Love Track")
+                .setSessionCommand(TOGGLE_LOVED_TRACK_COMMAND)
+                .build(),
+        )
     }
 
     @OptIn(UnstableApi::class)
@@ -196,14 +263,49 @@ class AudioPlaybackService : MediaLibraryService() {
 
     private fun channelListForContext(channel: Channel): List<Channel> {
         val channels = accountManager.channels.value
-        return when (lastBrowsedParentId) {
-            FAVORITES_ID -> channels.filter { it.isFavorite }
-            null -> channels.filter { it.group == channel.group }
-            else -> accountManager.groups.value
-                .find { it.name == lastBrowsedParentId }
-                ?.channels
-                ?: channels.filter { it.group == channel.group }
+        val result = when {
+            lastBrowsedParentId == FAVORITES_ID -> channels.filter { it.isFavorite }
+            lastBrowsedParentId == null -> channels.filter { it.group == channel.group }
+            lastBrowsedParentId!!.startsWith(CUSTOM_PLAYLIST_PREFIX) -> {
+                val playlistId = lastBrowsedParentId!!.removePrefix(CUSTOM_PLAYLIST_PREFIX)
+                customPlaylistManager.playlists.value
+                    .find { it.id == playlistId }
+                    ?.groups?.flatMap { g -> g.entries.map { it.asChannel() } }
+                    ?: listOf(channel)
+            }
+            lastBrowsedParentId!!.startsWith(CUSTOM_GROUP_PREFIX) -> {
+                val groupId = lastBrowsedParentId!!.removePrefix(CUSTOM_GROUP_PREFIX)
+                customPlaylistManager.playlists.value
+                    .flatMap { it.groups }
+                    .find { it.id == groupId }
+                    ?.entries?.map { it.asChannel() }
+                    ?: listOf(channel)
+            }
+            else -> {
+                val browseGroup = accountManager.groups.value
+                    .find { it.name == lastBrowsedParentId }
+                // Only use the browse group if the channel is actually in it;
+                // AA pre-fetches multiple groups in parallel, overwriting
+                // lastBrowsedParentId even when the user tapped from favorites.
+                if (browseGroup != null && browseGroup.channels.any { it.id == channel.id }) {
+                    browseGroup.channels
+                } else if (channel.isFavorite) {
+                    channels.filter { it.isFavorite }
+                } else {
+                    // Check if channel is from a custom playlist
+                    val customPlaylist = customPlaylistManager.playlists.value.find { playlist ->
+                        playlist.groups.any { g -> g.entries.any { it.id == channel.id } }
+                    }
+                    if (customPlaylist != null) {
+                        customPlaylist.groups.flatMap { g -> g.entries.map { it.asChannel() } }
+                    } else {
+                        channels.filter { it.group == channel.group }
+                    }
+                }
+            }
         }
+        DebugLogger.log("channelListForContext() - lastBrowsedParentId=$lastBrowsedParentId, channel=${channel.name}, resultSize=${result.size}", AUTO)
+        return result
     }
 
     private fun createNotificationChannel() {
@@ -228,15 +330,38 @@ class AudioPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
             DebugLogger.log("onConnect() - controller: pkg=${controller.packageName}, uid=${controller.uid}, pid=${controller.controllerVersion}", AUTO)
+
+            // Auto-play startup stream on Android Auto connect if nothing is playing
+            if (vlcPlayerWrapper.currentChannel.value == null) {
+                serviceScope.launch {
+                    accountManager.awaitInitialLoad()
+                    val settings = persistenceService.loadSettings()
+                    val startupId = settings.startupStreamID
+                    if (startupId != null) {
+                        val channel = accountManager.channels.value.find { it.id == startupId }
+                        if (channel != null) {
+                            DebugLogger.log("onConnect() - auto-playing startup channel: ${channel.name}", AUTO)
+                            vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+                            vlcPlayerWrapper.play(channel)
+                        }
+                    }
+                }
+            }
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                 .buildUpon()
                 .add(TOGGLE_FAVORITE_COMMAND)
                 .add(SEEK_TO_LIVE_COMMAND)
                 .add(TOGGLE_LOVED_TRACK_COMMAND)
                 .build()
+            val channel = vlcPlayerWrapper.currentChannel.value
+            val isFav = channel != null && accountManager.channels.value.find { it.id == channel.id }?.isFavorite == true
+            val track = channel?.let { accountManager.trackMetadata.value[it.name] }
+            val isLoved = track != null && accountManager.lovedTracks.value.any { it.artist == track.artist && it.title == track.title }
+            val customButtons = buildCustomButtons(isFav, isLoved)
             DebugLogger.log("onConnect() - accepting connection with custom commands: TOGGLE_FAVORITE, SEEK_TO_LIVE, TOGGLE_LOVED_TRACK", AUTO)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
+                .setCustomLayout(customButtons)
                 .build()
         }
 
@@ -289,56 +414,84 @@ class AudioPlaybackService : MediaLibraryService() {
             mediaItems: List<MediaItem>,
         ): ListenableFuture<List<MediaItem>> {
             DebugLogger.log("onAddMediaItems() - ${mediaItems.size} item(s) from ${controller.packageName}", AUTO)
-            mediaItems.forEach { DebugLogger.log("  mediaId=${it.mediaId}, uri=${it.localConfiguration?.uri}", AUTO) }
-            val resolved = mediaItems.map { item ->
-                val channel = accountManager.channels.value.find { it.id == item.mediaId }
-                if (channel != null) {
-                    DebugLogger.log("  Resolved channel: ${channel.name} (group=${channel.group})", AUTO)
-                    vlcPlayerWrapper.setChannelList(channelListForContext(channel))
-                    vlcPlayerWrapper.play(channel)
-                    item.buildUpon()
-                        .setUri(channel.streamURL)
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(channel.name)
-                                .setStation(channel.name)
-                                .setArtist(channel.group)
-                                .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
-                                .setIsPlayable(true)
-                                .apply { channel.logoURL?.let { setArtworkUri(Uri.parse(it)) } }
-                                .build()
-                        )
-                        .build()
-                } else {
-                    DebugLogger.log("  WARN: No channel found for mediaId=${item.mediaId}", AUTO)
-                    item
+            mediaItems.forEach { DebugLogger.log("  mediaId=${it.mediaId}, title=${it.mediaMetadata.title}, uri=${it.localConfiguration?.uri}", AUTO) }
+            val future = SettableFuture.create<List<MediaItem>>()
+            serviceScope.launch {
+                // Wait for channels to load before resolving media items
+                accountManager.awaitInitialLoad()
+                val allChannels = accountManager.channels.value
+                DebugLogger.log("  Channel pool: ${allChannels.size} channels loaded", AUTO)
+                val customChannels = customPlaylistManager.playlists.value
+                    .flatMap { it.groups }
+                    .flatMap { it.entries }
+                    .map { it.asChannel() }
+                val allSearchable = allChannels + customChannels
+                val resolved = mediaItems.map { item ->
+                    val byId = allSearchable.find { it.id == item.mediaId }
+                    val byName = if (byId == null) {
+                        item.mediaMetadata.title?.let { title ->
+                            allSearchable.find { it.name == title.toString() }
+                        }
+                    } else null
+                    val channel = byId ?: byName
+                    if (byId != null) {
+                        DebugLogger.log("  Matched by ID: ${channel!!.name} (id=${channel.id})", AUTO)
+                    } else if (byName != null) {
+                        DebugLogger.log("  Matched by NAME fallback: ${channel!!.name} (id=${channel.id}, requestedId=${item.mediaId})", AUTO)
+                    }
+                    if (channel != null) {
+                        DebugLogger.log("  Resolved channel: ${channel.name} (group=${channel.group})", AUTO)
+                        vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+                        vlcPlayerWrapper.play(channel)
+                        val subtitle = channelSubtitle(channel)
+                        item.buildUpon()
+                            .setUri(channel.streamURL)
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(channel.name)
+                                    .setStation(channel.name)
+                                    .setArtist(subtitle)
+                                    .setSubtitle(subtitle)
+                                    .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                                    .setIsPlayable(true)
+                                    .apply { channel.logoURL?.let { setArtworkUri(Uri.parse(it)) } }
+                                    .build()
+                            )
+                            .build()
+                    } else {
+                        DebugLogger.log("  WARN: No channel found for mediaId=${item.mediaId}", AUTO)
+                        item
+                    }
                 }
+                future.set(resolved)
             }
-            return Futures.immediateFuture(resolved)
+            return future
         }
 
+        @Deprecated("Deprecated in Media3", ReplaceWith("onPlaybackResumption(mediaSession, controller)"))
         override fun onPlaybackResumption(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
             DebugLogger.log("onPlaybackResumption() - from ${controller.packageName}", AUTO)
-            val lastPlayedId = kotlinx.coroutines.runBlocking {
-                persistenceService.loadLastPlayed()
+            val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            serviceScope.launch {
+                val lastPlayedId = persistenceService.loadLastPlayed()
+                DebugLogger.log("onPlaybackResumption() - lastPlayedId=$lastPlayedId", AUTO)
+                val channel = lastPlayedId?.let { id ->
+                    accountManager.channels.value.find { it.id == id }
+                }
+                if (channel != null) {
+                    DebugLogger.log("onPlaybackResumption() - resuming: ${channel.name}", AUTO)
+                    vlcPlayerWrapper.setChannelList(channelListForContext(channel))
+                    vlcPlayerWrapper.play(channel)
+                } else {
+                    DebugLogger.log("onPlaybackResumption() - no channel found to resume", AUTO)
+                }
+                val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
+                future.set(MediaSession.MediaItemsWithStartPosition(items, 0, 0L))
             }
-            DebugLogger.log("onPlaybackResumption() - lastPlayedId=$lastPlayedId", AUTO)
-            val channel = lastPlayedId?.let { id ->
-                accountManager.channels.value.find { it.id == id }
-            }
-            if (channel != null) {
-                DebugLogger.log("onPlaybackResumption() - resuming: ${channel.name}", AUTO)
-                vlcPlayerWrapper.setChannelList(channelListForContext(channel))
-            } else {
-                DebugLogger.log("onPlaybackResumption() - no channel found to resume", AUTO)
-            }
-            val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
-            return Futures.immediateFuture(
-                MediaSession.MediaItemsWithStartPosition(items, 0, 0L)
-            )
+            return future
         }
 
         override fun onGetLibraryRoot(
@@ -371,49 +524,117 @@ class AudioPlaybackService : MediaLibraryService() {
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             DebugLogger.log("onGetChildren() - parentId=$parentId, page=$page, pageSize=$pageSize, browser=${browser.packageName}", AUTO)
-            val groups = accountManager.groups.value
-            val channels = accountManager.channels.value
-            val favorites = channels.filter { it.isFavorite }
-            DebugLogger.log("onGetChildren() - ${groups.size} groups, ${channels.size} channels, ${favorites.size} favorites", AUTO)
 
-            if (parentId != ROOT_ID) {
-                lastBrowsedParentId = parentId
-            }
+            val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
+            serviceScope.launch {
+                // Wait for initial channel load so browse tree isn't empty
+                accountManager.awaitInitialLoad()
 
-            val items: List<MediaItem> = when (parentId) {
-                ROOT_ID -> {
-                    val result = mutableListOf<MediaItem>()
-                    if (favorites.isNotEmpty()) {
+                val groups = accountManager.groups.value
+                val channels = accountManager.channels.value
+                val favorites = channels.filter { it.isFavorite }
+                DebugLogger.log("onGetChildren() - ${groups.size} groups, ${channels.size} channels, ${favorites.size} favorites", AUTO)
+
+                if (parentId != ROOT_ID) {
+                    lastBrowsedParentId = parentId
+                }
+
+                val lovedTracks = accountManager.lovedTracks.value
+
+                val items: List<MediaItem> = when (parentId) {
+                    ROOT_ID -> {
+                        val result = mutableListOf<MediaItem>()
                         result.add(
                             buildBrowsableItem(
                                 FAVORITES_ID,
                                 "Favorites",
-                                "${favorites.size} channels",
+                                if (favorites.isNotEmpty()) "${favorites.size} channels" else "No favorites yet",
                             )
                         )
+                        // Loved Songs intentionally excluded from AA browse tree —
+                        // it's a reference list, not playable channels.
+                        // Custom playlists
+                        val playlists = customPlaylistManager.playlists.value
+                        playlists.forEach { playlist ->
+                            val entryCount = playlist.groups.sumOf { it.entries.size }
+                            if (entryCount > 0) {
+                                result.add(
+                                    buildBrowsableItem(
+                                        "$CUSTOM_PLAYLIST_PREFIX${playlist.id}",
+                                        playlist.name,
+                                        "$entryCount streams",
+                                    )
+                                )
+                            }
+                        }
+                        result.addAll(groups.map {
+                            buildBrowsableItem(
+                                it.name,
+                                it.name,
+                                "${it.channels.size} channels",
+                            )
+                        })
+                        result
                     }
-                    result.addAll(groups.map {
-                        buildBrowsableItem(
-                            it.name,
-                            it.name,
-                            "${it.channels.size} channels",
-                        )
-                    })
-                    result
+                    FAVORITES_ID -> {
+                        favorites.forEach { DebugLogger.log("  Favorite: id=${it.id}, name=${it.name}", AUTO) }
+                        favorites.map { buildPlayableItem(it) }
+                    }
+                    LOVED_SONGS_ID -> lovedTracks.map { track ->
+                        MediaItem.Builder()
+                            .setMediaId("loved_${track.artist}_${track.title}")
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(track.title)
+                                    .setArtist(track.artist)
+                                    .setSubtitle("${track.artist} \u2013 ${track.channelName}")
+                                    .setIsPlayable(false)
+                                    .setIsBrowsable(false)
+                                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                    .apply { track.albumArtURL?.let { setArtworkUri(Uri.parse(it)) } }
+                                    .build()
+                            )
+                            .build()
+                    }
+                    else -> when {
+                        parentId.startsWith(CUSTOM_PLAYLIST_PREFIX) -> {
+                            val playlistId = parentId.removePrefix(CUSTOM_PLAYLIST_PREFIX)
+                            val playlist = customPlaylistManager.playlists.value.find { it.id == playlistId }
+                            if (playlist != null && playlist.groups.size == 1) {
+                                // Single group: show entries directly
+                                playlist.groups.first().entries.map { buildPlayableItem(it.asChannel()) }
+                            } else {
+                                playlist?.groups?.filter { it.entries.isNotEmpty() }?.map { group ->
+                                    buildBrowsableItem(
+                                        "$CUSTOM_GROUP_PREFIX${group.id}",
+                                        group.name,
+                                        "${group.entries.size} streams",
+                                    )
+                                } ?: emptyList()
+                            }
+                        }
+                        parentId.startsWith(CUSTOM_GROUP_PREFIX) -> {
+                            val groupId = parentId.removePrefix(CUSTOM_GROUP_PREFIX)
+                            customPlaylistManager.playlists.value
+                                .flatMap { it.groups }
+                                .find { it.id == groupId }
+                                ?.entries
+                                ?.map { buildPlayableItem(it.asChannel()) }
+                                ?: emptyList()
+                        }
+                        else -> {
+                            groups.find { it.name == parentId }
+                                ?.channels
+                                ?.map { buildPlayableItem(it) }
+                                ?: emptyList()
+                        }
+                    }
                 }
-                FAVORITES_ID -> favorites.map { buildPlayableItem(it) }
-                else -> {
-                    groups.find { it.name == parentId }
-                        ?.channels
-                        ?.map { buildPlayableItem(it) }
-                        ?: emptyList()
-                }
-            }
 
-            DebugLogger.log("onGetChildren() - returning ${items.size} items for parentId=$parentId", AUTO)
-            return Futures.immediateFuture(
-                LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
-            )
+                DebugLogger.log("onGetChildren() - returning ${items.size} items for parentId=$parentId", AUTO)
+                future.set(LibraryResult.ofItemList(ImmutableList.copyOf(items), params))
+            }
+            return future
         }
 
         override fun onSearch(
@@ -423,7 +644,11 @@ class AudioPlaybackService : MediaLibraryService() {
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<Void>> {
             DebugLogger.log("onSearch() - query='$query' from ${browser.packageName}", AUTO)
-            val results = accountManager.channels.value
+            val customChannels = customPlaylistManager.playlists.value
+                .flatMap { it.groups }
+                .flatMap { it.entries }
+                .map { it.asChannel() }
+            val results = (accountManager.channels.value + customChannels)
                 .filter { it.name.contains(query, ignoreCase = true) }
                 .map { buildPlayableItem(it) }
 
@@ -443,7 +668,11 @@ class AudioPlaybackService : MediaLibraryService() {
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             DebugLogger.log("onGetSearchResult() - query='$query', page=$page, pageSize=$pageSize from ${browser.packageName}", AUTO)
-            val results = accountManager.channels.value
+            val customChannels = customPlaylistManager.playlists.value
+                .flatMap { it.groups }
+                .flatMap { it.entries }
+                .map { it.asChannel() }
+            val results = (accountManager.channels.value + customChannels)
                 .filter { it.name.contains(query, ignoreCase = true) }
                 .map { buildPlayableItem(it) }
 

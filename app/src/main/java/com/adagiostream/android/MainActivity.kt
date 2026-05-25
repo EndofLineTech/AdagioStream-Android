@@ -5,18 +5,23 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import com.adagiostream.android.service.player.AudioPlaybackService
 import com.adagiostream.android.ui.MainScreen
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestBatteryOptimizationExemption()
+        ContextCompat.startForegroundService(
+            this, Intent(this, AudioPlaybackService::class.java)
+        )
         setContent {
             MainScreen()
         }

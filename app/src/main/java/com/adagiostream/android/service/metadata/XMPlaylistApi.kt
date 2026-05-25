@@ -3,6 +3,7 @@ package com.adagiostream.android.service.metadata
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.util.DebugLogger
+import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -49,7 +50,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                 DebugLogger.log("Station list API returned ${response.code}", DebugLogger.Category.SXM)
                 return@withContext
             }
-            val body = response.body?.string() ?: return@withContext
+            val body = response.body.string()
             val stationList = json.decodeFromString<XMStationListResponse>(body)
             val stations = stationList.results
             DebugLogger.log("Fetched ${stations.size} XMPlaylist stations", DebugLogger.Category.SXM)
@@ -133,7 +134,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                 DebugLogger.log("Feed API returned ${response.code}", DebugLogger.Category.SXM)
                 return@withContext emptyMap()
             }
-            val body = response.body?.string() ?: return@withContext emptyMap()
+            val body = response.body.string()
             val apiResponse = json.decodeFromString<XMApiResponse>(body)
 
             // Group by deeplink (channelId in feed), take most recent per deeplink
@@ -149,7 +150,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                     artist = artists.joinToString(", "),
                     title = title,
                     album = null,
-                    albumArtURL = entry.spotify?.albumImageLarge,
+                    albumArtURL = entry.spotify?.albumImageLarge?.takeIf { UrlSanitizer.isHttpUrl(it) },
                     timestamp = 0L,
                 )
             }
@@ -180,7 +181,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                 DebugLogger.log("API returned ${response.code} for $deeplink", DebugLogger.Category.SXM)
                 return@withContext null
             }
-            val body = response.body?.string() ?: return@withContext null
+            val body = response.body.string()
             val apiResponse = json.decodeFromString<XMApiResponse>(body)
             val latest = apiResponse.results.firstOrNull() ?: return@withContext null
             val track = latest.track ?: return@withContext null
@@ -192,7 +193,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
                 artist = artists.joinToString(", "),
                 title = title,
                 album = null,
-                albumArtURL = latest.spotify?.albumImageLarge,
+                albumArtURL = latest.spotify?.albumImageLarge?.takeIf { UrlSanitizer.isHttpUrl(it) },
                 timestamp = 0L,
             )
         } catch (e: Exception) {

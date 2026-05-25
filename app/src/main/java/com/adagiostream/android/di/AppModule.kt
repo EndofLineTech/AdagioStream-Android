@@ -5,6 +5,7 @@ import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.metadata.ITunesSearchApi
 import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.player.CastManager
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import coil3.ImageLoader
 import coil3.disk.DiskCache
@@ -41,12 +42,19 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideCastManager(
+        @ApplicationContext context: Context,
+    ): CastManager = CastManager(context)
+
+    @Provides
+    @Singleton
     fun provideVLCPlayerWrapper(
         @ApplicationContext context: Context,
         persistenceService: PersistenceService,
+        castManager: CastManager,
     ): VLCPlayerWrapper {
         val settings = persistenceService.loadSettingsSync()
-        return VLCPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15))
+        return VLCPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15), castManager)
     }
 
     @Provides

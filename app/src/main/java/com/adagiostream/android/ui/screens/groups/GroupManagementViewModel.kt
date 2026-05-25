@@ -31,16 +31,18 @@ class GroupManagementViewModel @Inject constructor(
     val groupItems: StateFlow<List<GroupItem>> = combine(
         accountManager.allGroupNames,
         accountManager.channels,
+        accountManager.favoriteGroupNames,
+        accountManager.enabledGroupNames,
         _searchQuery,
-    ) { allGroups, channels, query ->
+    ) { allGroups, channels, favoriteNames, enabledNames, query ->
         val channelCounts = channels.groupBy { it.group }.mapValues { it.value.size }
         allGroups
             .filter { query.isBlank() || it.contains(query, ignoreCase = true) }
             .map { name ->
                 GroupItem(
                     name = name,
-                    isEnabled = accountManager.isGroupEnabled(name),
-                    isFavorite = accountManager.isGroupFavorite(name),
+                    isEnabled = enabledNames?.contains(name) ?: true,
+                    isFavorite = name in favoriteNames,
                     channelCount = channelCounts[name] ?: 0,
                 )
             }

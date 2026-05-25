@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,8 +43,12 @@ fun MiniPlayerBar(
     trackMetadata: TrackMetadata? = null,
     espnGame: ESPNGameInfo? = null,
     artworkDisplayMode: ArtworkDisplayMode = ArtworkDisplayMode.COVER_ART,
+    isTimeShifted: Boolean = false,
+    isCasting: Boolean = false,
+    castDeviceName: String? = null,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
+    onSeekToLive: () -> Unit = {},
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -94,6 +99,8 @@ fun MiniPlayerBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    val isActive = playbackState is PlaybackState.Playing || playbackState is PlaybackState.CatchingUp
+                    val listeningTime = rememberListeningTime(accumulatedMs = listeningTimeMs, isPlaying = isActive)
                     if (trackMetadata != null) {
                         Text(
                             text = "${trackMetadata.artist} \u2013 ${trackMetadata.title}",
@@ -115,14 +122,19 @@ fun MiniPlayerBar(
                             overflow = TextOverflow.Ellipsis,
                         )
                     } else {
-                        val isActive = playbackState is PlaybackState.Playing || playbackState is PlaybackState.CatchingUp
-                        val listeningTime = rememberListeningTime(accumulatedMs = listeningTimeMs, isPlaying = isActive)
-                        val statusText = when (playbackState) {
-                            is PlaybackState.Buffering -> "Buffering..."
-                            is PlaybackState.Playing -> if (listeningTime != null) "Playing \u00B7 $listeningTime" else "Playing"
-                            is PlaybackState.Paused -> if (listeningTime != null) "Paused \u00B7 $listeningTime" else "Paused"
-                            is PlaybackState.CatchingUp -> "Catching up..."
-                            is PlaybackState.Error -> "Error"
+                        val castPrefix = if (isCasting && castDeviceName != null) "Casting to $castDeviceName" else null
+                        val statusText = when {
+                            castPrefix != null && playbackState is PlaybackState.Playing -> castPrefix
+                            castPrefix != null -> "$castPrefix \u00B7 ${when (playbackState) {
+                                is PlaybackState.Buffering -> "Buffering..."
+                                is PlaybackState.Paused -> "Paused"
+                                else -> ""
+                            }}"
+                            playbackState is PlaybackState.Buffering -> "Buffering..."
+                            playbackState is PlaybackState.Playing -> if (listeningTime != null) "Playing \u00B7 $listeningTime" else "Playing"
+                            playbackState is PlaybackState.Paused -> if (listeningTime != null) "Paused \u00B7 $listeningTime" else "Paused"
+                            playbackState is PlaybackState.CatchingUp -> "Catching up..."
+                            playbackState is PlaybackState.Error -> "Error"
                             else -> ""
                         }
                         Text(
@@ -130,6 +142,19 @@ fun MiniPlayerBar(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+
+                CastButton(modifier = Modifier.size(36.dp))
+
+                if (isTimeShifted) {
+                    TextButton(
+                        onClick = onSeekToLive,
+                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Text("LIVE", style = MaterialTheme.typography.labelSmall)
                     }
                 }
 

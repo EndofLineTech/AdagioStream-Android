@@ -42,11 +42,7 @@ class TimeShiftBuffer(
                     .url(channel.streamURL)
                     .build()
                 val response = client.newCall(request).execute()
-                val body = response.body ?: run {
-                    DebugLogger.log("TimeShift: no response body", DebugLogger.Category.TIMESHIFT)
-                    isCapturing = false
-                    return@withContext
-                }
+                val body = response.body
 
                 val fos = FileOutputStream(file).buffered(65536)
                 outputStream = fos

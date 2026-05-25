@@ -45,6 +45,9 @@ class AddAccountViewModel @Inject constructor(
     private val _epgUrl = MutableStateFlow("")
     val epgUrl: StateFlow<String> = _epgUrl.asStateFlow()
 
+    private val _stripStreamIDs = MutableStateFlow(false)
+    val stripStreamIDs: StateFlow<Boolean> = _stripStreamIDs.asStateFlow()
+
     private val _isSaving = MutableStateFlow(false)
     val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
 
@@ -68,6 +71,7 @@ class AddAccountViewModel @Inject constructor(
                         _host.value = type.host
                         _username.value = type.username
                         _password.value = type.password
+                        _stripStreamIDs.value = type.stripStreamIDs
                     }
                     is AccountType.M3U -> {
                         _isXtream.value = false
@@ -86,6 +90,7 @@ class AddAccountViewModel @Inject constructor(
     fun setUsername(value: String) { _username.value = value }
     fun setPassword(value: String) { _password.value = value }
     fun setEpgUrl(value: String) { _epgUrl.value = value }
+    fun setStripStreamIDs(value: Boolean) { _stripStreamIDs.value = value }
     fun dismissResult() {
         _addAccountResult.value = null
         _saveComplete.value = true
@@ -111,11 +116,20 @@ class AddAccountViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
+                if (_isXtream.value) {
+                    UrlSanitizer.requireHttpUrl(_host.value.trim())
+                } else {
+                    UrlSanitizer.requireHttpUrl(_m3uUrl.value.trim())
+                    val epg = _epgUrl.value.trim()
+                    if (epg.isNotBlank()) UrlSanitizer.requireHttpUrl(epg)
+                }
+
                 val type = if (_isXtream.value) {
                     AccountType.XtreamCodes(
                         host = _host.value.trim(),
                         username = _username.value.trim(),
                         password = _password.value.trim(),
+                        stripStreamIDs = _stripStreamIDs.value,
                     )
                 } else {
                     AccountType.M3U(

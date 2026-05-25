@@ -1,9 +1,11 @@
 package com.adagiostream.android.service.metadata
 
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.ESPNLeague
 import com.adagiostream.android.model.ESPNScoreboardResponse
+import com.adagiostream.android.model.ESPNTeam
 import com.adagiostream.android.util.DebugLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,14 +32,21 @@ class ESPNScoreService(private val client: OkHttpClient) {
 
     /** Lowercase team displayName → list of channel IDs */
     private var teamToChannelIDs: Map<String, List<String>> = emptyMap()
+    /** Sports channels with EPG data that weren't matched by team name — EPG fallback candidates. */
+    private var epgCandidateChannels: Map<String, String> = emptyMap() // channelID → epgChannelID
+    /** Pre-compiled search tokens per ESPN team displayName for EPG title matching. */
+    private var teamTokenCache: MutableMap<String, TeamSearchTokens> = mutableMapOf()
+    /** EPG data supplier, set by AccountManager after channel load. */
+    var epgDataProvider: (() -> Map<String, List<EPGEntry>>)? = null
     private var hasChannels = false
     private var pollingWanted = false
     private var hasLiveGame = false
     private var pollJob: Job? = null
     private var lastScoreboardLogLine: String? = null
 
+    var livePollIntervalMs: Long = 15_000L
+
     companion object {
-        private const val LIVE_POLL_INTERVAL = 15_000L
         private const val IDLE_POLL_INTERVAL = 60_000L
         private val SPORTS_LEAGUES = setOf("NFL", "MLB", "NBA", "NHL")
         private val CHANNEL_PREFIXES = listOf("Radio: ", "TV: ")
@@ -81,8 +90,16 @@ class ESPNScoreService(private val client: OkHttpClient) {
 
         teamToChannelIDs = lookup
         hasChannels = true
+        teamTokenCache.clear()
+
+        // Build EPG candidate list: sports channels with EPG that didn't match a team name
+        val matchedChannelIDs = teamToChannelIDs.values.flatten().toSet()
+        epgCandidateChannels = sportsChannels
+            .filter { it.epgChannelID != null && it.id !in matchedChannelIDs }
+            .associate { it.id to it.epgChannelID!! }
+
         DebugLogger.log(
-            "Matched ${teamToChannelIDs.size} team names from ${sportsChannels.size} sports channels",
+            "Matched ${teamToChannelIDs.size} team names from ${sportsChannels.size} sports channels, ${epgCandidateChannels.size} EPG fallback candidates",
             DebugLogger.Category.ESPN,
         )
 
@@ -103,7 +120,7 @@ class ESPNScoreService(private val client: OkHttpClient) {
     }
 
     private val currentPollInterval: Long
-        get() = if (hasLiveGame) LIVE_POLL_INTERVAL else IDLE_POLL_INTERVAL
+        get() = if (hasLiveGame) livePollIntervalMs else IDLE_POLL_INTERVAL
 
     private fun startPolling() {
         stopPolling()
@@ -153,7 +170,7 @@ class ESPNScoreService(private val client: OkHttpClient) {
                             val request = Request.Builder().url(url).build()
                             val response = client.newCall(request).execute()
                             if (!response.isSuccessful) return@async null
-                            val body = response.body?.string() ?: return@async null
+                            val body = response.body.string()
                             val scoreboard = json.decodeFromString<ESPNScoreboardResponse>(body)
                             league to scoreboard.events
                         } catch (_: Exception) {
@@ -183,6 +200,9 @@ class ESPNScoreService(private val client: OkHttpClient) {
                 matchEvents(events, league, newGames)
             }
 
+            // Second pass: EPG-based fallback for unmatched sports channels
+            matchEventsViaEPG(allEvents, newGames)
+
             if (_gamesByChannel.value != newGames) {
                 _gamesByChannel.value = newGames
             }
@@ -198,54 +218,143 @@ class ESPNScoreService(private val client: OkHttpClient) {
         }
     }
 
+    private fun buildGameInfo(
+        event: com.adagiostream.android.model.ESPNEvent,
+        league: ESPNLeague,
+    ): ESPNGameInfo? {
+        val comp = event.competition ?: return null
+        val home = comp.homeTeam ?: return null
+        val away = comp.awayTeam ?: return null
+
+        var possessionAbbr: String? = null
+        if (league == ESPNLeague.NFL) {
+            val possID = comp.situation?.possession
+            if (possID != null) {
+                possessionAbbr = when (possID) {
+                    home.team.id -> home.team.abbreviation
+                    away.team.id -> away.team.abbreviation
+                    else -> null
+                }
+            }
+        }
+
+        return ESPNGameInfo(
+            league = league,
+            awayAbbr = away.team.abbreviation,
+            homeAbbr = home.team.abbreviation,
+            awayScore = away.score,
+            homeScore = home.score,
+            awayRecord = away.overallRecord,
+            homeRecord = home.overallRecord,
+            state = ESPNGameInfo.GameState.fromApi(comp.status.type.state),
+            statusDetail = comp.status.type.shortDetail,
+            displayClock = comp.status.displayClock,
+            period = comp.status.period,
+            outs = comp.situation?.outs,
+            balls = comp.situation?.balls,
+            strikes = comp.situation?.strikes,
+            onFirst = comp.situation?.onFirst,
+            onSecond = comp.situation?.onSecond,
+            onThird = comp.situation?.onThird,
+            possessionTeamAbbr = possessionAbbr,
+            downDistanceText = comp.situation?.shortDownDistanceText
+                ?: comp.situation?.downDistanceText,
+            gameDate = ESPNGameInfo.parseESPNDate(event.date),
+        )
+    }
+
     private fun matchEvents(
         events: List<com.adagiostream.android.model.ESPNEvent>,
         league: ESPNLeague,
         games: MutableMap<String, ESPNGameInfo>,
     ) {
         for (event in events) {
+            val gameInfo = buildGameInfo(event, league) ?: continue
             val comp = event.competition ?: continue
             val home = comp.homeTeam ?: continue
             val away = comp.awayTeam ?: continue
 
-            // Resolve NFL possession to team abbreviation
-            var possessionAbbr: String? = null
-            if (league == ESPNLeague.NFL) {
-                val possID = comp.situation?.possession
-                if (possID != null) {
-                    possessionAbbr = when (possID) {
-                        home.team.id -> home.team.abbreviation
-                        away.team.id -> away.team.abbreviation
-                        else -> null
-                    }
-                }
-            }
-
-            val gameInfo = ESPNGameInfo(
-                league = league,
-                awayAbbr = away.team.abbreviation,
-                homeAbbr = home.team.abbreviation,
-                awayScore = away.score,
-                homeScore = home.score,
-                awayRecord = away.overallRecord,
-                homeRecord = home.overallRecord,
-                state = ESPNGameInfo.GameState.fromApi(comp.status.type.state),
-                statusDetail = comp.status.type.shortDetail,
-                displayClock = comp.status.displayClock,
-                period = comp.status.period,
-                outs = comp.situation?.outs,
-                possessionTeamAbbr = possessionAbbr,
-                downDistanceText = comp.situation?.shortDownDistanceText
-                    ?: comp.situation?.downDistanceText,
-            )
-
-            // Match home team
             val homeKey = home.team.displayName.lowercase()
             teamToChannelIDs[homeKey]?.forEach { id -> games[id] = gameInfo }
 
-            // Match away team
             val awayKey = away.team.displayName.lowercase()
             teamToChannelIDs[awayKey]?.forEach { id -> games[id] = gameInfo }
+        }
+    }
+
+    // MARK: - EPG Fuzzy Matching
+
+    private data class TeamSearchTokens(
+        val fullName: String,            // "boston bruins"
+        val nicknamePattern: Regex,      // \bbruins\b
+        val abbrPattern: Regex,          // \bBOS\b
+    )
+
+    private fun tokens(team: ESPNTeam): TeamSearchTokens {
+        teamTokenCache[team.displayName]?.let { return it }
+        val full = team.displayName.lowercase()
+        val nickname = team.displayName.split(" ").lastOrNull() ?: team.displayName
+        val result = TeamSearchTokens(
+            fullName = full,
+            nicknamePattern = Regex("\\b${Regex.escape(nickname)}\\b", RegexOption.IGNORE_CASE),
+            abbrPattern = Regex("\\b${Regex.escape(team.abbreviation)}\\b", RegexOption.IGNORE_CASE),
+        )
+        teamTokenCache[team.displayName] = result
+        return result
+    }
+
+    private fun epgTitleContainsTeam(title: String, tokens: TeamSearchTokens): Boolean {
+        // Tier 1: full display name (most precise)
+        if (title.lowercase().contains(tokens.fullName)) return true
+        // Tier 2: team nickname with word boundary
+        if (tokens.nicknamePattern.containsMatchIn(title)) return true
+        // Tier 3: abbreviation with word boundary
+        if (tokens.abbrPattern.containsMatchIn(title)) return true
+        return false
+    }
+
+    private fun matchEventsViaEPG(
+        allEvents: List<Pair<ESPNLeague, List<com.adagiostream.android.model.ESPNEvent>>>,
+        games: MutableMap<String, ESPNGameInfo>,
+    ) {
+        if (epgCandidateChannels.isEmpty()) return
+        val epgData = epgDataProvider?.invoke() ?: return
+
+        var epgMatched = 0
+
+        for ((channelID, epgID) in epgCandidateChannels) {
+            if (games.containsKey(channelID)) continue
+            val currentEntry = epgData[epgID]?.firstOrNull { it.isCurrentlyAiring } ?: continue
+            val title = currentEntry.title
+
+            var matched = false
+            for ((league, events) in allEvents) {
+                if (matched) break
+                for (event in events) {
+                    val comp = event.competition ?: continue
+                    val home = comp.homeTeam ?: continue
+                    val away = comp.awayTeam ?: continue
+                    val gameInfo = buildGameInfo(event, league) ?: continue
+
+                    val homeTokens = tokens(home.team)
+                    val awayTokens = tokens(away.team)
+
+                    // Require BOTH teams to appear in the EPG title to prevent false positives
+                    if (epgTitleContainsTeam(title, homeTokens) && epgTitleContainsTeam(title, awayTokens)) {
+                        games[channelID] = gameInfo
+                        epgMatched++
+                        matched = true
+                        break
+                    }
+                }
+            }
+        }
+
+        if (epgMatched > 0) {
+            DebugLogger.log(
+                "ESPN EPG fallback: matched $epgMatched channels via program titles",
+                DebugLogger.Category.ESPN,
+            )
         }
     }
 }

@@ -8,6 +8,7 @@ import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.player.CastManager
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,7 +23,11 @@ import javax.inject.Inject
 class NowPlayingViewModel @Inject constructor(
     private val vlcPlayer: VLCPlayerWrapper,
     private val accountManager: AccountManager,
+    private val castManager: CastManager,
 ) : ViewModel() {
+
+    val isCasting: StateFlow<Boolean> = castManager.isCasting
+    val castDeviceName: StateFlow<String?> = castManager.castDeviceName
 
     val playbackState: StateFlow<PlaybackState> = vlcPlayer.playbackState
     val currentChannel: StateFlow<Channel?> = vlcPlayer.currentChannel
