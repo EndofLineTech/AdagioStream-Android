@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+import java.io.Reader
 import java.io.StringReader
 
 class EPGParser(private val client: OkHttpClient) {
@@ -18,15 +19,16 @@ class EPGParser(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) return@withContext emptyMap()
-        val body = response.body.string()
-        parseContent(body)
+        response.body.charStream().use { reader -> parseContent(reader) }
     }
 
-    fun parseContent(xml: String): Map<String, List<EPGEntry>> {
+    fun parseContent(xml: String): Map<String, List<EPGEntry>> = parseContent(StringReader(xml))
+
+    fun parseContent(reader: Reader): Map<String, List<EPGEntry>> {
         val entries = mutableListOf<EPGEntry>()
         val factory = XmlPullParserFactory.newInstance()
         val parser = factory.newPullParser()
-        parser.setInput(StringReader(xml))
+        parser.setInput(reader)
 
         var channelId: String? = null
         var startStr: String? = null

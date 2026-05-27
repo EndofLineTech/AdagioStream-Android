@@ -1,5 +1,6 @@
 package com.adagiostream.android.di
 
+import com.adagiostream.android.network.BodySizeCapInterceptor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -22,5 +23,6 @@ object NetworkModule {
         .pingInterval(30, TimeUnit.SECONDS)
         .connectionPool(ConnectionPool(5, 5, TimeUnit.MINUTES))
         .followRedirects(true)
+        .addInterceptor(BodySizeCapInterceptor())
         .build()
 }
