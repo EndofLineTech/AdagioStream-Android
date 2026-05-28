@@ -48,6 +48,26 @@ jobs:
       - name: Build release AAB
         run: ./gradlew bundleRelease
 
+      - name: Generate Play Store release notes from tag commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p distribution/whatsnew
+          # Pull the tag-commit message, strip the "Release vX.Y.Z: " prefix
+          # (redundant — Play already shows the version), drop Co-Authored-By and
+          # other git trailers, then cap at Play's 500-char per-locale limit.
+          notes=$(git log -1 --pretty=%B HEAD \
+            | sed -E '1 s/^Release v[0-9]+(\.[0-9]+)*:[[:space:]]*//' \
+            | sed -E '/^(Co-[Aa]uthored-[Bb]y|Signed-off-by|Closes|Fixes|Refs):/d' \
+            | awk 'BEGIN{blank=0} /^$/{blank++; if(blank<=1)print; next} {blank=0; print}' \
+            | head -c 500)
+          if [ -z "${notes// /}" ]; then
+            notes="Bug fixes and improvements."
+          fi
+          printf '%s\n' "$notes" > distribution/whatsnew/whatsnew-en-US.txt
+          echo "--- whatsnew-en-US.txt ---"
+          cat distribution/whatsnew/whatsnew-en-US.txt
+
       - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1
         with:
@@ -55,4 +75,5 @@ jobs:
           packageName: com.adagiostream.android
           releaseFiles: app/build/outputs/bundle/release/*.aab
           track: alpha
-          status: draft
+          status: completed
+          whatsNewDirectory: distribution/whatsnew/
