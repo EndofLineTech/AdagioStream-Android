@@ -147,4 +147,44 @@ class M3UParserTest {
         val channels = parser.parseContent("")
         assertTrue(channels.isEmpty())
     }
+
+    @Test
+    fun `parseContent BufferedReader overload streams large playlist without loading whole file`() {
+        // Generate a ~1.5 MB M3U and stream it through the new BufferedReader path.
+        val sb = StringBuilder()
+        sb.append("#EXTM3U\n")
+        val target = 1_500_000
+        var i = 0
+        while (sb.length < target) {
+            sb.append(
+                "#EXTINF:-1 tvg-id=\"ch$i\" tvg-name=\"Channel $i\" " +
+                    "tvg-logo=\"http://logos.example.com/${i % 100}.png\" " +
+                    "group-title=\"Group ${i % 50}\",Channel $i\n",
+            )
+            sb.append("http://stream.example.com/live/$i.ts\n")
+            i++
+        }
+        val reader = java.io.BufferedReader(java.io.StringReader(sb.toString()))
+
+        val channels = parser.parseContent(reader)
+
+        assertTrue("Should parse many channels", channels.size > 1000)
+        assertEquals("Channel 0", channels[0].name)
+        assertEquals("http://stream.example.com/live/0.ts", channels[0].streamURL)
+        assertEquals("Group 0", channels[0].group)
+    }
+
+    @Test
+    fun `parseContent BufferedReader handles EXTINF with no following URL`() {
+        // An orphan EXTINF at end-of-file should not crash.
+        val m3u = """
+            #EXTM3U
+            #EXTINF:-1,First
+            http://example.com/first
+            #EXTINF:-1,Orphan
+        """.trimIndent()
+        val channels = parser.parseContent(java.io.BufferedReader(java.io.StringReader(m3u)))
+        assertEquals(1, channels.size)
+        assertEquals("First", channels[0].name)
+    }
 }

@@ -15,9 +15,11 @@ import androidx.core.app.ServiceCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaStyleNotificationHelper
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.CommandButton
@@ -63,6 +65,7 @@ class AudioPlaybackService : MediaLibraryService() {
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
+        private const val NOTIFICATION_ID = 1001
         private const val ROOT_ID = "root"
         private const val FAVORITES_ID = "favorites"
         private const val LOVED_SONGS_ID = "loved_songs"
@@ -183,6 +186,16 @@ class AudioPlaybackService : MediaLibraryService() {
             .build()
         DebugLogger.log("buildSession() - session created: token=${mediaLibrarySession?.token}", AUTO)
 
+        // Use our pre-created "playback" channel + ID so Media3's MediaStyle notification
+        // replaces the placeholder posted in onStartCommand (instead of racing on a different channel).
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider.Builder(this)
+                .setChannelId(NOTIFICATION_CHANNEL_ID)
+                .setChannelName(R.string.playback_channel_name)
+                .setNotificationId(NOTIFICATION_ID)
+                .build()
+        )
+
         // Reactively update custom button icons when favorite/loved state changes
         customButtonJob?.cancel()
         customButtonJob = serviceScope.launch {
@@ -226,13 +239,17 @@ class AudioPlaybackService : MediaLibraryService() {
         DebugLogger.log("onStartCommand() - intent=${intent?.action}, flags=$flags, startId=$startId", AUTO)
         super.onStartCommand(intent, flags, startId)
 
-        val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        val notificationBuilder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("AdagioStream")
             .setSmallIcon(R.mipmap.ic_launcher_foreground)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+        // Attach the MediaSession token so the system Media Controls tile + lock-screen
+        // surface can bind to us immediately, before Media3 posts its full notification.
+        mediaLibrarySession?.let { session ->
+            notificationBuilder.setStyle(MediaStyleNotificationHelper.MediaStyle(session))
+        }
         ServiceCompat.startForeground(
-            this, 1001, notification,
+            this, NOTIFICATION_ID, notificationBuilder.build(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
         )
         DebugLogger.log("onStartCommand() - foreground service started", AUTO)

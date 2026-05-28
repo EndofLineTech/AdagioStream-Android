@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package com.adagiostream.android.service.parsing
 
 import android.util.Base64
@@ -11,9 +13,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.UUID
 
 class XtreamCodesApi(private val client: OkHttpClient) {
 
@@ -74,8 +76,9 @@ class XtreamCodesApi(private val client: OkHttpClient) {
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext emptyList()
-            val body = response.body.string()
-            val epgResponse = json.decodeFromString<XtreamEPGResponse>(body)
+            val epgResponse = response.body.byteStream().use { stream ->
+                json.decodeFromStream<XtreamEPGResponse>(stream)
+            }
 
             epgResponse.epgListings.mapNotNull { listing ->
                 val title = decodeIfBase64(listing.title)
@@ -107,8 +110,9 @@ class XtreamCodesApi(private val client: OkHttpClient) {
             val request = Request.Builder().url(url).build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return null
-            val body = response.body.string()
-            json.decodeFromString<AuthResponse>(body)
+            response.body.byteStream().use { stream ->
+                json.decodeFromStream<AuthResponse>(stream)
+            }
         } catch (_: Exception) {
             null
         }
@@ -123,8 +127,9 @@ class XtreamCodesApi(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) return emptyList()
-        val body = response.body.string()
-        return json.decodeFromString<List<XtreamCategory>>(body)
+        return response.body.byteStream().use { stream ->
+            json.decodeFromStream<List<XtreamCategory>>(stream)
+        }
     }
 
     private fun fetchLiveStreams(
@@ -136,8 +141,9 @@ class XtreamCodesApi(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) return emptyList()
-        val body = response.body.string()
-        return json.decodeFromString<List<XtreamStream>>(body)
+        return response.body.byteStream().use { stream ->
+            json.decodeFromStream<List<XtreamStream>>(stream)
+        }
     }
 
     @VisibleForTesting

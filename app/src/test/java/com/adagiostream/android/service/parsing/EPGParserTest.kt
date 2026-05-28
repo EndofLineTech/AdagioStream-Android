@@ -145,4 +145,39 @@ class EPGParserTest {
         // Some entries may have invalid hours (24+), but we care it doesn't crash
         assertTrue(result.isNotEmpty())
     }
+
+    @Test
+    fun `parseContent Reader overload streams large XML without buffering whole document`() {
+        // Generate a ~2 MB EPG XML and stream it via Reader (the new streaming path).
+        // This exercises the same code path as the production parse(url) flow.
+        val sb = StringBuilder()
+        sb.append("""<?xml version="1.0" encoding="UTF-8"?><tv>""")
+        val target = 2 * 1024 * 1024
+        var i = 0
+        while (sb.length < target) {
+            val hour = "%02d".format(i % 23)
+            val nextHour = "%02d".format((i % 23) + 1)
+            sb.append(
+                "<programme channel=\"ch${i % 5}\" start=\"20250101${hour}0000 +0000\" " +
+                    "stop=\"20250101${nextHour}0000 +0000\">" +
+                    "<title>Show $i</title><desc>${"d".repeat(64)}</desc></programme>",
+            )
+            i++
+        }
+        sb.append("</tv>")
+        val reader = java.io.StringReader(sb.toString())
+
+        val result = parser.parseContent(reader)
+
+        assertTrue("Expected entries from streamed XML", result.isNotEmpty())
+        // Some entries from each channel id we used (ch0..ch4)
+        assertTrue("Should have multiple channels", result.size >= 2)
+    }
+
+    @Test
+    fun `parseContent String overload still works after refactor`() {
+        val result = parser.parseContent(TestFixtures.MINIMAL_EPG_XML)
+        assertEquals(1, result.size)
+        assertTrue(result.containsKey("ch1"))
+    }
 }

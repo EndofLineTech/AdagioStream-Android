@@ -20,7 +20,16 @@ class AdagioStreamApp : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         DebugLogger.init(this)
+        installCrashHandler()
         castManager.initialize()
+    }
+
+    private fun installCrashHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            DebugLogger.logCrash(thread, throwable)
+            previous?.uncaughtException(thread, throwable)
+        }
     }
 
     override fun newImageLoader(context: android.content.Context): ImageLoader = imageLoader

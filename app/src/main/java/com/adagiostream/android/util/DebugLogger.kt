@@ -4,10 +4,13 @@ import android.content.Context
 import android.util.Log
 import com.adagiostream.android.BuildConfig
 import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Persistent file-based logger for debugging player, CarPlay/Android Auto,
@@ -61,6 +64,33 @@ object DebugLogger {
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to write log: ${e.message}")
             }
+        }
+    }
+
+    fun logCrash(thread: Thread, throwable: Throwable) {
+        // Flush pending async writes so context leading up to the crash is preserved.
+        try {
+            executor.shutdown()
+            executor.awaitTermination(500, TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+        }
+
+        val timestamp = dateFormat.format(Date())
+        val stack = StringWriter().also { throwable.printStackTrace(PrintWriter(it)) }.toString()
+        val entry = "[$timestamp] [CRASH] [thread=${thread.name}]\n$stack\n"
+
+        Log.e("Adagio/CRASH", stack)
+
+        try {
+            val dir = logDir ?: return
+            val logFile = File(dir, LOG_FILE)
+            if (!logFile.exists()) {
+                val header = "=== AdagioStream Debug Log === v${BuildConfig.VERSION_NAME}\n\n"
+                logFile.writeText(header)
+            }
+            logFile.appendText(entry)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to write crash log: ${e.message}")
         }
     }
 

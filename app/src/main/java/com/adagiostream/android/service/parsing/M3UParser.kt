@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.BufferedReader
+import java.io.StringReader
 import java.util.UUID
 
 class M3UParser(private val client: OkHttpClient) {
@@ -14,47 +16,44 @@ class M3UParser(private val client: OkHttpClient) {
         UrlSanitizer.requireHttpUrl(url)
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
-        if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code} from ${UrlSanitizer.redact(url)}")
-        val body = response.body.string()
-        parseContent(body)
+        if (!response.isSuccessful) {
+            throw IllegalStateException("HTTP ${response.code} from ${UrlSanitizer.redact(url)}")
+        }
+        response.body.charStream().use { reader -> parseContent(reader.buffered()) }
     }
 
-    fun parseContent(content: String): List<Channel> {
-        val channels = mutableListOf<Channel>()
-        val lines = content.lines()
-        var i = 0
+    fun parseContent(content: String): List<Channel> =
+        parseContent(BufferedReader(StringReader(content)))
 
-        while (i < lines.size) {
-            val line = lines[i].trim()
-            if (line.startsWith("#EXTINF:")) {
-                val infoLine = line
-                val streamUrl = findNextUrl(lines, i + 1)
-                if (streamUrl != null) {
-                    val channel = parseExtInf(infoLine, streamUrl)
-                    if (channel != null) {
-                        channels.add(channel)
+    fun parseContent(reader: BufferedReader): List<Channel> {
+        val channels = mutableListOf<Channel>()
+        var pendingExtInf: String? = null
+
+        reader.lineSequence().forEach { rawLine ->
+            val line = rawLine.trim()
+            when {
+                line.isEmpty() -> {
+                    // Skip blank lines; keep any pending EXTINF
+                }
+                line.startsWith("#EXTINF:") -> {
+                    // A new EXTINF replaces any previously unmatched EXTINF
+                    pendingExtInf = line
+                }
+                line.startsWith("#") -> {
+                    // Other comment / directive lines (e.g. #EXTM3U, #EXTVLCOPT) — ignore
+                }
+                else -> {
+                    val infoLine = pendingExtInf
+                    if (infoLine != null) {
+                        parseExtInf(infoLine, line)?.let { channels.add(it) }
+                        pendingExtInf = null
                     }
+                    // URL with no preceding EXTINF — ignore
                 }
             }
-            i++
         }
 
         return channels
-    }
-
-    private fun findNextUrl(lines: List<String>, startIndex: Int): String? {
-        var i = startIndex
-        while (i < lines.size) {
-            val line = lines[i].trim()
-            if (line.isNotEmpty() && !line.startsWith("#")) {
-                return line
-            }
-            if (line.startsWith("#EXTINF:")) {
-                return null
-            }
-            i++
-        }
-        return null
     }
 
     private fun parseExtInf(line: String, streamUrl: String): Channel? {
