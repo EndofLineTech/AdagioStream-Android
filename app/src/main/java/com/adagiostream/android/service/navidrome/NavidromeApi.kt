@@ -227,6 +227,37 @@ class NavidromeApi(
     val hostBase: String get() = host
 
     // -------------------------------------------------------------------------
+    // Streaming (baw.3.2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Builds an authenticated `stream.view` URL for the given [trackId].
+     *
+     * This is the URL libVLC opens to play a library track. It carries a fresh
+     * Subsonic auth salt on every call (like [getCoverArtUrl]); it must NEVER be
+     * logged, since it contains the `u`/`t`/`s` auth params.
+     *
+     * @param trackId     Subsonic song identifier from [Track.id].
+     * @param maxBitRate  Optional transcode ceiling in kbps. `null` (default) lets
+     *                    the server decide (typically original/raw). `0` is
+     *                    Subsonic's documented "no limit" value; pass `null` to
+     *                    omit the param entirely.
+     * @param format      Optional transcode target (e.g. `"raw"` to stream the
+     *                    original file without transcoding, `"mp3"`, `"opus"`).
+     *                    `null` (default) omits the param and lets the server pick.
+     * @return            The fully-qualified authenticated URL, or `null` if the
+     *                    host string is not a valid HTTP/HTTPS URL.
+     */
+    fun streamUrl(trackId: String, maxBitRate: Int? = null, format: String? = null): HttpUrl? {
+        val params = buildMap<String, String> {
+            put("id", trackId)
+            if (maxBitRate != null) put("maxBitRate", maxBitRate.toString())
+            if (format != null) put("format", format)
+        }
+        return buildUrl("stream", params)
+    }
+
+    // -------------------------------------------------------------------------
     // Private: browse helper
     // -------------------------------------------------------------------------
 

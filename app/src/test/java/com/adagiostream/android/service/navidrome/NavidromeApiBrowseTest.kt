@@ -430,6 +430,48 @@ class NavidromeApiBrowseTest {
     }
 
     // -------------------------------------------------------------------------
+    // streamUrl (baw.3.2)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `streamUrl targets stream dot view with the track id`() {
+        val url = api.streamUrl("t-42")
+
+        assertNotNull(url)
+        assertEquals("/rest/stream.view", url!!.encodedPath)
+        assertEquals("t-42", url.queryParameter("id"))
+    }
+
+    @Test
+    fun `streamUrl includes all auth params`() {
+        val url = api.streamUrl("t-42")
+
+        assertNotNull(url)
+        assertEquals("alice", url!!.queryParameter("u"))
+        assertEquals("json", url.queryParameter("f"))
+        assertNotNull(url.queryParameter("t")) // token
+        assertNotNull(url.queryParameter("s")) // salt
+    }
+
+    @Test
+    fun `streamUrl omits maxBitRate and format when not supplied`() {
+        val url = api.streamUrl("t-42")
+
+        assertNotNull(url)
+        assertNull(url!!.queryParameter("maxBitRate"))
+        assertNull(url.queryParameter("format"))
+    }
+
+    @Test
+    fun `streamUrl includes maxBitRate and format when supplied`() {
+        val url = api.streamUrl("t-42", maxBitRate = 320, format = "raw")
+
+        assertNotNull(url)
+        assertEquals("320", url!!.queryParameter("maxBitRate"))
+        assertEquals("raw", url.queryParameter("format"))
+    }
+
+    // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
 

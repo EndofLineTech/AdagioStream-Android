@@ -6,6 +6,7 @@ import com.adagiostream.android.service.metadata.ITunesSearchApi
 import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.CastManager
+import com.adagiostream.android.service.player.LibraryTrackPlayer
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import coil3.ImageLoader
 import coil3.disk.DiskCache
@@ -59,6 +60,16 @@ object AppModule {
         val settings = persistenceService.loadSettingsSync()
         return VLCPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15), castManager)
     }
+
+    /**
+     * Binds the [VLCPlayerWrapper] singleton as the [LibraryTrackPlayer] port the
+     * [com.adagiostream.android.service.player.MusicPlaybackCoordinator] drives —
+     * the coordinator depends on the interface (not the concrete wrapper) so it is
+     * unit-testable on the JVM without native libVLC.
+     */
+    @Provides
+    @Singleton
+    fun provideLibraryTrackPlayer(wrapper: VLCPlayerWrapper): LibraryTrackPlayer = wrapper
 
     @Provides
     @Singleton

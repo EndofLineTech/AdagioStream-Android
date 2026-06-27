@@ -31,7 +31,7 @@ class VLCPlayerWrapper(
     private val context: Context,
     initialBufferSeconds: Int = 10,
     val castManager: CastManager,
-) {
+) : LibraryTrackPlayer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val _playbackState = kotlinx.coroutines.flow.MutableStateFlow<PlaybackState>(PlaybackState.Idle)
@@ -534,6 +534,78 @@ class VLCPlayerWrapper(
         mediaPlayer.play()
     }
 
+    /**
+     * Plays a Navidrome library track from [streamUrl] (baw.3.2).
+     *
+     * Mirrors [doPlay] but for on-demand content: it switches the player out of
+     * radio mode (clears [currentChannel], so the live auto-reconnect / retry
+     * paths stay dormant) and sets [playbackSource] to [source]. From that point
+     * [PlaybackContract] routes EndReached to auto-advance and reports the track as
+     * seekable with a real duration. The canonical queue/index live in
+     * [MusicQueueManager]; this only renders the audio for the active track.
+     */
+    override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library) {
+        DebugLogger.log(
+            "playLibraryTrack(): track=${source.currentTrack.title}, index=${source.index}/${source.queue.size}",
+            DebugLogger.Category.PLAYER,
+        )
+        pendingPlayJob?.cancel()
+        retryJob?.cancel()
+        retryCount = 0
+        hasReceivedPlayingEvent = false
+
+        // Guard against stale VLC events FIRST, before updating state.
+        isSwitchingChannels = true
+        mediaPlayer.stop()
+        stopBitratePolling()
+
+        // Library, not radio: clear the channel so live-only logic (network
+        // reconnect, EndReached-as-error, XM polling) stays dormant.
+        _currentChannel.value = null
+        _playbackSource.value = source
+        _playbackState.value = PlaybackState.Buffering
+        _bitrateKbps.value = 0f
+        peakBitrateKbps = 0f
+        _streamStartedAt.value = System.currentTimeMillis()
+        _timeShiftMs.value = 0L
+        pausedAtSystemTime = 0L
+        _listeningTimeMs.value = 0L
+        listeningSegmentStartTime = 0L
+
+        ContextCompat.startForegroundService(
+            context, Intent(context, AudioPlaybackService::class.java)
+        )
+
+        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
+        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            DebugLogger.log("Library play blocked — audio focus denied", DebugLogger.Category.AUDIO)
+            _playbackState.value = PlaybackState.Idle
+            return
+        }
+
+        val media = Media(libVLC, Uri.parse(streamUrl))
+        media.setHWDecoderEnabled(true, false)
+        media.addOption(":no-video")
+        mediaPlayer.media = media
+        media.release()
+        mediaPlayer.play()
+    }
+
+    /** Current playback position in milliseconds (library scrubber; baw.3.6). */
+    fun currentPositionMs(): Long = mediaPlayer.time.coerceAtLeast(0L)
+
+    /**
+     * Seeks the active library track to [positionMs], clamped into the track's
+     * known duration (baw.3.6). Live radio never calls this — it is non-seekable
+     * per [PlaybackContract].
+     */
+    fun seekToPositionMs(positionMs: Long) {
+        val durationMs = mediaPlayer.length // -1 when unknown
+        val target = clampSeekMs(positionMs, durationMs)
+        DebugLogger.log("seekToPositionMs(): requested=$positionMs, clamped=$target, len=$durationMs", DebugLogger.Category.PLAYER)
+        mediaPlayer.time = target
+    }
+
     private fun retryConnection(reason: String) {
         retryCount++
         val delayMs = (retryCount * 1500L)
@@ -596,7 +668,7 @@ class VLCPlayerWrapper(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         DebugLogger.log("stop(): channel=${_currentChannel.value?.name}", DebugLogger.Category.PLAYER)
         pendingPlayJob?.cancel()
         retryJob?.cancel()

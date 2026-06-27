@@ -41,9 +41,11 @@ interface NowPlayingItem {
     /**
      * Optional artwork URL for the item.
      *
-     * For [Track] this is `null` in the E3 foundation: a Subsonic cover-art URL
-     * requires an authenticated base URL the model does not own. baw.3.2 resolves
-     * a real URL via the API context. For [Channel] it is the channel logo.
+     * For [Track] this stays `null`: a Subsonic cover-art URL requires an
+     * authenticated base URL the model does not own, so the real authenticated URL
+     * is resolved one layer up by `MusicPlaybackCoordinator.nowPlayingArtworkUrl`
+     * (baw.3.2/3.4) and read by the session player when building MediaSession
+     * metadata. For [Channel] it is the channel logo.
      */
     val artworkUrl: String?
 
@@ -77,7 +79,11 @@ private data class TrackNowPlayingItem(val track: Track) : NowPlayingItem {
      */
     override val displaySubtitle: String? get() = track.artist?.ifEmpty { null }
 
-    /** Resolved by baw.3.2 from the API context; null in the E3 foundation. */
+    /**
+     * Always null here — the authenticated cover-art URL is resolved by
+     * `MusicPlaybackCoordinator.nowPlayingArtworkUrl`, which has the API context
+     * the model lacks (baw.3.2/3.4).
+     */
     override val artworkUrl: String? get() = null
 
     override val isLiveStream: Boolean get() = false
