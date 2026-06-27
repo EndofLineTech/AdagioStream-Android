@@ -6,6 +6,10 @@ import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
+import com.adagiostream.android.service.player.LibraryTrackPlayer
+import com.adagiostream.android.service.player.MusicPlaybackCoordinator
+import com.adagiostream.android.service.player.MusicQueueManager
+import com.adagiostream.android.service.player.PlaybackSource
 import com.adagiostream.android.testutil.MainDispatcherRule
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +45,15 @@ class NavidromeLibraryViewModelTest {
     private lateinit var api: NavidromeApi
     private lateinit var viewModel: NavidromeLibraryViewModel
 
+    // Records what the browse→play bridge would start (baw.3.8).
+    private val playedSources = mutableListOf<PlaybackSource.Library>()
+    private val fakeTrackPlayer = object : LibraryTrackPlayer {
+        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library) {
+            playedSources += source
+        }
+        override fun stop() {}
+    }
+
     // Fake AccountRepository — simple MutableStateFlow, no Android dependencies.
     private val fakeAccountsFlow = MutableStateFlow<List<Account>>(emptyList())
     private val fakeAccountRepository = object : AccountRepository {
@@ -71,6 +84,7 @@ class NavidromeLibraryViewModelTest {
         viewModel = NavidromeLibraryViewModel(
             accountRepository = fakeAccountRepository,
             navidromeApiFactory = factory,
+            musicPlaybackCoordinator = MusicPlaybackCoordinator(MusicQueueManager(), fakeTrackPlayer),
         )
     }
 
@@ -345,6 +359,45 @@ class NavidromeLibraryViewModelTest {
             "artistName must be null when server omits 'artist' field, never the artistId",
             viewModel.selectedAlbumArtistName.value,
         )
+    }
+
+    // -------------------------------------------------------------------------
+    // Browse → play bridge (baw.3.8)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `playTrack enqueues the whole album and starts from the tapped index`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(ALBUM_DETAIL_FIXTURE))
+
+        val fakeAlbum = com.adagiostream.android.service.navidrome.Album(
+            id = "al1", artistId = "ar1", title = "OK Computer", updatedAt = 0,
+        )
+        viewModel.tracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadTracks(fakeAlbum)
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val tracks = viewModel.albumTracks.value
+        assertEquals(3, tracks.size)
+        // Tap the 2nd track (Paranoid Android, t2).
+        viewModel.playTrack(tracks[1])
+
+        assertEquals(1, playedSources.size)
+        val source = playedSources.first()
+        assertEquals(3, source.queue.size)          // whole album enqueued
+        assertEquals(1, source.index)               // started from tapped index
+        assertEquals("t2", source.currentTrack.id)
+    }
+
+    @Test
+    fun `playTrack is a no-op when no Subsonic account is configured`() = runTest {
+        // No account → no api. Calling playTrack must not start anything.
+        viewModel.playTrack(com.adagiostream.android.testutil.TestFixtures.makeTrack())
+        assertTrue(playedSources.isEmpty())
     }
 
     // -------------------------------------------------------------------------

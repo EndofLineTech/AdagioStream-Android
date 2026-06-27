@@ -10,6 +10,7 @@ import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +38,7 @@ import javax.inject.Inject
 class NavidromeLibraryViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val navidromeApiFactory: NavidromeApiFactory,
+    private val musicPlaybackCoordinator: MusicPlaybackCoordinator,
 ) : ViewModel() {
 
     // -------------------------------------------------------------------------
@@ -242,6 +244,30 @@ class NavidromeLibraryViewModel @Inject constructor(
         val album = _selectedAlbum.value ?: return
         _tracksState.value = LoadState.Idle
         loadTracks(album)
+    }
+
+    // -------------------------------------------------------------------------
+    // Browse → play bridge (baw.3.8)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Starts playback from a tapped track (baw.3.8).
+     *
+     * PO decision: tapping a track enqueues the WHOLE loaded album and starts from
+     * the tapped index, so auto-advance works immediately. No-op when no Subsonic
+     * API is configured or the track is not in the loaded list.
+     */
+    fun playTrack(track: Track) {
+        val api = _api.value ?: return
+        val tracks = _albumTracks.value
+        val startIndex = tracks.indexOfFirst { it.id == track.id }
+        if (startIndex < 0) return
+        musicPlaybackCoordinator.playAlbum(
+            tracks = tracks,
+            startIndex = startIndex,
+            api = api,
+            albumTitle = _selectedAlbum.value?.title,
+        )
     }
 }
 

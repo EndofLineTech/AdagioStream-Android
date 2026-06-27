@@ -48,10 +48,9 @@ import com.adagiostream.android.service.navidrome.Track
  * Receives the `albumId` from the nav back-stack arguments and delegates
  * to [NavidromeLibraryViewModel.loadTracks].
  *
- * PLAYBACK: Tapping a track row currently does nothing (E3 scope).
- * TODO(E3): Wire track tap to the playback engine:
- *   audioPlayer.setQueue(tracks, startIndex = trackIndex, via = api)
- * The track list and API are available on the ViewModel when E3 is ready.
+ * PLAYBACK (baw.3.8): Tapping a track enqueues the WHOLE loaded album and starts
+ * from the tapped index (PO decision), giving auto-advance immediately. The tap
+ * delegates to [NavidromeLibraryViewModel.playTrack].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -153,7 +152,7 @@ fun AlbumDetailScreen(
                     }
 
                     items(tracks, key = { it.id }) { track ->
-                        TrackRow(track = track)
+                        TrackRow(track = track, onClick = { viewModel.playTrack(track) })
                         HorizontalDivider(modifier = Modifier.padding(start = 64.dp))
                     }
                 }
@@ -225,15 +224,11 @@ private fun AlbumHeader(
 }
 
 @Composable
-private fun TrackRow(track: Track) {
+private fun TrackRow(track: Track, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            // TODO(E3): Replace this no-op click with audio playback:
-            //   val tracks = viewModel.albumTracks.value
-            //   val startIndex = tracks.indexOfFirst { it.id == track.id }
-            //   audioPlayer.setQueue(tracks, startIndex = startIndex, via = api)
-            .clickable { /* E3 playback hook — not implemented in E2 */ }
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
