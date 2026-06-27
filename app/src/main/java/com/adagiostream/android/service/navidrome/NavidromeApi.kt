@@ -199,6 +199,85 @@ class NavidromeApi(
     }
 
     // -------------------------------------------------------------------------
+    // Scrobble / social endpoints (baw.5.1 / baw.5.2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Sends a scrobble notification to `scrobble.view` (baw.5.1).
+     *
+     * Fire-and-forget: all network and protocol errors are caught and silently
+     * discarded — callers should not rely on this function throwing.
+     *
+     * @param id          Subsonic song ID.
+     * @param submission  `true` for a final scrobble submission, `false` for a
+     *                    now-playing notification.
+     */
+    suspend fun scrobble(id: String, submission: Boolean) {
+        val url = buildUrl(
+            "scrobble",
+            mapOf("id" to id, "submission" to submission.toString()),
+        ) ?: return // invalid host — silently skip
+        try {
+            val data = fetchRawData(url)
+            val envelope = decodeEnvelope(data)
+            checkStatus(envelope)
+        } catch (_: Exception) {
+            // Fire-and-forget: log in production; suppress in tests.
+        }
+    }
+
+    /**
+     * Stars a track/album/artist via `star.view` (baw.5.2).
+     *
+     * Throws [NavidromeApiException] on failure so the UI can revert optimistic
+     * state updates.
+     *
+     * @param id  Subsonic item ID.
+     */
+    suspend fun star(id: String) {
+        val url = buildUrl("star", mapOf("id" to id))
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/star.view")
+        val data = fetchRawData(url)
+        val envelope = decodeEnvelope(data)
+        checkStatus(envelope)
+    }
+
+    /**
+     * Unstars a track/album/artist via `unstar.view` (baw.5.2).
+     *
+     * Throws [NavidromeApiException] on failure so the UI can revert optimistic
+     * state updates.
+     *
+     * @param id  Subsonic item ID.
+     */
+    suspend fun unstar(id: String) {
+        val url = buildUrl("unstar", mapOf("id" to id))
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/unstar.view")
+        val data = fetchRawData(url)
+        val envelope = decodeEnvelope(data)
+        checkStatus(envelope)
+    }
+
+    /**
+     * Sets a user rating for a track/album via `setRating.view` (baw.5.2).
+     *
+     * [rating] is clamped to `[0, 5]` — Subsonic's valid range.
+     *
+     * Throws [NavidromeApiException] on failure.
+     *
+     * @param id      Subsonic item ID.
+     * @param rating  Star rating 0–5 (0 removes the rating).
+     */
+    suspend fun setRating(id: String, rating: Int) {
+        val clamped = rating.coerceIn(0, 5)
+        val url = buildUrl("setRating", mapOf("id" to id, "rating" to clamped.toString()))
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/setRating.view")
+        val data = fetchRawData(url)
+        val envelope = decodeEnvelope(data)
+        checkStatus(envelope)
+    }
+
+    // -------------------------------------------------------------------------
     // Cover art (baw.2.2)
     // -------------------------------------------------------------------------
 

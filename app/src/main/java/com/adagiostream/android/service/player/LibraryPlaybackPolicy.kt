@@ -67,3 +67,21 @@ fun clampSeekMs(requestedMs: Long, durationMs: Long): Long {
     val lowerBounded = requestedMs.coerceAtLeast(0L)
     return if (durationMs > 0L) lowerBounded.coerceAtMost(durationMs) else lowerBounded
 }
+
+/**
+ * Scrobble submission threshold logic (baw.5.1).
+ *
+ * Mirrors the Last.fm / Subsonic scrobble spec:
+ *  - Submit when 50% of the track duration has elapsed, OR
+ *  - Submit when 4 minutes (240 s) have elapsed (whichever comes first).
+ *
+ * A zero or null duration is treated as unknown — only the 4-minute fallback
+ * rule applies in that case.
+ */
+object LibraryPlaybackPolicy {
+    fun shouldSubmit(elapsedSeconds: Long, durationSeconds: Long?): Boolean {
+        val duration = durationSeconds?.takeIf { it > 0 }
+        if (duration != null && elapsedSeconds * 2 >= duration) return true
+        return elapsedSeconds >= 240
+    }
+}

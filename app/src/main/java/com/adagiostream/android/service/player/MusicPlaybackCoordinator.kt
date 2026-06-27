@@ -2,9 +2,13 @@ package com.adagiostream.android.service.player
 
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.Track
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,6 +36,18 @@ class MusicPlaybackCoordinator @Inject constructor(
 
     /** The [NavidromeApi] backing the current library session; null until [playAlbum]. */
     private var api: NavidromeApi? = null
+
+    /**
+     * Coroutine scope for fire-and-forget operations such as scrobbling (baw.5.1).
+     *
+     * Exposed as `internal` so unit tests can inject a [kotlinx.coroutines.test.TestScope]
+     * with [kotlinx.coroutines.test.UnconfinedTestDispatcher] to run launched
+     * coroutines eagerly and verify scrobble calls synchronously.
+     */
+    internal var scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Guard that ensures the scrobble submission fires at most once per track (baw.5.1). */
+    private var scrobbleSubmitted = false
 
     private val _nowPlayingArtworkUrl = MutableStateFlow<String?>(null)
     private val _nowPlayingAlbumTitle = MutableStateFlow<String?>(null)
@@ -115,6 +131,31 @@ class MusicPlaybackCoordinator @Inject constructor(
     /** The currently-active library track, or null when nothing is queued. */
     fun currentTrack(): Track? = queue.current()
 
+    /**
+     * Reports playback progress for the current library track (baw.5.1).
+     *
+     * When [LibraryPlaybackPolicy.shouldSubmit] returns `true` AND the scrobble
+     * guard has not yet fired for the current track, fires a scrobble submission
+     * (submission=true) exactly once per track, fire-and-forget.
+     *
+     * No-op when no library session is active (api == null) — this ensures the
+     * IPTV/Radio paths never trigger a scrobble.
+     *
+     * @param elapsedSeconds  Seconds of playback elapsed so far.
+     */
+    fun reportPlaybackProgress(elapsedSeconds: Long) {
+        if (scrobbleSubmitted) return
+        val api = api ?: return
+        val track = queue.current() ?: return
+        val durationSeconds = track.duration?.toLong()
+        if (LibraryPlaybackPolicy.shouldSubmit(elapsedSeconds, durationSeconds)) {
+            scrobbleSubmitted = true
+            scope.launch {
+                api.scrobble(track.id, submission = true)
+            }
+        }
+    }
+
     private fun advanceOrStop() {
         val next = queue.next()
         if (next != null) {
@@ -131,6 +172,11 @@ class MusicPlaybackCoordinator @Inject constructor(
         val api = api ?: return
         val streamUrl = api.streamUrl(track.id)?.toString() ?: return
         _nowPlayingArtworkUrl.value = track.coverArt?.let { api.getCoverArtUrl(it)?.toString() }
+        // Reset per-track scrobble guard and fire now-playing notification (baw.5.1).
+        scrobbleSubmitted = false
+        scope.launch {
+            api.scrobble(track.id, submission = false)
+        }
         player.playLibraryTrack(
             streamUrl = streamUrl,
             source = PlaybackSource.Library(queue.queue, queue.currentIndex),

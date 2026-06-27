@@ -3,6 +3,16 @@ package com.adagiostream.android.service.player
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.testutil.TestFixtures
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.just
+import io.mockk.mockk
+import io.mockk.Runs
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -12,14 +22,19 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Wiring tests for the library playback engine (baw.3.2 / baw.3.3 / baw.3.5 / baw.3.8).
+ * Wiring tests for the library playback engine (baw.3.2 / baw.3.3 / baw.3.5 / baw.3.8 / baw.5.1).
  *
  * The coordinator is the unit-testable seam between [MusicQueueManager] and the
  * native player: a [FakeLibraryTrackPlayer] records what would be played, and a
  * real (network-free) [NavidromeApi] exercises actual stream/cover-art URL
  * building. This is how the queue-advance, auto-advance, repeat-one, manual
  * next/previous and shuffle/repeat routing get verified without a device.
+ *
+ * Scrobble tests (baw.5.1) use a MockK [NavidromeApi] with an [UnconfinedTestDispatcher]
+ * injected into [MusicPlaybackCoordinator.scope] so fire-and-forget coroutines run
+ * eagerly and can be verified synchronously.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class MusicPlaybackCoordinatorTest {
 
     /** Records the source of each playLibraryTrack call + whether stop() was hit. */
@@ -45,17 +60,41 @@ class MusicPlaybackCoordinatorTest {
     private lateinit var coordinator: MusicPlaybackCoordinator
     private lateinit var api: NavidromeApi
 
+    /**
+     * Unconfined dispatcher so coroutines launched in [MusicPlaybackCoordinator.scope]
+     * run eagerly (synchronously) during tests — no need for [advanceUntilIdle].
+     */
+    private val testDispatcher = UnconfinedTestDispatcher()
+    private val testScope = TestScope(testDispatcher)
+
     @Before
     fun setUp() {
         queue = MusicQueueManager()
         fakePlayer = FakeLibraryTrackPlayer()
         coordinator = MusicPlaybackCoordinator(queue, fakePlayer)
+        // Inject a test-controlled scope so fire-and-forget coroutines run eagerly.
+        coordinator.scope = testScope
         api = NavidromeApi(
             client = OkHttpClient(),
             host = "https://music.example.com",
             username = "alice",
             password = "sesame",
         )
+    }
+
+    /**
+     * Builds a [NavidromeApi] mock that:
+     *  - returns a valid stream URL from [streamUrl] so [playCurrent] doesn't short-circuit
+     *  - returns null from [getCoverArtUrl] (artwork not needed for scrobble tests)
+     *  - accepts [scrobble] calls without error
+     */
+    private fun makeMockApi(): NavidromeApi {
+        val mock = mockk<NavidromeApi>()
+        every { mock.streamUrl(any(), any(), any()) } returns
+            "https://music.example.com/rest/stream.view?id=x".toHttpUrl()
+        every { mock.getCoverArtUrl(any(), any()) } returns null
+        coEvery { mock.scrobble(any(), any()) } just Runs
+        return mock
     }
 
     private fun tracks(count: Int): List<Track> = TestFixtures.makeTracks(count)
@@ -237,5 +276,39 @@ class MusicPlaybackCoordinatorTest {
     fun `setRepeatMode updates the queue repeat mode`() {
         coordinator.setRepeatMode(RepeatMode.All)
         assertEquals(RepeatMode.All, queue.repeatMode)
+    }
+
+    // ---- scrobble (baw.5.1) ----------------------------------------------
+
+    @Test
+    fun `scrobble fires now-playing on track start`() {
+        val mockApi = makeMockApi()
+        coordinator.playAlbum(tracks(1), startIndex = 0, api = mockApi)
+
+        // submission=false = now-playing notification fired when playAlbum starts.
+        coVerify(exactly = 1) { mockApi.scrobble("track-0", submission = false) }
+    }
+
+    @Test
+    fun `scrobble fires submission exactly once at threshold`() {
+        val mockApi = makeMockApi()
+        coordinator.playAlbum(tracks(1), startIndex = 0, api = mockApi)
+
+        // TestFixtures.makeTracks(1) → track-0 with duration=180 s.
+        // 50% threshold = 90 s.
+        coordinator.reportPlaybackProgress(89L)  // just under → no submission
+        coordinator.reportPlaybackProgress(90L)  // exactly at 50% → fires!
+        coordinator.reportPlaybackProgress(150L) // past threshold → guard prevents second fire
+
+        coVerify(exactly = 1) { mockApi.scrobble("track-0", submission = true) }
+    }
+
+    @Test
+    fun `scrobble does not fire when no library session is active`() {
+        val mockApi = makeMockApi()
+        // No playAlbum call → api field is null → reportPlaybackProgress is a no-op.
+        coordinator.reportPlaybackProgress(300L)
+
+        coVerify(exactly = 0) { mockApi.scrobble(any(), any()) }
     }
 }
