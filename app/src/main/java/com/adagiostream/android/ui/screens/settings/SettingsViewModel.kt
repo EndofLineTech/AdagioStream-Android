@@ -154,6 +154,18 @@ class SettingsViewModel @Inject constructor(
         save()
     }
 
+    /**
+     * Toggles the Music tab alpha feature gate (baw.2.6).
+     *
+     * When enabled, the Music tab appears in the bottom nav and the Navidrome
+     * library browse UI is accessible.  Intended for developer/alpha testing
+     * before the feature is promoted to general availability.
+     */
+    fun updateMusicTabEnabled(enabled: Boolean) {
+        _settings.value = _settings.value.copy(musicTabEnabled = enabled)
+        save()
+    }
+
     fun clearDebugLogs() {
         DebugLogger.clearLogs()
         debugLogSize.value = DebugLogger.logFileSize()
