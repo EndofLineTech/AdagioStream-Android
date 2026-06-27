@@ -11,6 +11,9 @@ import coil3.ImageLoader
 import coil3.disk.DiskCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.CachePolicy
+import com.adagiostream.android.service.navidrome.NavidromeCoverArtFetcher
+import com.adagiostream.android.service.navidrome.NavidromeCoverArtKeyer
+import com.adagiostream.android.service.navidrome.NavidromeCoverArtRequest
 import dagger.Module
 import okio.Path.Companion.toOkioPath
 import dagger.Provides
@@ -71,9 +74,20 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideImageLoader(@ApplicationContext context: Context): ImageLoader =
+    fun provideImageLoader(
+        @ApplicationContext context: Context,
+        client: OkHttpClient,
+    ): ImageLoader =
         ImageLoader.Builder(context)
-            .components { add(OkHttpNetworkFetcherFactory()) }
+            .components {
+                // Standard OkHttp fetcher for regular https:// URLs.
+                add(OkHttpNetworkFetcherFactory(callFactory = { client }))
+                // Navidrome cover art: stable cache key + authenticated URL fetch.
+                // The keyer MUST be registered before the fetcher factory so Coil
+                // uses it during cache-key resolution for NavidromeCoverArtRequest.
+                add(NavidromeCoverArtKeyer())
+                add(NavidromeCoverArtFetcher.Factory(client))
+            }
             .memoryCachePolicy(CachePolicy.ENABLED)
             .diskCache {
                 DiskCache.Builder()

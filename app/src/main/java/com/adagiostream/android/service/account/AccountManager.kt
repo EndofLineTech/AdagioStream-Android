@@ -38,7 +38,7 @@ class AccountManager @Inject constructor(
     private val client: OkHttpClient,
     private val xmPlaylistApi: XMPlaylistApi,
     private val espnScoreService: ESPNScoreService,
-) {
+) : AccountRepository {
     companion object
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -47,7 +47,7 @@ class AccountManager @Inject constructor(
     private val epgParser = EPGParser(client)
 
     private val _accounts = MutableStateFlow<List<Account>>(emptyList())
-    val accounts: StateFlow<List<Account>> = _accounts.asStateFlow()
+    override val accounts: StateFlow<List<Account>> = _accounts.asStateFlow()
 
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
