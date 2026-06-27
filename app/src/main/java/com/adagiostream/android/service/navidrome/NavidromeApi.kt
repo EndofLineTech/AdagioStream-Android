@@ -199,6 +199,156 @@ class NavidromeApi(
     }
 
     // -------------------------------------------------------------------------
+    // Search (baw.4.1)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Full-text search via `search3.view` (baw.4.1).
+     *
+     * Returns a [NavidromeSearchResult] with artists, albums, and songs matching
+     * [query].  If the server omits any array (e.g. `artistCount=0` was requested)
+     * the corresponding list defaults to empty — this method never throws on a
+     * missing array.
+     *
+     * @param query         Search string — must be non-blank; blank queries should
+     *                      be filtered by the caller (ViewModel).
+     * @param artistCount   Max artist results (default 20).
+     * @param albumCount    Max album results (default 20).
+     * @param songCount     Max song results (default 20).
+     */
+    suspend fun search3(
+        query: String,
+        artistCount: Int = 20,
+        albumCount: Int = 20,
+        songCount: Int = 20,
+    ): NavidromeSearchResult {
+        val params = mapOf(
+            "query" to query,
+            "artistCount" to artistCount.toString(),
+            "albumCount" to albumCount.toString(),
+            "songCount" to songCount.toString(),
+        )
+        val url = buildUrl("search3", params)
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/search3.view")
+        val now = nowEpochSeconds()
+        val payload = fetchAndDecode(url, SearchResult3Payload.serializer())
+        val body = payload.response.searchResult3
+        return NavidromeSearchResult(
+            artists = body?.artists?.map { it.toRecord(updatedAt = now) } ?: emptyList(),
+            albums = body?.albums?.map { it.toRecord(updatedAt = now) } ?: emptyList(),
+            tracks = body?.songs?.map { it.toRecord(updatedAt = now) } ?: emptyList(),
+        )
+    }
+
+    // -------------------------------------------------------------------------
+    // Playlist browse (baw.4.2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Fetches all playlists from `getPlaylists.view` (baw.4.2).
+     *
+     * Returns an empty list when the server's `playlists` key is absent or has
+     * no playlist entries.
+     */
+    suspend fun getPlaylists(): List<NavidromePlaylist> {
+        val url = buildUrl("getPlaylists", emptyMap())
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/getPlaylists.view")
+        val payload = fetchAndDecode(url, GetPlaylistsPayload.serializer())
+        return payload.response.playlists?.items?.map { it.toRecord() } ?: emptyList()
+    }
+
+    /**
+     * Fetches a single playlist and its tracks from `getPlaylist.view?id=` (baw.4.2).
+     *
+     * Tracks are under the `"entry"` Subsonic key (distinct from the `"song"` key
+     * used in album responses).  Returns an empty track list when `entry` is absent.
+     *
+     * @return Pair of the [NavidromePlaylist] metadata and its [List<Track>].
+     */
+    suspend fun getPlaylist(id: String): Pair<NavidromePlaylist, List<Track>> {
+        val url = buildUrl("getPlaylist", mapOf("id" to id))
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/getPlaylist.view")
+        val now = nowEpochSeconds()
+        val payload = fetchAndDecode(url, GetPlaylistPayload.serializer())
+        val dto = payload.response.playlist
+            ?: throw NavidromeApiException.DecodingError(
+                IllegalStateException("Missing 'playlist' in getPlaylist response"),
+            )
+        val playlist = dto.toRecord()
+        val tracks = dto.songs.map { it.toRecord(updatedAt = now) }
+        return playlist to tracks
+    }
+
+    // -------------------------------------------------------------------------
+    // Playlist editing (baw.4.3)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a new empty playlist via `createPlaylist.view?name=` (baw.4.3).
+     *
+     * Navidrome may return the new playlist in the response body, or it may
+     * return a bare `status:ok` envelope — both are accepted; no data is
+     * returned.  Callers should refresh their playlist list after creation.
+     *
+     * Throws [NavidromeApiException] on server or auth failure.
+     */
+    suspend fun createPlaylist(name: String) {
+        val url = buildUrlList("createPlaylist", listOf("name" to name))
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/createPlaylist.view")
+        val data = fetchRawData(url)
+        val envelope = decodeEnvelope(data)
+        checkStatus(envelope)
+        // Status-only response accepted — no further parsing required.
+    }
+
+    /**
+     * Updates a playlist's name and/or tracks via `updatePlaylist.view` (baw.4.3).
+     *
+     * Repeated params are built with [buildUrlList] so each song ID / removal
+     * index is sent as a separate `songIdToAdd` / `songIndexToRemove` query
+     * parameter (OkHttp's `addQueryParameter` is called once per value).
+     *
+     * @param id              Subsonic playlist ID.
+     * @param name            Optional new name (param omitted if null).
+     * @param songIdsToAdd    Song IDs to append — each sent as its own param.
+     * @param indicesToRemove 0-based track indices to remove — each sent as its own param.
+     */
+    suspend fun updatePlaylist(
+        id: String,
+        name: String? = null,
+        songIdsToAdd: List<String> = emptyList(),
+        indicesToRemove: List<Int> = emptyList(),
+    ) {
+        val params = buildList {
+            add("playlistId" to id)
+            if (name != null) add("name" to name)
+            songIdsToAdd.forEach { add("songIdToAdd" to it) }
+            indicesToRemove.forEach { add("songIndexToRemove" to it.toString()) }
+        }
+        val url = buildUrlList("updatePlaylist", params)
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/updatePlaylist.view")
+        val data = fetchRawData(url)
+        val envelope = decodeEnvelope(data)
+        checkStatus(envelope)
+    }
+
+    /**
+     * Deletes a playlist via `deletePlaylist.view?id=` (baw.4.3).
+     *
+     * Throws [NavidromeApiException] on failure so the UI can revert
+     * optimistic deletions.
+     *
+     * @param id  Subsonic playlist ID to delete.
+     */
+    suspend fun deletePlaylist(id: String) {
+        val url = buildUrl("deletePlaylist", mapOf("id" to id))
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/deletePlaylist.view")
+        val data = fetchRawData(url)
+        val envelope = decodeEnvelope(data)
+        checkStatus(envelope)
+    }
+
+    // -------------------------------------------------------------------------
     // Scrobble / social endpoints (baw.5.1 / baw.5.2)
     // -------------------------------------------------------------------------
 
@@ -388,6 +538,33 @@ class NavidromeApi(
         }
 
         // Append endpoint-specific params
+        for ((key, value) in params) {
+            builder.addQueryParameter(key, value)
+        }
+
+        return builder.build()
+    }
+
+    /**
+     * Builds a URL accepting a list of key-value pairs, allowing repeated keys.
+     *
+     * Required for endpoints like `updatePlaylist` that use repeated query params
+     * (e.g. multiple `songIdToAdd=…` values).  OkHttp's `addQueryParameter` is
+     * called once per pair, producing the correct multi-value URL encoding.
+     *
+     * @return null if the host string is not a valid HTTP/HTTPS URL.
+     */
+    private fun buildUrlList(endpoint: String, params: List<Pair<String, String>>): HttpUrl? {
+        val base = host.trimEnd('/').toHttpUrlOrNull() ?: return null
+        val builder = base.newBuilder()
+            .encodedPath("/rest/$endpoint.view")
+
+        // Append auth params
+        for ((key, value) in auth.queryParams()) {
+            builder.addQueryParameter(key, value)
+        }
+
+        // Append endpoint-specific params — one call per entry, supports repeated keys
         for ((key, value) in params) {
             builder.addQueryParameter(key, value)
         }

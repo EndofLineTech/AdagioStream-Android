@@ -512,6 +512,183 @@ data class SubsonicTrackDto(
     )
 }
 
+// ============================================================================
+// Navidrome Playlist models (baw.4.2 / baw.4.3)
+//
+// IMPORTANT naming: NavidromePlaylist is intentionally distinct from the
+// IPTV M3U CustomPlaylist system (service/m3u/). These two systems are
+// entirely separate — Navidrome playlists are server-side Subsonic playlists,
+// not local M3U-derived channel groups.
+// ============================================================================
+
+/**
+ * A Navidrome / Subsonic server-side playlist.
+ *
+ * Name is [NavidromePlaylist] to avoid collisions with the IPTV M3U
+ * [CustomPlaylist] model and the Android navigation [Playlist] route.
+ */
+@Serializable
+data class NavidromePlaylist(
+    val id: String,
+    val name: String,
+    val songCount: Int = 0,
+    val coverArt: String? = null,
+    val public: Boolean = false,
+    val owner: String? = null,
+)
+
+/**
+ * Container for a search3 result.
+ *
+ * All three arrays default to empty if the server omits them — Subsonic sends
+ * absent keys when the count for that type is 0.
+ */
+data class NavidromeSearchResult(
+    val artists: List<Artist> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val tracks: List<Track> = emptyList(),
+) {
+    /** True when all three result lists are empty. */
+    val isEmpty: Boolean get() = artists.isEmpty() && albums.isEmpty() && tracks.isEmpty()
+}
+
+// ----------------------------------------------------------------------------
+// Playlist DTO types — decode Subsonic JSON before producing domain records
+// ----------------------------------------------------------------------------
+
+/**
+ * Decodes a single playlist entry from `getPlaylists` response.
+ *
+ * Songs are NOT included at the list level — call `getPlaylist` for tracks.
+ */
+@Serializable
+data class SubsonicPlaylistDto(
+    val id: String,
+    val name: String,
+    val songCount: Int = 0,
+    val coverArt: String? = null,
+    val public: Boolean = false,
+    val owner: String? = null,
+) {
+    fun toRecord(): NavidromePlaylist = NavidromePlaylist(
+        id = id,
+        name = name,
+        songCount = songCount,
+        coverArt = coverArt,
+        public = public,
+        owner = owner,
+    )
+}
+
+/**
+ * Decodes a full playlist detail from `getPlaylist`.
+ *
+ * Tracks are under the `"entry"` key (not `"song"` as in album responses).
+ */
+@Serializable
+data class SubsonicPlaylistDetailDto(
+    val id: String,
+    val name: String,
+    val songCount: Int = 0,
+    val coverArt: String? = null,
+    val public: Boolean = false,
+    val owner: String? = null,
+    /** Subsonic uses "entry" for playlist song items (not "song"). */
+    @SerialName("entry") val songs: List<SubsonicTrackDto> = emptyList(),
+) {
+    fun toRecord(): NavidromePlaylist = NavidromePlaylist(
+        id = id,
+        name = name,
+        songCount = songCount,
+        coverArt = coverArt,
+        public = public,
+        owner = owner,
+    )
+}
+
+// ----------------------------------------------------------------------------
+// Playlist payload types
+// ----------------------------------------------------------------------------
+
+/**
+ * Full Subsonic envelope for getPlaylists.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status":"ok", ..., "playlists": {"playlist":[...]}}}
+ * ```
+ */
+@Serializable
+data class GetPlaylistsPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val playlists: PlaylistsBody? = null,
+    )
+
+    @Serializable
+    data class PlaylistsBody(
+        @SerialName("playlist") val items: List<SubsonicPlaylistDto> = emptyList(),
+    )
+}
+
+/**
+ * Full Subsonic envelope for getPlaylist.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status":"ok", ..., "playlist": {"id":…, "entry":[...]}}}
+ * ```
+ */
+@Serializable
+data class GetPlaylistPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val playlist: SubsonicPlaylistDetailDto? = null,
+    )
+}
+
+// ----------------------------------------------------------------------------
+// Search payload types (baw.4.1)
+// ----------------------------------------------------------------------------
+
+/**
+ * Full Subsonic envelope for search3.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status":"ok", ..., "searchResult3": {"artist":[...],"album":[...],"song":[...]}}}
+ * ```
+ *
+ * Any of the arrays may be absent (Subsonic omits them when count=0 was
+ * requested); they all default to empty lists.
+ */
+@Serializable
+data class SearchResult3Payload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val searchResult3: SearchResult3Body? = null,
+    )
+
+    @Serializable
+    data class SearchResult3Body(
+        @SerialName("artist") val artists: List<SubsonicArtistDto> = emptyList(),
+        @SerialName("album") val albums: List<SubsonicAlbumDto> = emptyList(),
+        @SerialName("song") val songs: List<SubsonicTrackDto> = emptyList(),
+    )
+}
+
 // ----------------------------------------------------------------------------
 // Custom serializer: starred presence → boolean
 // ----------------------------------------------------------------------------
