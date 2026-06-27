@@ -4,6 +4,7 @@ import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.EPGEntry
+import com.adagiostream.android.service.navidrome.Track
 
 object TestFixtures {
 
@@ -104,6 +105,32 @@ object TestFixtures {
         isFavorite = isFavorite,
         xtreamStreamId = xtreamStreamId,
     )
+
+    fun makeTrack(
+        id: String = "track-1",
+        albumId: String = "album-1",
+        artistId: String = "artist-1",
+        title: String = "Test Track",
+        artist: String? = "Test Artist",
+        trackNumber: Int? = 1,
+        duration: Int? = 180,
+        coverArt: String? = "cover-1",
+        updatedAt: Int = 0,
+    ) = Track(
+        id = id,
+        albumId = albumId,
+        artistId = artistId,
+        title = title,
+        artist = artist,
+        trackNumber = trackNumber,
+        duration = duration,
+        coverArt = coverArt,
+        updatedAt = updatedAt,
+    )
+
+    /** Builds [count] distinct tracks (ids/titles `track-0..track-N`) for queue tests. */
+    fun makeTracks(count: Int): List<Track> =
+        (0 until count).map { makeTrack(id = "track-$it", title = "Track $it", trackNumber = it + 1) }
 
     fun makeAccount(
         id: String = "account-1",

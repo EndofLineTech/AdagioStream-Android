@@ -207,6 +207,17 @@ class VLCSessionPlayer(
             val meta = activeItem.mediaMetadata
             DebugLogger.log("getState() - mediaId=${activeItem.mediaId}, title=${meta.title}, artist=${meta.artist}, station=${meta.station}, artworkUri=${meta.artworkUri}", AUTO)
 
+            // Per-source playback contract (baw.3.7). This block only runs for the
+            // live path (gated on currentChannel != null), so the source is Radio
+            // (or null) and these resolve to the existing live values —
+            // isSeekable=false, durationUs=TIME_UNSET, isDynamic=true. Reading them
+            // from PlaybackContract keeps the live MediaItemData locked to a single
+            // source of truth that PlaybackContractTest guards.
+            val source = vlcWrapper.playbackSource.value
+            val liveSeekable = PlaybackContract.isSeekable(source)
+            val liveDurationUs = PlaybackContract.durationUs(source)
+            val liveDynamic = PlaybackContract.isDynamic(source)
+
             // Build playlist from channel list so Media3 exposes skip next/previous actions
             val channels = vlcWrapper.channelList
             if (channels.size > 1) {
@@ -232,9 +243,9 @@ class VLCSessionPlayer(
                         .setMediaMetadata(mediaItem.mediaMetadata)
                         .setIsPlaceholder(index != currentIndex)
                         .setDefaultPositionUs(0)
-                        .setDurationUs(androidx.media3.common.C.TIME_UNSET)
-                        .setIsSeekable(false)
-                        .setIsDynamic(true)
+                        .setDurationUs(liveDurationUs)
+                        .setIsSeekable(liveSeekable)
+                        .setIsDynamic(liveDynamic)
                         .build()
                 }
                 builder.setPlaylist(playlistItems)
@@ -245,9 +256,9 @@ class VLCSessionPlayer(
                     .setMediaMetadata(activeItem.mediaMetadata)
                     .setIsPlaceholder(false)
                     .setDefaultPositionUs(0)
-                    .setDurationUs(androidx.media3.common.C.TIME_UNSET)
-                    .setIsSeekable(false)
-                    .setIsDynamic(true)
+                    .setDurationUs(liveDurationUs)
+                    .setIsSeekable(liveSeekable)
+                    .setIsDynamic(liveDynamic)
                     .build()))
                 builder.setCurrentMediaItemIndex(0)
             }
