@@ -78,6 +78,9 @@ class AddAccountViewModel @Inject constructor(
                         _m3uUrl.value = type.url
                         _epgUrl.value = type.epgUrl ?: ""
                     }
+                    // Subsonic accounts are not editable via the IPTV add-account flow.
+                    // The Navidrome provider UI is a separate screen (E2 scope).
+                    is AccountType.Subsonic -> Unit
                 }
             }
         }

@@ -242,6 +242,9 @@ class AccountManager @Inject constructor(
                     val channels = when (account.type) {
                         is AccountType.M3U -> m3uParser.parse(account.type.url)
                         is AccountType.XtreamCodes -> xtreamApi.getChannels(account.type)
+                        // Subsonic/Navidrome accounts are music providers — they produce no
+                        // IPTV channels. Library browsing is handled separately in E2.
+                        is AccountType.Subsonic -> emptyList()
                     }
                     val strip = (account.type as? AccountType.XtreamCodes)?.stripStreamIDs == true
                     allChannels.addAll(channels.map {
@@ -446,6 +449,8 @@ class AccountManager @Inject constructor(
                         // EPG loading is best-effort; on-demand fallback still available
                     }
                 }
+                // Subsonic/Navidrome accounts have no EPG — music library only.
+                is AccountType.Subsonic -> Unit
             }
         }
 

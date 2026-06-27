@@ -240,6 +240,13 @@ class SettingsViewModel @Inject constructor(
                                         put("username", JsonPrimitive(type.username))
                                         // Password intentionally omitted
                                     }
+                                    // Subsonic accounts: type only; credentials omitted intentionally.
+                                    is AccountType.Subsonic -> {
+                                        put("type", JsonPrimitive("subsonic"))
+                                        put("host", JsonPrimitive(type.host))
+                                        put("username", JsonPrimitive(type.username))
+                                        // Password intentionally omitted from diagnostic export
+                                    }
                                 }
                             })
                         }

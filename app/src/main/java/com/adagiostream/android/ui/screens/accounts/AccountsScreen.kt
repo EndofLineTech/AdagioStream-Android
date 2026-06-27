@@ -159,6 +159,7 @@ private fun AccountCard(
                     text = when (account.type) {
                         is AccountType.M3U -> "M3U Playlist"
                         is AccountType.XtreamCodes -> "Xtream Codes"
+                        is AccountType.Subsonic -> "Navidrome / Subsonic"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
