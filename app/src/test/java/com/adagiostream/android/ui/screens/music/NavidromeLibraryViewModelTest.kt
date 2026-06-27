@@ -439,6 +439,310 @@ class NavidromeLibraryViewModelTest {
     }
 
     // -------------------------------------------------------------------------
+    // Genre browse (baw.2.4) — loadGenres state machine
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `initial genresState is Idle`() = runTest {
+        viewModel.genresState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadGenres transitions Idle then Loading then Loaded on success`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRES_OK_FIXTURE))
+
+        viewModel.genresState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadGenres()
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loading, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadGenres populates genres list sorted alphabetically by name`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRES_OK_FIXTURE))
+
+        viewModel.genresState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadGenres()
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val genres = viewModel.genres.value
+        assertEquals(3, genres.size)
+        // Sorted alphabetically: Classical, Jazz, Rock
+        assertEquals("Classical", genres[0].name)
+        assertEquals("Jazz", genres[1].name)
+        assertEquals("Rock", genres[2].name)
+    }
+
+    @Test
+    fun `loadGenres transitions to Empty when server returns no genres`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRES_EMPTY_FIXTURE))
+
+        viewModel.genresState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadGenres()
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadGenres transitions to Error on auth failure`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(
+            mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong credentials"}}}"""),
+        )
+
+        viewModel.genresState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadGenres()
+            awaitItem() // Loading
+            val result = awaitItem()
+            assertTrue("Expected Error state", result is NavidromeLibraryViewModel.LoadState.Error)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadGenres is no-op when no Subsonic account configured`() = runTest {
+        viewModel.genresState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadGenres()
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadGenres is no-op while already Loading`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRES_OK_FIXTURE))
+
+        viewModel.genresState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadGenres()
+            awaitItem() // Loading
+            viewModel.loadGenres() // second call — no-op
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `retryGenres resets to Idle then triggers fresh load`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(
+            mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Auth error"}}}"""),
+        )
+        server.enqueue(mockOk(GENRES_OK_FIXTURE))
+
+        viewModel.genresState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadGenres()
+            awaitItem() // Loading
+            val errorState = awaitItem()
+            assertTrue("Should be Error state", errorState is NavidromeLibraryViewModel.LoadState.Error)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        viewModel.genresState.test {
+            viewModel.retryGenres()
+            val states = mutableListOf<NavidromeLibraryViewModel.LoadState>()
+            repeat(5) {
+                states.add(awaitItem())
+                if (states.last() == NavidromeLibraryViewModel.LoadState.Loaded) return@test
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, viewModel.genresState.value)
+    }
+
+    // -------------------------------------------------------------------------
+    // Genre detail — loadSongsByGenre state machine (baw.2.4)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `loadSongsByGenre transitions to Loaded and populates genreTracks`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRE_SONGS_FIXTURE))
+
+        val fakeGenre = com.adagiostream.android.service.navidrome.SubsonicGenre(
+            name = "Rock", songCount = 2, albumCount = 1,
+        )
+
+        viewModel.genreTracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadSongsByGenre(fakeGenre)
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(2, viewModel.genreTracks.value.size)
+    }
+
+    @Test
+    fun `loadSongsByGenre sorts tracks alphabetically by title`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRE_SONGS_FIXTURE))
+
+        val fakeGenre = com.adagiostream.android.service.navidrome.SubsonicGenre(
+            name = "Rock", songCount = 2, albumCount = 1,
+        )
+
+        viewModel.genreTracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadSongsByGenre(fakeGenre)
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val tracks = viewModel.genreTracks.value
+        assertEquals(2, tracks.size)
+        // Alphabetical: "Bohemian Rhapsody" < "We Will Rock You"
+        assertEquals("Bohemian Rhapsody", tracks[0].title)
+        assertEquals("We Will Rock You", tracks[1].title)
+    }
+
+    @Test
+    fun `loadSongsByGenre exposes artist NAME not artistId`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRE_SONGS_FIXTURE))
+
+        val fakeGenre = com.adagiostream.android.service.navidrome.SubsonicGenre(
+            name = "Rock", songCount = 2, albumCount = 1,
+        )
+
+        viewModel.genreTracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadSongsByGenre(fakeGenre)
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val tracks = viewModel.genreTracks.value
+        // artist field must be the human-readable name from "artist" JSON field, never the artistId
+        assertTrue(
+            "All tracks must have artist name 'Queen' from the 'artist' field, not the artistId 'ar1'",
+            tracks.all { it.artist == "Queen" },
+        )
+    }
+
+    @Test
+    fun `loadSongsByGenre transitions to Empty when server returns no songs`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRE_SONGS_EMPTY_FIXTURE))
+
+        val fakeGenre = com.adagiostream.android.service.navidrome.SubsonicGenre(
+            name = "Empty Genre", songCount = 0, albumCount = 0,
+        )
+
+        viewModel.genreTracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadSongsByGenre(fakeGenre)
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadSongsByGenre is no-op when same genre already Loaded`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRE_SONGS_FIXTURE))
+
+        val fakeGenre = com.adagiostream.android.service.navidrome.SubsonicGenre(
+            name = "Rock", songCount = 2, albumCount = 1,
+        )
+
+        // First load
+        viewModel.genreTracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadSongsByGenre(fakeGenre)
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // Second call with the same genre — no-op; no new Loading emitted
+        viewModel.genreTracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem()) // current state
+            viewModel.loadSongsByGenre(fakeGenre)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadSongsByGenre is no-op when no Subsonic account configured`() = runTest {
+        val fakeGenre = com.adagiostream.android.service.navidrome.SubsonicGenre(
+            name = "Rock", songCount = 2, albumCount = 1,
+        )
+
+        viewModel.genreTracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadSongsByGenre(fakeGenre)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Genre browse → play bridge (baw.2.4 + baw.3.8)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `playGenreTrack enqueues genre tracks and starts from tapped index`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(GENRE_SONGS_FIXTURE))
+
+        val fakeGenre = com.adagiostream.android.service.navidrome.SubsonicGenre(
+            name = "Rock", songCount = 2, albumCount = 1,
+        )
+
+        viewModel.genreTracksState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadSongsByGenre(fakeGenre)
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val tracks = viewModel.genreTracks.value
+        assertEquals(2, tracks.size)
+        // Tap the second track (We Will Rock You, sg1 — index 1 after alpha sort)
+        viewModel.playGenreTrack(tracks[1])
+
+        assertEquals(1, playedSources.size)
+        val source = playedSources.first()
+        assertEquals(2, source.queue.size)           // whole genre queue enqueued
+        assertEquals(1, source.index)                // started from tapped index
+        assertEquals(tracks[1].id, source.currentTrack.id)
+    }
+
+    @Test
+    fun `playGenreTrack is no-op when no Subsonic account configured`() = runTest {
+        viewModel.playGenreTrack(com.adagiostream.android.testutil.TestFixtures.makeTrack())
+        assertTrue(playedSources.isEmpty())
+    }
+
+    // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
 
@@ -504,6 +808,63 @@ class NavidromeLibraryViewModelTest {
                     {"id":"t3","albumId":"al1","artistId":"ar1","title":"Karma Police","track":3,"duration":261}
                   ]
                 }
+              }
+            }
+        """
+
+        // Genre fixtures (baw.2.4)
+
+        private const val GENRES_OK_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "genres": {
+                  "genre": [
+                    {"value":"Rock","songCount":42,"albumCount":8},
+                    {"value":"Jazz","songCount":15,"albumCount":3},
+                    {"value":"Classical","songCount":7,"albumCount":2}
+                  ]
+                }
+              }
+            }
+        """
+
+        private const val GENRES_EMPTY_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "genres": { "genre": [] }
+              }
+            }
+        """
+
+        /**
+         * Two Rock songs returned in unsorted order (We Will Rock You first, Bohemian Rhapsody second)
+         * so that the sort-by-title test can verify the ViewModel sorts them correctly.
+         */
+        private const val GENRE_SONGS_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "songsByGenre": {
+                  "song": [
+                    {"id":"sg1","albumId":"al1","artistId":"ar1","title":"We Will Rock You","artist":"Queen","track":1,"duration":121},
+                    {"id":"sg2","albumId":"al1","artistId":"ar1","title":"Bohemian Rhapsody","artist":"Queen","track":2,"duration":355}
+                  ]
+                }
+              }
+            }
+        """
+
+        private const val GENRE_SONGS_EMPTY_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "songsByGenre": { "song": [] }
               }
             }
         """

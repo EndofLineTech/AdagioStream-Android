@@ -41,6 +41,8 @@ import com.adagiostream.android.ui.screens.privacy.PrivacyPolicyScreen
 import com.adagiostream.android.ui.screens.loved.LovedTracksScreen
 import com.adagiostream.android.ui.screens.music.AlbumDetailScreen
 import com.adagiostream.android.ui.screens.music.ArtistDetailScreen
+import com.adagiostream.android.ui.screens.music.GenreBrowseScreen
+import com.adagiostream.android.ui.screens.music.GenreDetailScreen
 import com.adagiostream.android.ui.screens.music.MusicLibraryScreen
 import com.adagiostream.android.ui.screens.m3us.MyM3UsScreen
 import com.adagiostream.android.ui.screens.m3us.PlaylistDetailScreen
@@ -180,6 +182,9 @@ fun MainScreen(
                         onArtistClick = { artistId ->
                             navController.navigate(Screen.ArtistDetail.createRoute(artistId))
                         },
+                        onGenresClick = {
+                            navController.navigate(Screen.GenreBrowse.route)
+                        },
                     )
                 }
                 composable(
@@ -203,6 +208,26 @@ fun MainScreen(
                 ) {
                     AlbumDetailScreen(
                         onBack = { navController.popBackStack() },
+                    )
+                }
+                // Genre browse routes (baw.2.4)
+                composable(Screen.GenreBrowse.route) {
+                    GenreBrowseScreen(
+                        onGenreClick = { genreName ->
+                            navController.navigate(Screen.GenreDetail.createRoute(genreName))
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = Screen.GenreDetail.route,
+                    arguments = listOf(
+                        navArgument("genreName") { type = NavType.StringType },
+                    ),
+                ) {
+                    GenreDetailScreen(
+                        onBack = { navController.popBackStack() },
+                        backStackEntry = it,
                     )
                 }
                 composable(Screen.MyM3Us.route) {

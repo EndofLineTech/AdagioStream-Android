@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
@@ -40,19 +41,19 @@ import com.adagiostream.android.service.navidrome.NavidromeCoverArtRequest
 /**
  * Root Music tab screen (baw.2.3, baw.2.5).
  *
- * Shows the artist list when a Navidrome account is configured, or an
- * empty-state prompt directing the user to Settings → Accounts when not.
+ * Shows a "Browse by Genre" shortcut followed by the artist list when a
+ * Navidrome account is configured, or an empty-state prompt directing the
+ * user to Settings → Accounts when not.
  *
  * Navigation: tapping an artist row navigates to [ArtistDetailScreen] via
- * [onArtistClick] (caller owns the NavController).
- *
- * Playback: tapping a track in [AlbumDetailScreen] leaves a clear TODO — it
- * should call into the playback engine (E3 scope) rather than no-op silently.
+ * [onArtistClick]; tapping the Genres row navigates to [GenreBrowseScreen]
+ * via [onGenresClick].  Callers own the NavController.
  */
 @Composable
 fun MusicLibraryScreen(
     viewModel: NavidromeLibraryViewModel = hiltViewModel(),
     onArtistClick: (artistId: String) -> Unit,
+    onGenresClick: () -> Unit = {},
 ) {
     val api by viewModel.api.collectAsStateWithLifecycle()
     val artistsState by viewModel.artistsState.collectAsStateWithLifecycle()
@@ -146,6 +147,7 @@ fun MusicLibraryScreen(
                     artists = artists,
                     api = api,
                     onArtistClick = onArtistClick,
+                    onGenresClick = onGenresClick,
                 )
             }
         }
@@ -187,8 +189,15 @@ private fun ArtistList(
     artists: List<Artist>,
     api: com.adagiostream.android.service.navidrome.NavidromeApi?,
     onArtistClick: (artistId: String) -> Unit,
+    onGenresClick: () -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
+        // Browse-by-genre shortcut (baw.2.4) — shown above the artist list.
+        item {
+            GenresBrowseRow(onClick = onGenresClick)
+            HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
+        }
+
         items(artists, key = { it.id }) { artist ->
             ArtistRow(
                 artist = artist,
@@ -197,6 +206,43 @@ private fun ArtistList(
             )
             HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
         }
+    }
+}
+
+@Composable
+private fun GenresBrowseRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(44.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.MusicNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Text(
+            text = "Browse by Genre",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
 

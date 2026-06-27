@@ -9,6 +9,7 @@ import com.adagiostream.android.service.navidrome.Artist
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
+import com.adagiostream.android.service.navidrome.SubsonicGenre
 import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -267,6 +268,118 @@ class NavidromeLibraryViewModel @Inject constructor(
             startIndex = startIndex,
             api = api,
             albumTitle = _selectedAlbum.value?.title,
+        )
+    }
+
+    // -------------------------------------------------------------------------
+    // Genre browse state (baw.2.4)
+    // -------------------------------------------------------------------------
+
+    private val _genres = MutableStateFlow<List<SubsonicGenre>>(emptyList())
+    val genres: StateFlow<List<SubsonicGenre>> = _genres.asStateFlow()
+
+    private val _genresState = MutableStateFlow<LoadState>(LoadState.Idle)
+    val genresState: StateFlow<LoadState> = _genresState.asStateFlow()
+
+    /**
+     * Loads all genres from the active Navidrome API.
+     *
+     * Results are sorted alphabetically by name.  Guards against concurrent loads.
+     */
+    fun loadGenres() {
+        val api = _api.value ?: return
+        if (_genresState.value is LoadState.Loading) return
+
+        viewModelScope.launch {
+            _genresState.value = LoadState.Loading
+            try {
+                val loaded = api.getGenres()
+                    .sortedBy { it.name.lowercase() }
+                _genres.value = loaded
+                _genresState.value = if (loaded.isEmpty()) LoadState.Empty else LoadState.Loaded
+            } catch (e: NavidromeApiException) {
+                _genresState.value = LoadState.Error(e.userMessage)
+            } catch (e: Exception) {
+                _genresState.value = LoadState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    /** Resets genre state to [LoadState.Idle] so the screen can trigger a fresh load. */
+    fun retryGenres() {
+        _genresState.value = LoadState.Idle
+        loadGenres()
+    }
+
+    // -------------------------------------------------------------------------
+    // Genre detail (songs by genre) state (baw.2.4)
+    // -------------------------------------------------------------------------
+
+    private val _selectedGenre = MutableStateFlow<SubsonicGenre?>(null)
+    val selectedGenre: StateFlow<SubsonicGenre?> = _selectedGenre.asStateFlow()
+
+    private val _genreTracks = MutableStateFlow<List<Track>>(emptyList())
+    val genreTracks: StateFlow<List<Track>> = _genreTracks.asStateFlow()
+
+    private val _genreTracksState = MutableStateFlow<LoadState>(LoadState.Idle)
+    val genreTracksState: StateFlow<LoadState> = _genreTracksState.asStateFlow()
+
+    /**
+     * Loads songs for [genre] from `getSongsByGenre`.
+     *
+     * Results are sorted alphabetically by title.  No-ops when [genre] is the
+     * same as the currently loaded genre (avoids redundant reloads on recomposition).
+     * Guards against concurrent loads.
+     */
+    fun loadSongsByGenre(genre: SubsonicGenre) {
+        if (_selectedGenre.value?.name == genre.name && _genreTracksState.value == LoadState.Loaded) return
+        val api = _api.value ?: return
+        if (_genreTracksState.value is LoadState.Loading) return
+
+        viewModelScope.launch {
+            _selectedGenre.value = genre
+            _genreTracks.value = emptyList()
+            _genreTracksState.value = LoadState.Loading
+            try {
+                val loaded = api.getSongsByGenre(genre.name)
+                    .sortedBy { it.title.lowercase() }
+                _genreTracks.value = loaded
+                _genreTracksState.value = if (loaded.isEmpty()) LoadState.Empty else LoadState.Loaded
+            } catch (e: NavidromeApiException) {
+                _genreTracksState.value = LoadState.Error(e.userMessage)
+            } catch (e: Exception) {
+                _genreTracksState.value = LoadState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    fun retryGenreTracks() {
+        val genre = _selectedGenre.value ?: return
+        _genreTracksState.value = LoadState.Idle
+        loadSongsByGenre(genre)
+    }
+
+    // -------------------------------------------------------------------------
+    // Genre browse → play bridge (baw.2.4 + baw.3.8)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Starts playback from a tapped genre track (baw.2.4 + baw.3.8).
+     *
+     * Mirrors [playTrack] but operates on the [_genreTracks] queue.
+     * Tapping a track enqueues the WHOLE loaded genre track list and starts
+     * from the tapped index, so auto-advance works immediately.
+     */
+    fun playGenreTrack(track: Track) {
+        val api = _api.value ?: return
+        val tracks = _genreTracks.value
+        val startIndex = tracks.indexOfFirst { it.id == track.id }
+        if (startIndex < 0) return
+        musicPlaybackCoordinator.playAlbum(
+            tracks = tracks,
+            startIndex = startIndex,
+            api = api,
+            albumTitle = _selectedGenre.value?.name,
         )
     }
 }

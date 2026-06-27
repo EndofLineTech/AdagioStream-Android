@@ -55,12 +55,27 @@ sealed class Screen(
      */
     data object Music : Screen("music", "Music", Icons.Default.Headset)
 
-    // Music sub-routes (artist and album detail; no separate bottom-nav items)
+    // Music sub-routes (artist, album, and genre detail; no separate bottom-nav items)
     data object ArtistDetail : Screen("music/artist/{artistId}", "Artist", Icons.Default.Headset) {
         fun createRoute(artistId: String): String = "music/artist/$artistId"
     }
     data object AlbumDetail : Screen("music/album/{albumId}", "Album", Icons.Default.Headset) {
         fun createRoute(albumId: String): String = "music/album/$albumId"
+    }
+
+    /**
+     * Genre browse — list of all genres (baw.2.4).
+     * Accessible from inside [MusicLibraryScreen].
+     */
+    data object GenreBrowse : Screen("music/genres", "Genres", Icons.Default.MusicNote)
+
+    /**
+     * Genre detail — songs for a selected genre (baw.2.4).
+     * [genreName] is URL-encoded by the caller.
+     */
+    data object GenreDetail : Screen("music/genres/{genreName}", "Genre", Icons.Default.MusicNote) {
+        fun createRoute(genreName: String): String =
+            "music/genres/${android.net.Uri.encode(genreName)}"
     }
 }
 
