@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,6 +61,7 @@ import com.adagiostream.android.service.navidrome.Track
 @Composable
 fun AlbumDetailScreen(
     viewModel: NavidromeLibraryViewModel = hiltViewModel(),
+    downloadsViewModel: DownloadsViewModel = hiltViewModel(),
     onBack: () -> Unit,
     backStackEntry: NavBackStackEntry? = null,
 ) {
@@ -68,6 +70,7 @@ fun AlbumDetailScreen(
     val artistName by viewModel.selectedAlbumArtistName.collectAsStateWithLifecycle()
     val tracksState by viewModel.tracksState.collectAsStateWithLifecycle()
     val tracks by viewModel.albumTracks.collectAsStateWithLifecycle()
+    val downloadStates by downloadsViewModel.downloadStates.collectAsStateWithLifecycle()
 
     var addToPlaylistTrackId by remember { mutableStateOf<String?>(null) }
 
@@ -157,12 +160,23 @@ fun AlbumDetailScreen(
                         )
                     }
 
+                    // "Download All" — bulk enqueue the whole album (baw.6.2).
+                    item {
+                        DownloadAllButton(
+                            tracks = tracks,
+                            downloadStates = downloadStates,
+                            onDownloadAll = { downloadsViewModel.downloadAll(tracks) },
+                        )
+                    }
+
                     items(tracks, key = { it.id }) { track ->
                         TrackRow(
                             track = track,
+                            downloadState = downloadStates[track.id] ?: DownloadUiState.NOT_DOWNLOADED,
                             onClick = { viewModel.playTrack(track) },
                             onToggleStar = { viewModel.toggleStar(track) },
                             onAddToPlaylist = { addToPlaylistTrackId = track.id },
+                            onDownloadTap = { state -> downloadsViewModel.onButtonTap(track, state) },
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = 64.dp))
                     }
@@ -243,11 +257,41 @@ private fun AlbumHeader(
 }
 
 @Composable
+private fun DownloadAllButton(
+    tracks: List<Track>,
+    downloadStates: Map<String, DownloadUiState>,
+    onDownloadAll: () -> Unit,
+) {
+    // Already-downloaded count for the label.
+    val completed = tracks.count { downloadStates[it.id] == DownloadUiState.COMPLETED }
+    val allDownloaded = tracks.isNotEmpty() && completed == tracks.size
+    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Button(
+            onClick = onDownloadAll,
+            enabled = !allDownloaded,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Download,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                if (allDownloaded) "All downloaded" else "Download All ($completed/${tracks.size})",
+            )
+        }
+    }
+}
+
+@Composable
 private fun TrackRow(
     track: Track,
+    downloadState: DownloadUiState,
     onClick: () -> Unit,
     onToggleStar: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onDownloadTap: (DownloadUiState) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -285,6 +329,9 @@ private fun TrackRow(
 
         // Star toggle (baw.5.2)
         StarButton(starred = track.starred ?: false, onToggle = onToggleStar)
+
+        // Download button — 5 states (baw.6.2)
+        TrackDownloadButton(state = downloadState, onTap = { onDownloadTap(downloadState) })
 
         if (track.duration != null) {
             Spacer(modifier = Modifier.width(8.dp))

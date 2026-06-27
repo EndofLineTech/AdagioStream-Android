@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
@@ -63,6 +64,7 @@ import com.adagiostream.android.service.navidrome.Track
 @Composable
 fun NavidromePlaylistDetailScreen(
     viewModel: NavidromePlaylistViewModel = hiltViewModel(),
+    downloadsViewModel: DownloadsViewModel = hiltViewModel(),
     onBack: () -> Unit,
     playlistId: String,
 ) {
@@ -70,6 +72,7 @@ fun NavidromePlaylistDetailScreen(
     val selectedPlaylist by viewModel.selectedPlaylist.collectAsStateWithLifecycle()
     val detailState by viewModel.playlistDetailState.collectAsStateWithLifecycle()
     val tracks by viewModel.playlistTracks.collectAsStateWithLifecycle()
+    val downloadStates by downloadsViewModel.downloadStates.collectAsStateWithLifecycle()
 
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -112,6 +115,13 @@ fun NavidromePlaylistDetailScreen(
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = "Play all",
+                        )
+                    }
+                    // "Download All" — bulk enqueue the whole playlist (baw.6.2).
+                    IconButton(onClick = { downloadsViewModel.downloadAll(tracks) }) {
+                        Icon(
+                            imageVector = Icons.Filled.Download,
+                            contentDescription = "Download all",
                         )
                     }
                 }
@@ -208,8 +218,10 @@ fun NavidromePlaylistDetailScreen(
                     items(tracks, key = { it.id }) { track ->
                         PlaylistTrackRow(
                             track = track,
+                            downloadState = downloadStates[track.id] ?: DownloadUiState.NOT_DOWNLOADED,
                             onClick = { viewModel.playPlaylistTrack(track) },
                             onAddToPlaylist = { addToPlaylistTrackId = track.id },
+                            onDownloadTap = { state -> downloadsViewModel.onButtonTap(track, state) },
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
                     }
@@ -287,8 +299,10 @@ fun NavidromePlaylistDetailScreen(
 @Composable
 private fun PlaylistTrackRow(
     track: Track,
+    downloadState: DownloadUiState,
     onClick: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onDownloadTap: (DownloadUiState) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -314,6 +328,9 @@ private fun PlaylistTrackRow(
                 )
             }
         }
+
+        // Download button — 5 states (baw.6.2)
+        TrackDownloadButton(state = downloadState, onTap = { onDownloadTap(downloadState) })
 
         if (track.duration != null) {
             Spacer(modifier = Modifier.width(8.dp))

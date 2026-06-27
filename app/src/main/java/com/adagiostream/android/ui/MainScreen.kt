@@ -47,6 +47,7 @@ import com.adagiostream.android.ui.screens.music.MusicLibraryScreen
 import com.adagiostream.android.ui.screens.music.NavidromePlaylistDetailScreen
 import com.adagiostream.android.ui.screens.music.NavidromePlaylistListScreen
 import com.adagiostream.android.ui.screens.music.SearchResultsScreen
+import com.adagiostream.android.ui.screens.music.StorageManagementScreen
 import com.adagiostream.android.ui.screens.m3us.MyM3UsScreen
 import com.adagiostream.android.ui.screens.m3us.PlaylistDetailScreen
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
@@ -301,11 +302,19 @@ fun MainScreen(
                         onBack = { navController.popBackStack() },
                     )
                 }
+                composable(Screen.DownloadedMusic.route) {
+                    StorageManagementScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
                 composable(Screen.Settings.route) {
                     SettingsScreen(
                         viewModel = settingsViewModel,
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)
+                        },
+                        onNavigateToDownloads = {
+                            navController.navigate(Screen.DownloadedMusic.route)
                         },
                         onNavigateToGroups = {
                             navController.navigate(Screen.Groups.route)

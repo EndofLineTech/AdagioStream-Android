@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Headset
@@ -84,6 +85,12 @@ sealed class Screen(
      * Sectioned results: Artists / Albums / Songs.
      */
     data object MusicSearch : Screen("music/search", "Search", Icons.Default.Search)
+
+    /**
+     * Storage-management screen for offline downloads (baw.6.2).
+     * Reached from Settings → Downloaded Music.
+     */
+    data object DownloadedMusic : Screen("music/downloads", "Downloaded Music", Icons.Default.Download)
 
     /**
      * Server-side playlist list (baw.4.2).

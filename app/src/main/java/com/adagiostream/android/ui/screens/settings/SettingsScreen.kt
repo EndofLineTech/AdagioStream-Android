@@ -73,6 +73,7 @@ fun SettingsScreen(
     onNavigateToGroups: (() -> Unit)? = null,
     onNavigateToLicenses: (() -> Unit)? = null,
     onNavigateToPrivacyPolicy: (() -> Unit)? = null,
+    onNavigateToDownloads: (() -> Unit)? = null,
     onDataDeleted: (() -> Unit)? = null,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -510,6 +511,42 @@ fun SettingsScreen(
         }
 
         FooterText("How often to refresh live sports scores from ESPN.com API. Off disables score updates entirely. Lower values show scores sooner but use more data.")
+
+        // ── Downloaded Music (E6) ────────────────────────────
+
+        if (onNavigateToDownloads != null) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Downloaded Music",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                onClick = onNavigateToDownloads,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Manage Downloads",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Go to Downloaded Music",
+                    )
+                }
+            }
+            FooterText("View downloaded songs, see how much space they use, and free up storage.")
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
