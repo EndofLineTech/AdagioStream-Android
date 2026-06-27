@@ -152,7 +152,11 @@ fun AlbumDetailScreen(
                     }
 
                     items(tracks, key = { it.id }) { track ->
-                        TrackRow(track = track, onClick = { viewModel.playTrack(track) })
+                        TrackRow(
+                            track = track,
+                            onClick = { viewModel.playTrack(track) },
+                            onToggleStar = { viewModel.toggleStar(track) },
+                        )
                         HorizontalDivider(modifier = Modifier.padding(start = 64.dp))
                     }
                 }
@@ -224,7 +228,7 @@ private fun AlbumHeader(
 }
 
 @Composable
-private fun TrackRow(track: Track, onClick: () -> Unit) {
+private fun TrackRow(track: Track, onClick: () -> Unit, onToggleStar: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -249,7 +253,18 @@ private fun TrackRow(track: Track, onClick: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // Play count indicator (baw.5.3)
+            if (track.playCount != null && track.playCount > 0) {
+                Text(
+                    text = "▶ ${track.playCount}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+
+        // Star toggle (baw.5.2)
+        StarButton(starred = track.starred ?: false, onToggle = onToggleStar)
 
         if (track.duration != null) {
             Spacer(modifier = Modifier.width(8.dp))

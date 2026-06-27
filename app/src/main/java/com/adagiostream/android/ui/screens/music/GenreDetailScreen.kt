@@ -144,6 +144,7 @@ fun GenreDetailScreen(
                         GenreTrackRow(
                             track = track,
                             onClick = { viewModel.playGenreTrack(track) },
+                            onToggleStar = { viewModel.toggleStar(track) },
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
                     }
@@ -161,7 +162,7 @@ fun GenreDetailScreen(
  * contain tracks from multiple artists, so the artist name is always surfaced here.
  */
 @Composable
-private fun GenreTrackRow(track: Track, onClick: () -> Unit) {
+private fun GenreTrackRow(track: Track, onClick: () -> Unit, onToggleStar: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -187,7 +188,18 @@ private fun GenreTrackRow(track: Track, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // Play count indicator (baw.5.3)
+            if (track.playCount != null && track.playCount > 0) {
+                Text(
+                    text = "▶ ${track.playCount}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+
+        // Star toggle (baw.5.2)
+        StarButton(starred = track.starred ?: false, onToggle = onToggleStar)
 
         if (track.duration != null) {
             Spacer(modifier = Modifier.width(8.dp))
