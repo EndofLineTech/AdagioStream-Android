@@ -63,6 +63,20 @@ class NavidromeApiTest {
     }
 
     // -------------------------------------------------------------------------
+    // download.view URL (baw.6.1)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `downloadUrl points at download view with the track id and auth params`() {
+        val url = api.downloadUrl("track-42")!!
+        assertEquals("/rest/download.view", url.encodedPath)
+        assertEquals("track-42", url.queryParameter("id"))
+        assertEquals("alice", url.queryParameter("u"))
+        org.junit.Assert.assertNotNull("download url must carry an auth token", url.queryParameter("t"))
+        org.junit.Assert.assertNotNull("download url must carry a salt", url.queryParameter("s"))
+    }
+
+    // -------------------------------------------------------------------------
     // 2. status=failed code 40 → AuthFailed
     // -------------------------------------------------------------------------
 

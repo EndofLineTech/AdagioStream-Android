@@ -1,5 +1,6 @@
 package com.adagiostream.android.service.player
 
+import com.adagiostream.android.service.download.DownloadLocator
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.testutil.TestFixtures
@@ -301,6 +302,36 @@ class MusicPlaybackCoordinatorTest {
         coordinator.reportPlaybackProgress(150L) // past threshold → guard prevents second fire
 
         coVerify(exactly = 1) { mockApi.scrobble("track-0", submission = true) }
+    }
+
+    // ---- local-first playback (baw.6.3) ----------------------------------
+
+    @Test
+    fun `playCurrent loads the local file uri when the track is downloaded`() {
+        // Locator reports track-0 as downloaded to disk.
+        val locator = DownloadLocator { id ->
+            if (id == "track-0") "/data/music/downloads/track-0.mp3" else null
+        }
+        val localCoordinator = MusicPlaybackCoordinator(queue, fakePlayer, locator)
+        localCoordinator.scope = testScope
+
+        localCoordinator.playAlbum(tracks(2), startIndex = 0, api = api)
+
+        val url = fakePlayer.lastStreamUrl!!
+        assertTrue("expected a file:// uri but was $url", url.startsWith("file:"))
+        assertTrue(url.endsWith("track-0.mp3"))
+    }
+
+    @Test
+    fun `playCurrent streams when the track is not downloaded`() {
+        val locator = DownloadLocator { null }
+        val localCoordinator = MusicPlaybackCoordinator(queue, fakePlayer, locator)
+        localCoordinator.scope = testScope
+
+        localCoordinator.playAlbum(tracks(1), startIndex = 0, api = api)
+
+        val url = fakePlayer.lastStreamUrl!!
+        assertTrue(url.contains("/rest/stream.view"))
     }
 
     @Test

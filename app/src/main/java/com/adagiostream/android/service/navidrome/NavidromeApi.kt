@@ -486,6 +486,21 @@ class NavidromeApi(
         return buildUrl("stream", params)
     }
 
+    /**
+     * Builds an authenticated `download.view` URL for the given [trackId] (baw.6.1).
+     *
+     * Offline downloads fetch the **original** file (no transcode) via `download.view`
+     * — the ratified baw.6.4 decision. Like [streamUrl] it carries a fresh Subsonic
+     * auth salt on every call and must NEVER be logged.
+     *
+     * NOTE: the download index keys on [trackId], never on this URL — the URL's auth
+     * params rotate, the track id does not.
+     *
+     * @return The fully-qualified authenticated URL, or `null` if [host] is not a
+     *         valid HTTP/HTTPS URL.
+     */
+    fun downloadUrl(trackId: String): HttpUrl? = buildUrl("download", mapOf("id" to trackId))
+
     // -------------------------------------------------------------------------
     // Private: browse helper
     // -------------------------------------------------------------------------

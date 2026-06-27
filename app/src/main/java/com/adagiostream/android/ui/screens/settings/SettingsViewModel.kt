@@ -13,6 +13,8 @@ import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.download.DownloadManager
+import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.VLCPlayerWrapper
@@ -41,6 +43,8 @@ class SettingsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val vlcPlayerWrapper: VLCPlayerWrapper,
     private val espnScoreService: ESPNScoreService,
+    private val downloadManager: DownloadManager,
+    private val musicLibraryRepository: MusicLibraryRepository,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(persistenceService.loadSettingsSync().let {
@@ -300,6 +304,9 @@ class SettingsViewModel @Inject constructor(
             vlcPlayerWrapper.stop()
             accountManager.resetAll()
             persistenceService.deleteAllData()
+            // E6: also clear the Navidrome cache DB + downloaded files (delete-all path).
+            downloadManager.deleteAll()
+            musicLibraryRepository.clearLibraryCache()
             DebugLogger.clearLogs()
             _dataDeleted.value = true
         }

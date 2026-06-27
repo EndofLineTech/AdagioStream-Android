@@ -1,5 +1,7 @@
 package com.adagiostream.android.service.player
 
+import com.adagiostream.android.service.download.DownloadLocator
+import com.adagiostream.android.service.download.LocalFirstResolver
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.Track
 import kotlinx.coroutines.CoroutineScope
@@ -32,6 +34,12 @@ import javax.inject.Singleton
 class MusicPlaybackCoordinator @Inject constructor(
     private val queue: MusicQueueManager,
     private val player: LibraryTrackPlayer,
+    /**
+     * Local-first lookup (baw.6.3): when a track is fully downloaded, the player
+     * loads its local file instead of the stream URL. Defaults to [DownloadLocator.None]
+     * so the JVM coordinator tests (and the no-download path) keep streaming.
+     */
+    private val downloadLocator: DownloadLocator = DownloadLocator.None,
 ) {
 
     /** The [NavidromeApi] backing the current library session; null until [playAlbum]. */
@@ -170,7 +178,12 @@ class MusicPlaybackCoordinator @Inject constructor(
     private fun playCurrent() {
         val track = queue.current() ?: return
         val api = api ?: return
-        val streamUrl = api.streamUrl(track.id)?.toString() ?: return
+        // Local-first (baw.6.3): a downloaded track plays from disk; otherwise stream.
+        val localPath = downloadLocator.localPathFor(track.id)
+        val streamUrl = LocalFirstResolver.resolve(
+            localPath = localPath,
+            streamUrl = api.streamUrl(track.id)?.toString(),
+        ) ?: return
         _nowPlayingArtworkUrl.value = track.coverArt?.let { api.getCoverArtUrl(it)?.toString() }
         // Reset per-track scrobble guard and fire now-playing notification (baw.5.1).
         scrobbleSubmitted = false

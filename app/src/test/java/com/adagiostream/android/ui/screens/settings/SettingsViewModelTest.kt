@@ -32,9 +32,19 @@ class SettingsViewModelTest {
     private val accountManager = mockk<AccountManager>(relaxed = true)
     private val vlcPlayerWrapper = mockk<VLCPlayerWrapper>(relaxed = true)
     private val espnScoreService = mockk<ESPNScoreService>(relaxed = true)
+    private val downloadManager = mockk<com.adagiostream.android.service.download.DownloadManager>(relaxed = true)
+    private val musicLibraryRepository =
+        mockk<com.adagiostream.android.service.library.MusicLibraryRepository>(relaxed = true)
 
     private fun createViewModel(): SettingsViewModel {
-        return SettingsViewModel(persistenceService, accountManager, vlcPlayerWrapper, espnScoreService)
+        return SettingsViewModel(
+            persistenceService,
+            accountManager,
+            vlcPlayerWrapper,
+            espnScoreService,
+            downloadManager,
+            musicLibraryRepository,
+        )
     }
 
     // --- Buffer Duration ---

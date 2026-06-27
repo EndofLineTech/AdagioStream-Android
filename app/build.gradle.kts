@@ -75,6 +75,12 @@ kotlin {
     }
 }
 
+// Room schema export — keeps the navidrome_cache.db schema under version control
+// so future migrations are diffable. v1 is the first exported schema (E6).
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 base {
     val safeVersion = android.defaultConfig.versionName
         ?.replace("(", "-")?.replace(")", "") ?: "unknown"
@@ -109,6 +115,14 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
+    // Room — Navidrome music-library cache + download index (E6)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+
+    // WorkManager — background offline downloads (E6)
+    implementation(libs.work.runtime.ktx)
+
     // libVLC
     implementation(libs.libvlc.all)
 
@@ -139,4 +153,5 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
     testImplementation(libs.mockwebserver)
+    testImplementation(libs.room.testing)
 }
