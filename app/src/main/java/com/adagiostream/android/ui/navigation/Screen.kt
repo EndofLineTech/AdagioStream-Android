@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Settings
@@ -18,6 +19,14 @@ sealed class Screen(
 ) {
     data object Channels : Screen("channels", "Channels", Icons.Default.Radio)
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Star)
+    /**
+     * Loved tracks — retained as a route for deep-linking from Favorites.
+     *
+     * NOTE (baw.2.5): The 'Loved' tab was folded into Favorites to keep the
+     * bottom nav at 5 items (Material Design max) when the Music tab was added.
+     * The LovedTracksScreen is still accessible via a "Loved" button inside
+     * FavoritesScreen — it just no longer has its own bottom-nav slot.
+     */
     data object Loved : Screen("loved", "Loved", Icons.Default.MusicNote)
     data object Accounts : Screen("accounts", "Accounts", Icons.Default.Storage)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
@@ -34,6 +43,39 @@ sealed class Screen(
             return if (accountId != null) "add_account?accountId=$accountId" else "add_account"
         }
     }
+
+    /**
+     * Music tab — Navidrome library browse (baw.2.5).
+     *
+     * Replaces the standalone 'Loved' bottom-nav slot.  Loved tracks are now
+     * accessed from inside FavoritesScreen, keeping the nav count at 5.
+     *
+     * Visibility is gated by [AppSettings.musicTabEnabled] (baw.2.6); when
+     * the flag is false the tab is hidden entirely (coded-but-dark).
+     */
+    data object Music : Screen("music", "Music", Icons.Default.Headset)
+
+    // Music sub-routes (artist and album detail; no separate bottom-nav items)
+    data object ArtistDetail : Screen("music/artist/{artistId}", "Artist", Icons.Default.Headset) {
+        fun createRoute(artistId: String): String = "music/artist/$artistId"
+    }
+    data object AlbumDetail : Screen("music/album/{albumId}", "Album", Icons.Default.Headset) {
+        fun createRoute(albumId: String): String = "music/album/$albumId"
+    }
 }
 
-val bottomNavItems = listOf(Screen.Channels, Screen.Favorites, Screen.Loved, Screen.MyM3Us, Screen.Settings)
+/**
+ * Base bottom-nav items that are always visible.
+ *
+ * Music is NOT included here — it is conditionally appended in [MainScreen]
+ * based on [AppSettings.musicTabEnabled] (baw.2.6 alpha gate).
+ *
+ * The previous 'Loved' item has been replaced by 'Music'; Loved content is
+ * accessible from inside FavoritesScreen (baw.2.5 PO decision).
+ */
+val bottomNavItems = listOf(
+    Screen.Channels,
+    Screen.Favorites,
+    Screen.MyM3Us,
+    Screen.Settings,
+)

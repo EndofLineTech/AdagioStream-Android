@@ -19,6 +19,17 @@ data class AppSettings(
     val artworkDisplayMode: ArtworkDisplayMode = ArtworkDisplayMode.COVER_ART,
     val espnPollingIntervalSeconds: Int = 15,
     val channelGroupingMode: ChannelGroupingMode = ChannelGroupingMode.ALL_GROUPS,
+    /**
+     * Alpha feature gate for the Music tab (baw.2.6).
+     *
+     * When `false` (the default), the Music tab is hidden from the bottom
+     * navigation bar and the Navidrome library browse UI is inaccessible.
+     * Set to `true` in Settings → Developer to expose the tab for testing
+     * without shipping an incomplete feature to all users.
+     *
+     * Matches the iOS gate-flip pattern used to promote E1→E3 incrementally.
+     */
+    val musicTabEnabled: Boolean = false,
 )
 
 @Serializable

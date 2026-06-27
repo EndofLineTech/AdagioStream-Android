@@ -155,6 +155,226 @@ data class GenresWrapper(
 }
 
 // ----------------------------------------------------------------------------
+// Browse endpoint payload types — decoded from the full subsonic-response body
+// after status-check passes.  Each type captures only the fields needed for
+// its endpoint; ignoreUnknownKeys = true in the NavidromeApi Json instance
+// means extra server fields are safely discarded.
+// ----------------------------------------------------------------------------
+
+/** Album list ordering type for getAlbumList2. */
+enum class AlbumListType(val apiValue: String) {
+    NEWEST("newest"),
+    RECENT("recent"),
+    FREQUENT("frequent"),
+    RANDOM("random"),
+    ALPHABETICAL_BY_NAME("alphabeticalByName"),
+    ALPHABETICAL_BY_ARTIST("alphabeticalByArtist"),
+    STARRED("starred"),
+}
+
+/**
+ * Full Subsonic envelope for getArtists.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status": "ok", ..., "artists": {"index": [{"name": "A", "artist": [...]}]}}}
+ * ```
+ */
+@Serializable
+data class GetArtistsPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val artists: ArtistsIndex? = null,
+    )
+
+    @Serializable
+    data class ArtistsIndex(
+        val index: List<ArtistIndexBucket> = emptyList(),
+    )
+
+    @Serializable
+    data class ArtistIndexBucket(
+        val name: String = "",
+        @SerialName("artist") val artists: List<SubsonicArtistDto> = emptyList(),
+    )
+}
+
+/**
+ * Full Subsonic envelope for getArtist.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status": "ok", ..., "artist": {"id":…,"name":…,"album":[…]}}}
+ * ```
+ */
+@Serializable
+data class GetArtistPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val artist: ArtistWithAlbums? = null,
+    )
+
+    @Serializable
+    data class ArtistWithAlbums(
+        val id: String,
+        val name: String,
+        val albumCount: Int? = null,
+        val coverArt: String? = null,
+        @SerialName("starred")
+        @Serializable(with = StarredPresenceSerializer::class)
+        val starred: Boolean = false,
+        @SerialName("album") val albums: List<SubsonicAlbumDto> = emptyList(),
+    ) {
+        fun toArtistRecord(updatedAt: Int): Artist = Artist(
+            id = id,
+            name = name,
+            albumCount = albumCount ?: 0,
+            coverArt = coverArt,
+            updatedAt = updatedAt,
+        )
+    }
+}
+
+/**
+ * Full Subsonic envelope for getAlbum.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status": "ok", ..., "album": {"id":…,"title":…,"artist":…,"song":[…]}}}
+ * ```
+ *
+ * [AlbumWithTracks.artistName] carries the human-readable artist display name
+ * from the Subsonic `"artist"` string field (distinct from `"artistId"`).  The
+ * iOS bug that showed `artistId` in the now-playing subtitle stemmed from not
+ * threading this field through — never use `artistId` for display.
+ */
+@Serializable
+data class GetAlbumPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val album: AlbumWithTracks? = null,
+    )
+
+    @Serializable
+    data class AlbumWithTracks(
+        val id: String,
+        val artistId: String,
+        /** Human-readable artist name from the `"artist"` field — use this for display, not artistId. */
+        @SerialName("artist") val artistName: String? = null,
+        @SerialName("name") val nameField: String? = null,
+        @SerialName("title") val titleField: String? = null,
+        val year: Int? = null,
+        val genre: String? = null,
+        val songCount: Int? = null,
+        val coverArt: String? = null,
+        @SerialName("starred")
+        @Serializable(with = StarredPresenceSerializer::class)
+        val starred: Boolean = false,
+        @SerialName("song") val songs: List<SubsonicTrackDto> = emptyList(),
+    ) {
+        val resolvedTitle: String get() = titleField ?: nameField ?: ""
+
+        fun toAlbumRecord(updatedAt: Int): Album = Album(
+            id = id,
+            artistId = artistId,
+            title = resolvedTitle,
+            year = year,
+            genre = genre,
+            trackCount = songCount ?: songs.size,
+            coverArt = coverArt,
+            updatedAt = updatedAt,
+        )
+    }
+}
+
+/**
+ * Full Subsonic envelope for getAlbumList2.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status": "ok", ..., "albumList2": {"album": [...]}}}
+ * ```
+ */
+@Serializable
+data class GetAlbumListPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val albumList2: AlbumList? = null,
+    )
+
+    @Serializable
+    data class AlbumList(
+        @SerialName("album") val albums: List<SubsonicAlbumDto> = emptyList(),
+    )
+}
+
+/**
+ * Full Subsonic envelope for getGenres.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status": "ok", ..., "genres": {"genre": [...]}}}
+ * ```
+ */
+@Serializable
+data class GetGenresPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val genres: GenresList? = null,
+    )
+
+    @Serializable
+    data class GenresList(
+        @SerialName("genre") val genres: List<SubsonicGenre> = emptyList(),
+    )
+}
+
+/**
+ * Full Subsonic envelope for getSongsByGenre.
+ *
+ * Structure:
+ * ```
+ * {"subsonic-response": {"status": "ok", ..., "songsByGenre": {"song": [...]}}}
+ * ```
+ */
+@Serializable
+data class GetSongsByGenrePayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val songsByGenre: SongsList? = null,
+    )
+
+    @Serializable
+    data class SongsList(
+        @SerialName("song") val songs: List<SubsonicTrackDto> = emptyList(),
+    )
+}
+
+// ----------------------------------------------------------------------------
 // DTO layer — handles Subsonic JSON quirks before producing domain records
 // ----------------------------------------------------------------------------
 
