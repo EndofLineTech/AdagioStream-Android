@@ -39,6 +39,9 @@ import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
 import com.adagiostream.android.ui.screens.licenses.LicensesScreen
 import com.adagiostream.android.ui.screens.privacy.PrivacyPolicyScreen
 import com.adagiostream.android.ui.screens.loved.LovedTracksScreen
+import com.adagiostream.android.ui.screens.music.AlbumDetailScreen
+import com.adagiostream.android.ui.screens.music.ArtistDetailScreen
+import com.adagiostream.android.ui.screens.music.MusicLibraryScreen
 import com.adagiostream.android.ui.screens.m3us.MyM3UsScreen
 import com.adagiostream.android.ui.screens.m3us.PlaylistDetailScreen
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
@@ -107,7 +110,19 @@ fun MainScreen(
                             )
                         }
                         NavigationBar {
-                            bottomNavItems.forEach { screen ->
+                            // Conditionally add Music when the alpha gate is enabled (baw.2.5, baw.2.6).
+                            // Inserted between MyM3Us and Settings for a balanced layout:
+                            //   Channels | Favorites | MyM3Us | Music | Settings
+                            val visibleNavItems = if (settings.musicTabEnabled) {
+                                val base = bottomNavItems.toMutableList()
+                                // Insert Music before Settings
+                                val settingsIdx = base.indexOfFirst { it == Screen.Settings }
+                                base.add(settingsIdx, Screen.Music)
+                                base
+                            } else {
+                                bottomNavItems
+                            }
+                            visibleNavItems.forEach { screen ->
                                 NavigationBarItem(
                                     icon = { Icon(screen.icon, contentDescription = screen.label) },
                                     label = { Text(screen.label) },
@@ -149,10 +164,46 @@ fun MainScreen(
                     ChannelsScreen()
                 }
                 composable(Screen.Favorites.route) {
-                    FavoritesScreen()
+                    FavoritesScreen(
+                        onNavigateToLoved = {
+                            navController.navigate(Screen.Loved.route)
+                        },
+                    )
                 }
                 composable(Screen.Loved.route) {
                     LovedTracksScreen()
+                }
+                // Music tab routes (baw.2.5) — always registered so deep-links work
+                // even when the tab is hidden by the alpha gate.
+                composable(Screen.Music.route) {
+                    MusicLibraryScreen(
+                        onArtistClick = { artistId ->
+                            navController.navigate(Screen.ArtistDetail.createRoute(artistId))
+                        },
+                    )
+                }
+                composable(
+                    route = Screen.ArtistDetail.route,
+                    arguments = listOf(
+                        navArgument("artistId") { type = NavType.StringType },
+                    ),
+                ) {
+                    ArtistDetailScreen(
+                        onAlbumClick = { albumId ->
+                            navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = Screen.AlbumDetail.route,
+                    arguments = listOf(
+                        navArgument("albumId") { type = NavType.StringType },
+                    ),
+                ) {
+                    AlbumDetailScreen(
+                        onBack = { navController.popBackStack() },
+                    )
                 }
                 composable(Screen.MyM3Us.route) {
                     MyM3UsScreen(

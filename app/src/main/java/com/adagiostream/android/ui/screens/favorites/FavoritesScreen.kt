@@ -11,6 +11,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +36,13 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 @Composable
 fun FavoritesScreen(
     viewModel: FavoritesViewModel = hiltViewModel(),
+    /**
+     * Called when the user taps the "Loved" button to navigate to [LovedTracksScreen].
+     *
+     * The Loved tab was folded into Favorites (baw.2.5) to keep the bottom nav at
+     * 5 items after the Music tab was added.  Passing `null` hides the button.
+     */
+    onNavigateToLoved: (() -> Unit)? = null,
 ) {
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
@@ -48,11 +59,29 @@ fun FavoritesScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = "Favorites",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Favorites",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.weight(1f),
+            )
+            // Loved tracks entry point — folded in from the former Loved bottom-nav tab (baw.2.5)
+            if (onNavigateToLoved != null) {
+                OutlinedButton(onClick = onNavigateToLoved) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                    Text("Loved")
+                }
+            }
+        }
 
         if (favorites.isEmpty()) {
             Box(
