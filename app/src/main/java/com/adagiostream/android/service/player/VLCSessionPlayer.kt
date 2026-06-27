@@ -2,6 +2,7 @@ package com.adagiostream.android.service.player
 
 import android.os.Looper
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -29,6 +30,7 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class VLCSessionPlayer(
     private val vlcWrapper: VLCPlayerWrapper,
+    private val coordinator: MusicPlaybackCoordinator? = null,
     private val accountManager: AccountManager? = null,
     private val espnScoreService: ESPNScoreService? = null,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
@@ -49,6 +51,12 @@ class VLCSessionPlayer(
 
     init {
         DebugLogger.log("VLCSessionPlayer init", AUTO)
+        // Library playback (baw.3.4): refresh session state whenever the active
+        // source changes — a new queue track, or a radio↔library switch — so the
+        // lock screen / notification track metadata follows auto-advance & next/prev.
+        scope.launch {
+            vlcWrapper.playbackSource.collect { invalidateState() }
+        }
         // Observe VLC state changes + metadata updates and invalidate SimpleBasePlayer state
         scope.launch {
             combine(
@@ -161,27 +169,107 @@ class VLCSessionPlayer(
     }
 
     override fun getState(): State {
+        val source = vlcWrapper.playbackSource.value
         val builder = State.Builder()
-            .setAvailableCommands(
-                Player.Commands.Builder()
-                    .addAll(
-                        COMMAND_PLAY_PAUSE,
-                        COMMAND_STOP,
-                        COMMAND_PREPARE,
-                        COMMAND_SET_MEDIA_ITEM,
-                        COMMAND_CHANGE_MEDIA_ITEMS,
-                        COMMAND_SEEK_TO_NEXT,
-                        COMMAND_SEEK_TO_PREVIOUS,
-                        COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-                        COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
-                        COMMAND_GET_CURRENT_MEDIA_ITEM,
-                        COMMAND_GET_METADATA,
-                    )
-                    .build()
-            )
+            .setAvailableCommands(availableCommands(source))
             .setPlayWhenReady(currentPlayWhenReady, PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             .setPlaybackState(currentPlaybackState)
 
+        when (source) {
+            is PlaybackSource.Library -> buildLibraryState(builder, source)
+            else -> buildRadioState(builder)
+        }
+        return builder.build()
+    }
+
+    /**
+     * Command set per source. Radio keeps EXACTLY the live command set (no
+     * positional seek, no shuffle/repeat) — that's the live regression guard.
+     * Library adds positional seek + shuffle/repeat so the scrubber and mode
+     * toggles work for music tracks (baw.3.5 / baw.3.6).
+     */
+    private fun availableCommands(source: PlaybackSource?): Player.Commands {
+        val commands = Player.Commands.Builder()
+            .addAll(
+                COMMAND_PLAY_PAUSE,
+                COMMAND_STOP,
+                COMMAND_PREPARE,
+                COMMAND_SET_MEDIA_ITEM,
+                COMMAND_CHANGE_MEDIA_ITEMS,
+                COMMAND_SEEK_TO_NEXT,
+                COMMAND_SEEK_TO_PREVIOUS,
+                COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                COMMAND_GET_CURRENT_MEDIA_ITEM,
+                COMMAND_GET_METADATA,
+            )
+        if (source is PlaybackSource.Library) {
+            commands.addAll(
+                COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+                COMMAND_SEEK_TO_MEDIA_ITEM,
+                COMMAND_GET_TIMELINE,
+                COMMAND_SET_SHUFFLE_MODE,
+                COMMAND_SET_REPEAT_MODE,
+            )
+        }
+        return commands.build()
+    }
+
+    /**
+     * Builds session state for an on-demand library queue (baw.3.4 / 3.5 / 3.6):
+     * per-track title/artist(NAME)/album/artwork, a real seekable duration +
+     * position, and shuffle/repeat state — all sourced from [PlaybackContract] and
+     * the [coordinator] so the live contract stays untouched.
+     */
+    private fun buildLibraryState(builder: State.Builder, source: PlaybackSource.Library) {
+        val tracks = source.queue
+        if (tracks.isEmpty()) return
+        val currentIndex = source.index.coerceIn(0, tracks.lastIndex)
+        val artworkUri = coordinator?.nowPlayingArtworkUrl?.value?.let { android.net.Uri.parse(it) }
+        val albumTitle = coordinator?.nowPlayingAlbumTitle?.value
+
+        val playlistItems = tracks.mapIndexed { index, track ->
+            val isCurrent = index == currentIndex
+            val metaBuilder = MediaMetadata.Builder()
+                .setTitle(track.title)
+                // Artist display NAME (Track.artist), never the opaque artistId.
+                .setArtist(track.artist)
+                .setAlbumTitle(albumTitle)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                .setIsPlayable(true)
+                .setIsBrowsable(false)
+            if (isCurrent && artworkUri != null) metaBuilder.setArtworkUri(artworkUri)
+            val mediaItem = MediaItem.Builder()
+                .setMediaId(track.id)
+                .setMediaMetadata(metaBuilder.build())
+                .build()
+            // Only the active track carries the real source so duration resolves;
+            // others are placeholders so Media3 exposes next/prev without prefetch.
+            val itemSource = if (isCurrent) source else null
+            SimpleBasePlayer.MediaItemData.Builder(track.id.hashCode().toLong())
+                .setMediaItem(mediaItem)
+                .setMediaMetadata(mediaItem.mediaMetadata)
+                .setIsPlaceholder(!isCurrent)
+                .setDefaultPositionUs(0)
+                .setDurationUs(if (isCurrent) PlaybackContract.durationUs(source) else C.TIME_UNSET)
+                .setIsSeekable(PlaybackContract.isSeekable(itemSource))
+                .setIsDynamic(PlaybackContract.isDynamic(source))
+                .build()
+        }
+        builder.setPlaylist(playlistItems)
+        builder.setCurrentMediaItemIndex(currentIndex)
+        // Real scrubber position/duration come from libVLC via the wrapper (baw.3.6).
+        builder.setContentPositionMs(vlcWrapper.currentPositionMs())
+        builder.setIsLoading(currentPlaybackState == STATE_BUFFERING)
+        // Shuffle + repeat surfaced through the session (baw.3.5).
+        builder.setShuffleModeEnabled(coordinator?.shuffleEnabled ?: false)
+        builder.setRepeatMode(
+            Media3RepeatMapping.toMedia3(coordinator?.repeatMode ?: RepeatMode.Off),
+        )
+    }
+
+    /** Builds session state for the live radio path — unchanged live behaviour. */
+    private fun buildRadioState(builder: State.Builder) {
         val item = currentMediaItem
         val currentChannel = vlcWrapper.currentChannel.value
         if (item != null && currentChannel != null) {
@@ -270,8 +358,6 @@ class VLCSessionPlayer(
         } else {
             DebugLogger.log("getState() - no current media item, state=$currentPlaybackState", AUTO)
         }
-
-        return builder.build()
     }
 
     override fun handleSetMediaItems(
@@ -308,7 +394,26 @@ class VLCSessionPlayer(
         positionMs: Long,
         seekCommand: Int,
     ): ListenableFuture<*> {
-        DebugLogger.log("handleSeek() - index=$mediaItemIndex, pos=$positionMs, command=$seekCommand, channelList=${vlcWrapper.channelList.size}", AUTO)
+        DebugLogger.log("handleSeek() - index=$mediaItemIndex, pos=$positionMs, command=$seekCommand, source=${vlcWrapper.playbackSource.value}", AUTO)
+
+        // Library: next/prev drive the queue; positional seek scrubs the track (baw.3.6).
+        // Radio path is unchanged — channel next/prev only, never positional.
+        if (vlcWrapper.playbackSource.value is PlaybackSource.Library) {
+            when (seekCommand) {
+                COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> coordinator?.next()
+                COMMAND_SEEK_TO_PREVIOUS, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> coordinator?.previous()
+                COMMAND_SEEK_TO_MEDIA_ITEM -> {
+                    DebugLogger.log("handleSeek() - library jump to queue index $mediaItemIndex", AUTO)
+                    if (mediaItemIndex != C.INDEX_UNSET) coordinator?.playIndex(mediaItemIndex)
+                }
+                else -> {
+                    DebugLogger.log("handleSeek() - library positional seek to ${positionMs}ms", AUTO)
+                    vlcWrapper.seekToPositionMs(positionMs)
+                }
+            }
+            return Futures.immediateVoidFuture()
+        }
+
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
                 DebugLogger.log("handleSeek() - skipping to next", AUTO)
@@ -327,6 +432,20 @@ class VLCSessionPlayer(
                 }
             }
         }
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
+        DebugLogger.log("handleSetRepeatMode($repeatMode)", AUTO)
+        coordinator?.setRepeatMode(Media3RepeatMapping.fromMedia3(repeatMode))
+        invalidateState()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleSetShuffleModeEnabled(shuffleModeEnabled: Boolean): ListenableFuture<*> {
+        DebugLogger.log("handleSetShuffleModeEnabled($shuffleModeEnabled)", AUTO)
+        coordinator?.setShuffle(shuffleModeEnabled)
+        invalidateState()
         return Futures.immediateVoidFuture()
     }
 

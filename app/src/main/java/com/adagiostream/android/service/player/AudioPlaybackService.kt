@@ -57,6 +57,7 @@ class AudioPlaybackService : MediaLibraryService() {
     @Inject lateinit var persistenceService: PersistenceService
     @Inject lateinit var espnScoreService: ESPNScoreService
     @Inject lateinit var customPlaylistManager: CustomPlaylistManager
+    @Inject lateinit var musicPlaybackCoordinator: MusicPlaybackCoordinator
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -81,6 +82,10 @@ class AudioPlaybackService : MediaLibraryService() {
         super.onCreate()
         DebugLogger.log("AudioPlaybackService.onCreate()", AUTO)
         createNotificationChannel()
+        // Auto-advance seam (baw.3.3): when a library track ends naturally, the
+        // wrapper fires this; the coordinator advances the queue (honouring
+        // RepeatMode.One restart) and starts the next track.
+        vlcPlayerWrapper.onLibraryTrackEnded = { musicPlaybackCoordinator.onTrackEnded() }
         buildSession()
         DebugLogger.log("MediaLibrarySession built, session=$mediaLibrarySession", AUTO)
 
@@ -179,7 +184,7 @@ class AudioPlaybackService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     private fun buildSession() {
         DebugLogger.log("buildSession() - creating VLCSessionPlayer and MediaLibrarySession", AUTO)
-        val sessionPlayer = VLCSessionPlayer(vlcPlayerWrapper, accountManager, espnScoreService)
+        val sessionPlayer = VLCSessionPlayer(vlcPlayerWrapper, musicPlaybackCoordinator, accountManager, espnScoreService)
 
         mediaLibrarySession?.release()
         mediaLibrarySession = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
