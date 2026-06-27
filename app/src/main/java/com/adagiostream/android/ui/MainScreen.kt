@@ -44,6 +44,9 @@ import com.adagiostream.android.ui.screens.music.ArtistDetailScreen
 import com.adagiostream.android.ui.screens.music.GenreBrowseScreen
 import com.adagiostream.android.ui.screens.music.GenreDetailScreen
 import com.adagiostream.android.ui.screens.music.MusicLibraryScreen
+import com.adagiostream.android.ui.screens.music.NavidromePlaylistDetailScreen
+import com.adagiostream.android.ui.screens.music.NavidromePlaylistListScreen
+import com.adagiostream.android.ui.screens.music.SearchResultsScreen
 import com.adagiostream.android.ui.screens.m3us.MyM3UsScreen
 import com.adagiostream.android.ui.screens.m3us.PlaylistDetailScreen
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
@@ -185,6 +188,46 @@ fun MainScreen(
                         onGenresClick = {
                             navController.navigate(Screen.GenreBrowse.route)
                         },
+                        onSearchClick = {
+                            navController.navigate(Screen.MusicSearch.route)
+                        },
+                        onPlaylistsClick = {
+                            navController.navigate(Screen.NavidromePlaylistList.route)
+                        },
+                    )
+                }
+                // Search screen (baw.4.1)
+                composable(Screen.MusicSearch.route) {
+                    SearchResultsScreen(
+                        onBack = { navController.popBackStack() },
+                        onArtistClick = { artistId ->
+                            navController.navigate(Screen.ArtistDetail.createRoute(artistId))
+                        },
+                        onAlbumClick = { albumId ->
+                            navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                        },
+                    )
+                }
+                // Navidrome playlist list (baw.4.2)
+                composable(Screen.NavidromePlaylistList.route) {
+                    NavidromePlaylistListScreen(
+                        onBack = { navController.popBackStack() },
+                        onPlaylistClick = { playlistId ->
+                            navController.navigate(Screen.NavidromePlaylistDetail.createRoute(playlistId))
+                        },
+                    )
+                }
+                // Navidrome playlist detail (baw.4.2 / baw.4.3)
+                composable(
+                    route = Screen.NavidromePlaylistDetail.route,
+                    arguments = listOf(
+                        navArgument("playlistId") { type = NavType.StringType },
+                    ),
+                ) { backStackEntry ->
+                    val playlistId = backStackEntry.arguments?.getString("playlistId") ?: ""
+                    NavidromePlaylistDetailScreen(
+                        onBack = { navController.popBackStack() },
+                        playlistId = playlistId,
                     )
                 }
                 composable(

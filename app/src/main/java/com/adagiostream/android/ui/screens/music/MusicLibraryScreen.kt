@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,6 +57,8 @@ fun MusicLibraryScreen(
     viewModel: NavidromeLibraryViewModel = hiltViewModel(),
     onArtistClick: (artistId: String) -> Unit,
     onGenresClick: () -> Unit = {},
+    onSearchClick: () -> Unit = {},
+    onPlaylistsClick: () -> Unit = {},
 ) {
     val api by viewModel.api.collectAsStateWithLifecycle()
     val artistsState by viewModel.artistsState.collectAsStateWithLifecycle()
@@ -67,11 +72,27 @@ fun MusicLibraryScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = "Music",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Music",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (api != null) {
+                IconButton(onClick = onSearchClick) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
 
         when {
             api == null -> NoAccountEmptyState()
@@ -148,6 +169,7 @@ fun MusicLibraryScreen(
                     api = api,
                     onArtistClick = onArtistClick,
                     onGenresClick = onGenresClick,
+                    onPlaylistsClick = onPlaylistsClick,
                 )
             }
         }
@@ -190,11 +212,18 @@ private fun ArtistList(
     api: com.adagiostream.android.service.navidrome.NavidromeApi?,
     onArtistClick: (artistId: String) -> Unit,
     onGenresClick: () -> Unit,
+    onPlaylistsClick: () -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         // Browse-by-genre shortcut (baw.2.4) — shown above the artist list.
         item {
             GenresBrowseRow(onClick = onGenresClick)
+            HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
+        }
+
+        // Browse Navidrome playlists shortcut (baw.4.2).
+        item {
+            PlaylistsBrowseRow(onClick = onPlaylistsClick)
             HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
         }
 
@@ -206,6 +235,43 @@ private fun ArtistList(
             )
             HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
         }
+    }
+}
+
+@Composable
+private fun PlaylistsBrowseRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(44.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Text(
+            text = "Playlists",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
 

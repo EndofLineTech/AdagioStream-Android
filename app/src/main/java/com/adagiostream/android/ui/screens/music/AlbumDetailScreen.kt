@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,6 +29,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +68,8 @@ fun AlbumDetailScreen(
     val artistName by viewModel.selectedAlbumArtistName.collectAsStateWithLifecycle()
     val tracksState by viewModel.tracksState.collectAsStateWithLifecycle()
     val tracks by viewModel.albumTracks.collectAsStateWithLifecycle()
+
+    var addToPlaylistTrackId by remember { mutableStateOf<String?>(null) }
 
     val albumIdArg = backStackEntry?.arguments?.getString("albumId")
 
@@ -156,12 +162,21 @@ fun AlbumDetailScreen(
                             track = track,
                             onClick = { viewModel.playTrack(track) },
                             onToggleStar = { viewModel.toggleStar(track) },
+                            onAddToPlaylist = { addToPlaylistTrackId = track.id },
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = 64.dp))
                     }
                 }
             }
         }
+    }
+
+    // "Add to Playlist" bottom sheet (baw.4.3).
+    addToPlaylistTrackId?.let { trackId ->
+        AddToPlaylistSheet(
+            trackId = trackId,
+            onDismiss = { addToPlaylistTrackId = null },
+        )
     }
 }
 
@@ -228,12 +243,17 @@ private fun AlbumHeader(
 }
 
 @Composable
-private fun TrackRow(track: Track, onClick: () -> Unit, onToggleStar: () -> Unit) {
+private fun TrackRow(
+    track: Track,
+    onClick: () -> Unit,
+    onToggleStar: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Track number badge
@@ -272,6 +292,16 @@ private fun TrackRow(track: Track, onClick: () -> Unit, onToggleStar: () -> Unit
                 text = formatDuration(track.duration),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // "Add to Playlist" overflow (baw.4.3).
+        IconButton(onClick = onAddToPlaylist, modifier = Modifier.size(36.dp)) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Add to playlist",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
             )
         }
     }

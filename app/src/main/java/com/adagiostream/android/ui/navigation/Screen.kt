@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MusicNote
@@ -76,6 +77,34 @@ sealed class Screen(
     data object GenreDetail : Screen("music/genres/{genreName}", "Genre", Icons.Default.MusicNote) {
         fun createRoute(genreName: String): String =
             "music/genres/${android.net.Uri.encode(genreName)}"
+    }
+
+    /**
+     * Full-text search screen (baw.4.1).
+     * Sectioned results: Artists / Albums / Songs.
+     */
+    data object MusicSearch : Screen("music/search", "Search", Icons.Default.Search)
+
+    /**
+     * Server-side playlist list (baw.4.2).
+     * Distinct from the IPTV M3U [PlaylistDetail] route.
+     */
+    data object NavidromePlaylistList : Screen(
+        route = "music/navidrome-playlists",
+        label = "Playlists",
+        icon = Icons.AutoMirrored.Filled.PlaylistPlay,
+    )
+
+    /**
+     * Server-side playlist detail — tracks for one playlist (baw.4.2 / baw.4.3).
+     * [playlistId] is passed as a URL path segment.
+     */
+    data object NavidromePlaylistDetail : Screen(
+        route = "music/navidrome-playlists/{playlistId}",
+        label = "Playlist",
+        icon = Icons.AutoMirrored.Filled.PlaylistPlay,
+    ) {
+        fun createRoute(playlistId: String): String = "music/navidrome-playlists/$playlistId"
     }
 }
 
