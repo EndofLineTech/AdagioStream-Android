@@ -1,0 +1,274 @@
+package com.adagiostream.android.ui.screens.music
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.adagiostream.android.model.AccountType
+import com.adagiostream.android.service.account.AccountRepository
+import com.adagiostream.android.service.navidrome.Album
+import com.adagiostream.android.service.navidrome.Artist
+import com.adagiostream.android.service.navidrome.NavidromeApi
+import com.adagiostream.android.service.navidrome.NavidromeApiException
+import com.adagiostream.android.service.navidrome.NavidromeApiFactory
+import com.adagiostream.android.service.navidrome.Track
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+/**
+ * ViewModel for the Navidrome music library browse UI (baw.2.3).
+ *
+ * Drives three nested screens:
+ *  - [MusicLibraryScreen] — artist list (root)
+ *  - [ArtistDetailScreen] — albums for a selected artist
+ *  - [AlbumDetailScreen]  — tracks for a selected album
+ *
+ * State model: each screen has its own [LoadState] flow so navigation state is
+ * preserved independently.  All network calls live-browse the [NavidromeApi];
+ * no Room cache is used (library caching is a follow-on bead).
+ *
+ * The API is resolved lazily on first access by watching [AccountManager.accounts]
+ * for the first enabled [AccountType.Subsonic] entry.  If no Subsonic account is
+ * configured the [api] flow remains `null`, and callers render the empty state.
+ */
+@HiltViewModel
+class NavidromeLibraryViewModel @Inject constructor(
+    private val accountRepository: AccountRepository,
+    private val navidromeApiFactory: NavidromeApiFactory,
+) : ViewModel() {
+
+    // -------------------------------------------------------------------------
+    // LoadState — mirrors the iOS NavidromeLibraryViewModel pattern
+    // -------------------------------------------------------------------------
+
+    /**
+     * Loading state for each browse level.
+     *
+     * Transitions: Idle → Loading → Loaded | Empty | Error(msg)
+     * Retry: reset to Idle then call the relevant load function.
+     */
+    sealed class LoadState {
+        /** Initial state before the first load has been requested. */
+        object Idle : LoadState()
+
+        /** A network request is in-flight. */
+        object Loading : LoadState()
+
+        /** Data loaded successfully and the list is non-empty. */
+        object Loaded : LoadState()
+
+        /** Data loaded successfully but the list is empty. */
+        object Empty : LoadState()
+
+        /**
+         * The load failed.  [message] is a user-facing string derived from
+         * [NavidromeApiException] — never the raw exception message which may
+         * expose server internals.
+         */
+        data class Error(val message: String) : LoadState()
+    }
+
+    // -------------------------------------------------------------------------
+    // Resolved API (null until a Subsonic account is found)
+    // -------------------------------------------------------------------------
+
+    private val _api = MutableStateFlow<NavidromeApi?>(null)
+
+    /** The active [NavidromeApi], or `null` if no Subsonic account is configured. */
+    val api: StateFlow<NavidromeApi?> = _api.asStateFlow()
+
+    init {
+        // Watch for account changes (add/remove/edit) and rebuild the API.
+        viewModelScope.launch {
+            accountRepository.accounts.collect { accounts ->
+                val subsonic = accounts
+                    .filter { it.isEnabled }
+                    .firstNotNullOfOrNull { it.type as? AccountType.Subsonic }
+
+                _api.value = subsonic?.let { s ->
+                    navidromeApiFactory.create(s.host, s.username, s.password)
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Artist list state
+    // -------------------------------------------------------------------------
+
+    private val _artists = MutableStateFlow<List<Artist>>(emptyList())
+    val artists: StateFlow<List<Artist>> = _artists.asStateFlow()
+
+    private val _artistsState = MutableStateFlow<LoadState>(LoadState.Idle)
+    val artistsState: StateFlow<LoadState> = _artistsState.asStateFlow()
+
+    /**
+     * Loads all artists from the active Navidrome API.
+     *
+     * Guards against concurrent loads.  If no API is configured the state
+     * stays [LoadState.Idle] (the screen renders the "no account" empty state).
+     */
+    fun loadArtists() {
+        val api = _api.value ?: return
+        if (_artistsState.value is LoadState.Loading) return
+
+        viewModelScope.launch {
+            _artistsState.value = LoadState.Loading
+            try {
+                val loaded = api.getArtists()
+                    .sortedBy { it.name.lowercase() }
+                _artists.value = loaded
+                _artistsState.value = if (loaded.isEmpty()) LoadState.Empty else LoadState.Loaded
+            } catch (e: NavidromeApiException) {
+                _artistsState.value = LoadState.Error(e.userMessage)
+            } catch (e: Exception) {
+                _artistsState.value = LoadState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    /** Resets artist state to [LoadState.Idle] so the screen can trigger a fresh load. */
+    fun retryArtists() {
+        _artistsState.value = LoadState.Idle
+        loadArtists()
+    }
+
+    // -------------------------------------------------------------------------
+    // Artist detail (albums) state
+    // -------------------------------------------------------------------------
+
+    private val _selectedArtist = MutableStateFlow<Artist?>(null)
+    val selectedArtist: StateFlow<Artist?> = _selectedArtist.asStateFlow()
+
+    private val _artistAlbums = MutableStateFlow<List<Album>>(emptyList())
+    val artistAlbums: StateFlow<List<Album>> = _artistAlbums.asStateFlow()
+
+    private val _albumsState = MutableStateFlow<LoadState>(LoadState.Idle)
+    val albumsState: StateFlow<LoadState> = _albumsState.asStateFlow()
+
+    /**
+     * Loads albums for [artist] from `getArtist`.
+     *
+     * No-ops when [artist] is the same as the currently loaded artist (avoids
+     * redundant reloads during recomposition).  Guards against concurrent loads.
+     */
+    fun loadAlbums(artist: Artist) {
+        // Skip if already loaded for this artist
+        if (_selectedArtist.value?.id == artist.id && _albumsState.value == LoadState.Loaded) return
+        val api = _api.value ?: return
+        if (_albumsState.value is LoadState.Loading) return
+
+        viewModelScope.launch {
+            _selectedArtist.value = artist
+            _artistAlbums.value = emptyList()
+            _albumsState.value = LoadState.Loading
+            try {
+                val (_, albums) = api.getArtist(artist.id)
+                val sorted = albums.sortedWith(
+                    compareBy({ it.year ?: Int.MAX_VALUE }, { it.title.lowercase() }),
+                )
+                _artistAlbums.value = sorted
+                _albumsState.value = if (sorted.isEmpty()) LoadState.Empty else LoadState.Loaded
+            } catch (e: NavidromeApiException) {
+                _albumsState.value = LoadState.Error(e.userMessage)
+            } catch (e: Exception) {
+                _albumsState.value = LoadState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    fun retryAlbums() {
+        val artist = _selectedArtist.value ?: return
+        _albumsState.value = LoadState.Idle
+        loadAlbums(artist)
+    }
+
+    // -------------------------------------------------------------------------
+    // Album detail (tracks) state
+    // -------------------------------------------------------------------------
+
+    private val _selectedAlbum = MutableStateFlow<Album?>(null)
+    val selectedAlbum: StateFlow<Album?> = _selectedAlbum.asStateFlow()
+
+    /**
+     * Human-readable artist display name from the `getAlbum` response.
+     *
+     * Always sourced from the Subsonic `"artist"` string field — never from
+     * `artistId`.  The iOS bug that showed `artistId` in the now-playing subtitle
+     * came from not threading this field through the ViewModel.
+     */
+    private val _selectedAlbumArtistName = MutableStateFlow<String?>(null)
+    val selectedAlbumArtistName: StateFlow<String?> = _selectedAlbumArtistName.asStateFlow()
+
+    private val _albumTracks = MutableStateFlow<List<Track>>(emptyList())
+    val albumTracks: StateFlow<List<Track>> = _albumTracks.asStateFlow()
+
+    private val _tracksState = MutableStateFlow<LoadState>(LoadState.Idle)
+    val tracksState: StateFlow<LoadState> = _tracksState.asStateFlow()
+
+    /**
+     * Loads tracks for [album] from `getAlbum`.
+     *
+     * No-ops if this album is already loaded.  Guards against concurrent loads.
+     */
+    fun loadTracks(album: Album) {
+        if (_selectedAlbum.value?.id == album.id && _tracksState.value == LoadState.Loaded) return
+        val api = _api.value ?: return
+        if (_tracksState.value is LoadState.Loading) return
+
+        viewModelScope.launch {
+            _selectedAlbum.value = album
+            _albumTracks.value = emptyList()
+            _selectedAlbumArtistName.value = null
+            _tracksState.value = LoadState.Loading
+            try {
+                val (_, artistName, tracks) = api.getAlbum(album.id)
+                _selectedAlbumArtistName.value = artistName
+                _albumTracks.value = tracks.sortedWith(
+                    compareBy({ it.discNumber }, { it.trackNumber ?: Int.MAX_VALUE }),
+                )
+                _tracksState.value = if (tracks.isEmpty()) LoadState.Empty else LoadState.Loaded
+            } catch (e: NavidromeApiException) {
+                _tracksState.value = LoadState.Error(e.userMessage)
+            } catch (e: Exception) {
+                _tracksState.value = LoadState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    fun retryTracks() {
+        val album = _selectedAlbum.value ?: return
+        _tracksState.value = LoadState.Idle
+        loadTracks(album)
+    }
+}
+
+// -------------------------------------------------------------------------
+// NavidromeApiException user-facing message
+// -------------------------------------------------------------------------
+
+/**
+ * Maps a [NavidromeApiException] to a short user-facing message suitable for
+ * display in error states.  Never leaks internal server details.
+ */
+private val NavidromeApiException.userMessage: String
+    get() = when (this) {
+        is NavidromeApiException.AuthFailed ->
+            "Authentication failed. Check your username and password in Settings → Accounts."
+        is NavidromeApiException.Unreachable ->
+            "Cannot reach the server. Check your network and server address."
+        is NavidromeApiException.TimedOut ->
+            "The request timed out. Check your network connection."
+        is NavidromeApiException.ServerError ->
+            "Server error (HTTP $statusCode). Try again later."
+        is NavidromeApiException.NotSubsonicServer ->
+            "The server didn't respond as expected. Verify the server URL in Settings."
+        is NavidromeApiException.SubsonicError ->
+            message ?: "Subsonic error $code"
+        is NavidromeApiException.InvalidUrl ->
+            "Invalid server URL. Check the address in Settings → Accounts."
+        is NavidromeApiException.DecodingError ->
+            "Unexpected server response. The server may need updating."
+    }
