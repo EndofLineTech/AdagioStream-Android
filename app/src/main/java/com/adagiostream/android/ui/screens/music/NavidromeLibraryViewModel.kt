@@ -360,6 +360,44 @@ class NavidromeLibraryViewModel @Inject constructor(
     }
 
     // -------------------------------------------------------------------------
+    // Star / unstar (baw.5.2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Toggles the starred state of [track] in Navidrome (baw.5.2).
+     *
+     * Performs an optimistic UI update — flips [Track.starred] immediately in
+     * the in-memory state, then calls [NavidromeApi.star] or [NavidromeApi.unstar].
+     * On error the update is reverted.
+     *
+     * Architecturally separate from IPTV favourite IDs ([toggleFavorite] /
+     * [favoriteIds]): stars are a Navidrome-only concept, stored server-side.
+     */
+    fun toggleStar(track: Track) {
+        val api = _api.value ?: return
+        val newStarred = !(track.starred ?: false)
+        val updated = track.copy(starred = newStarred)
+
+        // Optimistic update across all in-memory track lists.
+        updateTrackInLists(updated)
+
+        viewModelScope.launch {
+            try {
+                if (newStarred) api.star(track.id) else api.unstar(track.id)
+            } catch (_: Exception) {
+                // Revert optimistic update on error.
+                updateTrackInLists(track)
+            }
+        }
+    }
+
+    /** Replaces the track with matching id in all in-memory track lists. */
+    private fun updateTrackInLists(updated: Track) {
+        _albumTracks.value = _albumTracks.value.map { if (it.id == updated.id) updated else it }
+        _genreTracks.value = _genreTracks.value.map { if (it.id == updated.id) updated else it }
+    }
+
+    // -------------------------------------------------------------------------
     // Genre browse → play bridge (baw.2.4 + baw.3.8)
     // -------------------------------------------------------------------------
 

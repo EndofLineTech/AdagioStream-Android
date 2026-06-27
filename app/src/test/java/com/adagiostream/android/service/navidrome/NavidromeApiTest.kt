@@ -201,4 +201,84 @@ class NavidromeApiTest {
             "Password must not appear in toString()"
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Scrobble (baw.5.1)
+    // -------------------------------------------------------------------------
+
+    private val okEnvelope = """{"subsonic-response":{"status":"ok","version":"1.16.1"}}"""
+
+    @Test
+    fun `scrobble nowPlaying callsCorrectEndpoint`() = runTest {
+        server.enqueue(mockResponse(200, okEnvelope))
+        api.scrobble("song-1", submission = false)
+        val request = server.takeRequest()
+        assertEquals("/rest/scrobble.view", request.url.encodedPath)
+        assertEquals("song-1", request.url.queryParameter("id"))
+        assertEquals("false", request.url.queryParameter("submission"))
+    }
+
+    @Test
+    fun `scrobble submission callsCorrectEndpoint`() = runTest {
+        server.enqueue(mockResponse(200, okEnvelope))
+        api.scrobble("song-1", submission = true)
+        val request = server.takeRequest()
+        assertEquals("/rest/scrobble.view", request.url.encodedPath)
+        assertEquals("song-1", request.url.queryParameter("id"))
+        assertEquals("true", request.url.queryParameter("submission"))
+    }
+
+    // -------------------------------------------------------------------------
+    // Star / Unstar (baw.5.2)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `star callsCorrectEndpoint`() = runTest {
+        server.enqueue(mockResponse(200, okEnvelope))
+        api.star("song-2")
+        val request = server.takeRequest()
+        assertEquals("/rest/star.view", request.url.encodedPath)
+        assertEquals("song-2", request.url.queryParameter("id"))
+    }
+
+    @Test
+    fun `unstar callsCorrectEndpoint`() = runTest {
+        server.enqueue(mockResponse(200, okEnvelope))
+        api.unstar("song-3")
+        val request = server.takeRequest()
+        assertEquals("/rest/unstar.view", request.url.encodedPath)
+        assertEquals("song-3", request.url.queryParameter("id"))
+    }
+
+    // -------------------------------------------------------------------------
+    // setRating (baw.5.2)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `setRating clamps rating above 5 to 5`() = runTest {
+        server.enqueue(mockResponse(200, okEnvelope))
+        api.setRating("song-4", 10)
+        val request = server.takeRequest()
+        assertEquals("/rest/setRating.view", request.url.encodedPath)
+        assertEquals("song-4", request.url.queryParameter("id"))
+        assertEquals("5", request.url.queryParameter("rating"))
+    }
+
+    @Test
+    fun `setRating clamps rating below 0 to 0`() = runTest {
+        server.enqueue(mockResponse(200, okEnvelope))
+        api.setRating("song-5", -1)
+        val request = server.takeRequest()
+        assertEquals("/rest/setRating.view", request.url.encodedPath)
+        assertEquals("0", request.url.queryParameter("rating"))
+    }
+
+    @Test
+    fun `setRating passes valid rating unchanged`() = runTest {
+        server.enqueue(mockResponse(200, okEnvelope))
+        api.setRating("song-6", 3)
+        val request = server.takeRequest()
+        assertEquals("/rest/setRating.view", request.url.encodedPath)
+        assertEquals("3", request.url.queryParameter("rating"))
+    }
 }

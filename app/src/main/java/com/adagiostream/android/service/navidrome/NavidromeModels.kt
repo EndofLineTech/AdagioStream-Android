@@ -124,6 +124,14 @@ data class Track(
     val contentType: String? = null,
     val coverArt: String? = null,
     val path: String? = null,
+    /**
+     * True when the track is starred/favourited in Navidrome (baw.5.2).
+     * Null when the starred state is unknown (e.g. not yet fetched).
+     * Architecturally separate from IPTV favourite IDs.
+     */
+    val starred: Boolean? = null,
+    /** Subsonic play count for this track (baw.5.3). */
+    val playCount: Int? = null,
     val updatedAt: Int,
 )
 
@@ -498,6 +506,8 @@ data class SubsonicTrackDto(
         contentType = contentType,
         coverArt = coverArt,
         path = path,
+        starred = starred,
+        playCount = playCount,
         updatedAt = updatedAt,
     )
 }
