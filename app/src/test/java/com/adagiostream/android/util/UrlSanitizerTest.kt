@@ -80,6 +80,47 @@ class UrlSanitizerTest {
         assertEquals(input, result)
     }
 
+    // --- Subsonic auth params (baw.1.9) ---
+
+    @Test
+    fun `redact redacts Subsonic u param but preserves other single-char params`() {
+        // u= should be redacted; id= should NOT (it doesn't match the [?&](u|t|s)= pattern)
+        val input = "http://navidrome.example.com/rest/ping.view?u=alice&t=abc123&s=def456&id=42"
+        val result = UrlSanitizer.redact(input)
+        assertEquals(
+            "http://navidrome.example.com/rest/ping.view?u=****&t=****&s=****&id=42",
+            result,
+        )
+    }
+
+    @Test
+    fun `redact redacts Subsonic u t s params appearing after amp`() {
+        val input = "http://example.com/rest/stream.view?c=AdagioStream&u=bob&t=tokenXYZ&s=saltABC&f=json"
+        val result = UrlSanitizer.redact(input)
+        assertEquals(
+            "http://example.com/rest/stream.view?c=AdagioStream&u=****&t=****&s=****&f=json",
+            result,
+        )
+    }
+
+    @Test
+    fun `redact does not over-match params that start with u t or s but are longer`() {
+        // "type=", "size=", "url=" should NOT be redacted — only exact [?&](u|t|s)= matches
+        val input = "http://example.com?type=newest&size=10&url=foo"
+        val result = UrlSanitizer.redact(input)
+        assertEquals(input, result)
+    }
+
+    @Test
+    fun `redact handles Subsonic URL starting with question-mark u param`() {
+        val input = "http://example.com/rest/ping.view?u=alice&v=1.16.1"
+        val result = UrlSanitizer.redact(input)
+        assertEquals(
+            "http://example.com/rest/ping.view?u=****&v=1.16.1",
+            result,
+        )
+    }
+
     // --- requireHttpUrl() tests ---
 
     @Test
