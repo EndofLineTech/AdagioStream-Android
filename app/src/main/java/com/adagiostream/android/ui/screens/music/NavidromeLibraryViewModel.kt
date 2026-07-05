@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
 import com.adagiostream.android.service.navidrome.Album
+import com.adagiostream.android.service.navidrome.AlbumListType
 import com.adagiostream.android.service.navidrome.Artist
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiException
@@ -269,6 +270,57 @@ class NavidromeLibraryViewModel @Inject constructor(
             api = api,
             albumTitle = _selectedAlbum.value?.title,
         )
+    }
+
+    // -------------------------------------------------------------------------
+    // Album browse list (baw.9.1) — getAlbumList2 with a selectable ordering.
+    // -------------------------------------------------------------------------
+
+    private val _albumListType = MutableStateFlow(AlbumListType.NEWEST)
+    val albumListType: StateFlow<AlbumListType> = _albumListType.asStateFlow()
+
+    private val _albumBrowseList = MutableStateFlow<List<Album>>(emptyList())
+    val albumBrowseList: StateFlow<List<Album>> = _albumBrowseList.asStateFlow()
+
+    private val _albumBrowseState = MutableStateFlow<LoadState>(LoadState.Idle)
+    val albumBrowseState: StateFlow<LoadState> = _albumBrowseState.asStateFlow()
+
+    /**
+     * Loads a page of albums from `getAlbumList2` ordered by [type] (baw.9.1).
+     *
+     * Guards against concurrent loads. Callers switching the list-type picker
+     * should use [selectAlbumListType] instead, which resets state to [LoadState.Idle]
+     * first so the load is never treated as a no-op duplicate request.
+     */
+    fun loadAlbumBrowseList(type: AlbumListType = _albumListType.value) {
+        val api = _api.value ?: return
+        if (_albumBrowseState.value is LoadState.Loading) return
+
+        viewModelScope.launch {
+            _albumListType.value = type
+            _albumBrowseState.value = LoadState.Loading
+            try {
+                val loaded = api.getAlbumList2(type = type)
+                _albumBrowseList.value = loaded
+                _albumBrowseState.value = if (loaded.isEmpty()) LoadState.Empty else LoadState.Loaded
+            } catch (e: NavidromeApiException) {
+                _albumBrowseState.value = LoadState.Error(e.userMessage)
+            } catch (e: Exception) {
+                _albumBrowseState.value = LoadState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    /** Resets browse state to [LoadState.Idle] so the screen can trigger a fresh load. */
+    fun retryAlbumBrowseList() {
+        _albumBrowseState.value = LoadState.Idle
+        loadAlbumBrowseList()
+    }
+
+    /** Switches the list-type picker to [type] and reloads (baw.9.1). */
+    fun selectAlbumListType(type: AlbumListType) {
+        _albumBrowseState.value = LoadState.Idle
+        loadAlbumBrowseList(type)
     }
 
     // -------------------------------------------------------------------------

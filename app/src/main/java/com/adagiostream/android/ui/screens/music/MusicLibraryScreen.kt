@@ -17,6 +17,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -57,6 +58,7 @@ fun MusicLibraryScreen(
     viewModel: NavidromeLibraryViewModel = hiltViewModel(),
     onArtistClick: (artistId: String) -> Unit,
     onGenresClick: () -> Unit = {},
+    onAlbumsClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
     onPlaylistsClick: () -> Unit = {},
 ) {
@@ -169,6 +171,7 @@ fun MusicLibraryScreen(
                     api = api,
                     onArtistClick = onArtistClick,
                     onGenresClick = onGenresClick,
+                    onAlbumsClick = onAlbumsClick,
                     onPlaylistsClick = onPlaylistsClick,
                 )
             }
@@ -212,9 +215,16 @@ private fun ArtistList(
     api: com.adagiostream.android.service.navidrome.NavidromeApi?,
     onArtistClick: (artistId: String) -> Unit,
     onGenresClick: () -> Unit,
+    onAlbumsClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
+        // Browse-by-album-list shortcut (baw.9.1) — shown above the artist list.
+        item {
+            AlbumsBrowseRow(onClick = onAlbumsClick)
+            HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
+        }
+
         // Browse-by-genre shortcut (baw.2.4) — shown above the artist list.
         item {
             GenresBrowseRow(onClick = onGenresClick)
@@ -262,6 +272,43 @@ private fun PlaylistsBrowseRow(onClick: () -> Unit) {
 
         Text(
             text = "Playlists",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+@Composable
+private fun AlbumsBrowseRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(44.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Album,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Text(
+            text = "Albums",
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.weight(1f),
         )
