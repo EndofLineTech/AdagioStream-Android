@@ -30,6 +30,12 @@ data class AppSettings(
      * Matches the iOS gate-flip pattern used to promote E1→E3 incrementally.
      */
     val musicTabEnabled: Boolean = false,
+    /**
+     * Android Auto browse-root ordering when a Subsonic account is configured
+     * (baw.7.1, iOS parity: `CarPlaySourceOrder`). Only surfaced in Settings
+     * when a Subsonic account exists.
+     */
+    val autoSourceOrder: AutoSourceOrder = AutoSourceOrder.STREAMING_FIRST,
 )
 
 @Serializable
@@ -58,6 +64,13 @@ enum class ChannelGroupingMode(val displayName: String) {
     ALL_GROUPS("All Groups"),
     BY_PROVIDER("By Provider"),
     BY_SOURCE("By Source"),
+}
+
+/** Android Auto browse-root section order (baw.7.1, iOS parity: `CarPlaySourceOrder`). */
+@Serializable
+enum class AutoSourceOrder(val displayName: String) {
+    STREAMING_FIRST("Streaming First"),
+    MUSIC_FIRST("Music First"),
 }
 
 @Serializable

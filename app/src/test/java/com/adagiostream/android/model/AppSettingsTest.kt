@@ -35,6 +35,7 @@ class AppSettingsTest {
         assertEquals(TextSizeMode.M, defaults.textSizeMode)
         assertEquals(SortMode.ALPHABETICAL, defaults.sortMode)
         assertEquals(SortMode.ALPHABETICAL, defaults.groupSortMode)
+        assertEquals(AutoSourceOrder.STREAMING_FIRST, defaults.autoSourceOrder)
     }
 
     @Test

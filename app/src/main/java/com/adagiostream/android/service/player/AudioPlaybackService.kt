@@ -24,10 +24,19 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.CommandButton
 import com.adagiostream.android.R
+import com.adagiostream.android.model.AccountType
+import com.adagiostream.android.model.AutoSourceOrder
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.metadata.ESPNScoreService
+import com.adagiostream.android.service.navidrome.Album
+import com.adagiostream.android.service.navidrome.AlbumListType
+import com.adagiostream.android.service.navidrome.NavidromeApi
+import com.adagiostream.android.service.navidrome.NavidromeApiFactory
+import com.adagiostream.android.service.navidrome.NavidromePlaylist
+import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
@@ -58,11 +67,49 @@ class AudioPlaybackService : MediaLibraryService() {
     @Inject lateinit var espnScoreService: ESPNScoreService
     @Inject lateinit var customPlaylistManager: CustomPlaylistManager
     @Inject lateinit var musicPlaybackCoordinator: MusicPlaybackCoordinator
+    @Inject lateinit var musicLibraryRepository: MusicLibraryRepository
+    @Inject lateinit var navidromeApiFactory: NavidromeApiFactory
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastBrowsedParentId: String? = null
     private var customButtonJob: kotlinx.coroutines.Job? = null
+
+    // ---- Navidrome / music browse state (baw.7.1) -------------------------
+
+    /**
+     * Resolved [NavidromeApi] for the currently-configured Subsonic account, or
+     * null when no Subsonic account exists. Updated reactively in [onCreate].
+     *
+     * Reads from [AccountManager.accounts] (never blocks the Auto callback).
+     */
+    private var subsonicApi: NavidromeApi? = null
+
+    /**
+     * In-memory playlist cache (baw.7.1). Populated by a background coroutine
+     * whenever the Subsonic API changes; served immediately from memory in
+     * [onGetChildren] so the Auto callback never blocks on the network.
+     */
+    private val cachedMusicPlaylists = mutableListOf<NavidromePlaylist>()
+
+    /**
+     * Per-playlist track cache keyed by playlist ID (baw.7.1). Populated on
+     * demand when the user first opens a playlist; empty list is returned until
+     * the background fetch completes, then [notifyChildrenChanged] is fired.
+     */
+    private val cachedMusicPlaylistTracks = mutableMapOf<String, List<Track>>()
+
+    /**
+     * In-memory "newest 50 albums" cache for the [MusicAutoMediaMapper.MUSIC_ALBUMS_ID]
+     * root node (baw.7.1, iOS parity). Refreshed alongside the playlist cache.
+     */
+    private val cachedMusicAlbums = mutableListOf<Album>()
+
+    /**
+     * In-memory "random 100 songs" cache for the [MusicAutoMediaMapper.MUSIC_SONGS_ID]
+     * root node (baw.7.1, iOS parity: random 100).
+     */
+    private val cachedRandomSongs = mutableListOf<Track>()
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
@@ -75,6 +122,8 @@ class AudioPlaybackService : MediaLibraryService() {
         private val TOGGLE_FAVORITE_COMMAND = SessionCommand("TOGGLE_FAVORITE", Bundle.EMPTY)
         private val SEEK_TO_LIVE_COMMAND = SessionCommand("SEEK_TO_LIVE", Bundle.EMPTY)
         private val TOGGLE_LOVED_TRACK_COMMAND = SessionCommand("TOGGLE_LOVED_TRACK", Bundle.EMPTY)
+        private val TOGGLE_SHUFFLE_COMMAND = SessionCommand("TOGGLE_SHUFFLE", Bundle.EMPTY)
+        private val CYCLE_REPEAT_COMMAND = SessionCommand("CYCLE_REPEAT", Bundle.EMPTY)
     }
 
     @OptIn(UnstableApi::class)
@@ -152,6 +201,40 @@ class AudioPlaybackService : MediaLibraryService() {
             }
         }
 
+        // Watch for Subsonic account changes → resolve API, pre-fetch playlists (baw.7.1)
+        serviceScope.launch {
+            accountManager.accounts.collect { accounts ->
+                val subsonic = accounts
+                    .filter { it.isEnabled }
+                    .firstNotNullOfOrNull { it.type as? AccountType.Subsonic }
+                val newApi = subsonic?.let { s ->
+                    navidromeApiFactory.create(s.host, s.username, s.password)
+                }
+                val apiChanged = newApi?.let { true } ?: (subsonicApi != null)
+                subsonicApi = newApi
+                if (apiChanged) {
+                    // Notify Root children so the Music node appears/disappears
+                    val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
+                    controllers.forEach { controller ->
+                        mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, 0, null)
+                    }
+                }
+                // Background-fetch playlists/albums/songs for the in-memory caches
+                // (non-blocking for Auto — see prefetchMusicList()).
+                if (newApi != null) {
+                    prefetchMusicList(MusicAutoMediaMapper.MUSIC_PLAYLISTS_ID, cachedMusicPlaylists, "playlist") {
+                        newApi.getPlaylists()
+                    }
+                    prefetchMusicList(MusicAutoMediaMapper.MUSIC_ALBUMS_ID, cachedMusicAlbums, "album") {
+                        newApi.getAlbumList2(type = AlbumListType.NEWEST, size = 50)
+                    }
+                    prefetchMusicList(MusicAutoMediaMapper.MUSIC_SONGS_ID, cachedRandomSongs, "song") {
+                        newApi.getRandomSongs(size = 100)
+                    }
+                }
+            }
+        }
+
         // Stop foreground when playback goes idle + update widget
         serviceScope.launch {
             combine(
@@ -201,7 +284,8 @@ class AudioPlaybackService : MediaLibraryService() {
                 .build()
         )
 
-        // Reactively update custom button icons when favorite/loved state changes
+        // Reactively update custom button icons: favorite/loved for radio, or
+        // shuffle/repeat for library playback (baw.7.2 — buttons branch by source).
         customButtonJob?.cancel()
         customButtonJob = serviceScope.launch {
             combine(
@@ -209,15 +293,20 @@ class AudioPlaybackService : MediaLibraryService() {
                 accountManager.channels,
                 accountManager.trackMetadata,
                 accountManager.lovedTracks,
-            ) { current, channels, trackMeta, lovedTracks ->
+                vlcPlayerWrapper.playbackSource,
+            ) { current, channels, trackMeta, lovedTracks, source ->
                 val isFav = current != null && channels.find { it.id == current.id }?.isFavorite == true
                 val track = current?.let { trackMeta[it.name] }
                 val isLoved = track != null && lovedTracks.any { it.artist == track.artist && it.title == track.title }
-                isFav to isLoved
+                Triple(source is PlaybackSource.Library, isFav, isLoved)
             }
                 .distinctUntilChanged()
-                .collect { (isFav, isLoved) ->
-                    val buttons = buildCustomButtons(isFav, isLoved)
+                .collect { (isLibrary, isFav, isLoved) ->
+                    val buttons = if (isLibrary) {
+                        buildLibraryCustomButtons(musicPlaybackCoordinator.shuffleEnabled, musicPlaybackCoordinator.repeatMode)
+                    } else {
+                        buildCustomButtons(isFav, isLoved)
+                    }
                     mediaLibrarySession?.connectedControllers?.forEach { controller ->
                         mediaLibrarySession?.setCustomLayout(controller, buttons)
                     }
@@ -237,6 +326,45 @@ class AudioPlaybackService : MediaLibraryService() {
                 .setSessionCommand(TOGGLE_LOVED_TRACK_COMMAND)
                 .build(),
         )
+    }
+
+    /**
+     * Custom button row for library (Navidrome) playback (baw.7.2) — shuffle
+     * toggle + repeat-mode cycle, replacing the radio-only favorite/love row
+     * (those act on [vlcPlayerWrapper.currentChannel], which is null for
+     * on-demand tracks). Auto also natively exposes shuffle/repeat toggles via
+     * the standard `COMMAND_SET_SHUFFLE_MODE`/`COMMAND_SET_REPEAT_MODE` player
+     * commands (see [VLCSessionPlayer.availableCommands]); this row is a visible
+     * shortcut to the same state, refreshed by [onCustomCommand] on tap.
+     */
+    @OptIn(UnstableApi::class)
+    private fun buildLibraryCustomButtons(shuffleEnabled: Boolean, repeatMode: RepeatMode): List<CommandButton> {
+        val repeatIcon = when (repeatMode) {
+            RepeatMode.Off -> CommandButton.ICON_REPEAT_OFF
+            RepeatMode.All -> CommandButton.ICON_REPEAT_ALL
+            RepeatMode.One -> CommandButton.ICON_REPEAT_ONE
+        }
+        return listOf(
+            CommandButton.Builder(if (shuffleEnabled) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF)
+                .setDisplayName("Shuffle")
+                .setSessionCommand(TOGGLE_SHUFFLE_COMMAND)
+                .build(),
+            CommandButton.Builder(repeatIcon)
+                .setDisplayName("Repeat")
+                .setSessionCommand(CYCLE_REPEAT_COMMAND)
+                .build(),
+        )
+    }
+
+    /**
+     * Rebuilds and re-pushes the library custom layout for [controller] right
+     * after a shuffle/repeat tap (baw.7.2) so the icon reflects the new state
+     * immediately, without waiting for the next reactive [customButtonJob] tick.
+     */
+    @OptIn(UnstableApi::class)
+    private fun refreshLibraryCustomLayout(controller: MediaSession.ControllerInfo) {
+        val buttons = buildLibraryCustomButtons(musicPlaybackCoordinator.shuffleEnabled, musicPlaybackCoordinator.repeatMode)
+        mediaLibrarySession?.setCustomLayout(controller, buttons)
     }
 
     @OptIn(UnstableApi::class)
@@ -374,13 +502,21 @@ class AudioPlaybackService : MediaLibraryService() {
                 .add(TOGGLE_FAVORITE_COMMAND)
                 .add(SEEK_TO_LIVE_COMMAND)
                 .add(TOGGLE_LOVED_TRACK_COMMAND)
+                .add(TOGGLE_SHUFFLE_COMMAND)
+                .add(CYCLE_REPEAT_COMMAND)
                 .build()
-            val channel = vlcPlayerWrapper.currentChannel.value
-            val isFav = channel != null && accountManager.channels.value.find { it.id == channel.id }?.isFavorite == true
-            val track = channel?.let { accountManager.trackMetadata.value[it.name] }
-            val isLoved = track != null && accountManager.lovedTracks.value.any { it.artist == track.artist && it.title == track.title }
-            val customButtons = buildCustomButtons(isFav, isLoved)
-            DebugLogger.log("onConnect() - accepting connection with custom commands: TOGGLE_FAVORITE, SEEK_TO_LIVE, TOGGLE_LOVED_TRACK", AUTO)
+            // Custom layout branches by playback source (baw.7.2): library
+            // playback gets shuffle/repeat, radio keeps favorite/love.
+            val customButtons = if (vlcPlayerWrapper.playbackSource.value is PlaybackSource.Library) {
+                buildLibraryCustomButtons(musicPlaybackCoordinator.shuffleEnabled, musicPlaybackCoordinator.repeatMode)
+            } else {
+                val channel = vlcPlayerWrapper.currentChannel.value
+                val isFav = channel != null && accountManager.channels.value.find { it.id == channel.id }?.isFavorite == true
+                val track = channel?.let { accountManager.trackMetadata.value[it.name] }
+                val isLoved = track != null && accountManager.lovedTracks.value.any { it.artist == track.artist && it.title == track.title }
+                buildCustomButtons(isFav, isLoved)
+            }
+            DebugLogger.log("onConnect() - accepting connection with custom commands: TOGGLE_FAVORITE, SEEK_TO_LIVE, TOGGLE_LOVED_TRACK, TOGGLE_SHUFFLE, CYCLE_REPEAT", AUTO)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .setCustomLayout(customButtons)
@@ -427,6 +563,22 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+            // Library-mode custom buttons (baw.7.2) — no-op outside library playback,
+            // mirroring the currentChannel == null guards above for the radio buttons.
+            if (customCommand.customAction == TOGGLE_SHUFFLE_COMMAND.customAction) {
+                if (vlcPlayerWrapper.playbackSource.value is PlaybackSource.Library) {
+                    musicPlaybackCoordinator.setShuffle(!musicPlaybackCoordinator.shuffleEnabled)
+                    refreshLibraryCustomLayout(controller)
+                }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            if (customCommand.customAction == CYCLE_REPEAT_COMMAND.customAction) {
+                if (vlcPlayerWrapper.playbackSource.value is PlaybackSource.Library) {
+                    musicPlaybackCoordinator.setRepeatMode(musicPlaybackCoordinator.repeatMode.next)
+                    refreshLibraryCustomLayout(controller)
+                }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
         }
 
@@ -437,6 +589,19 @@ class AudioPlaybackService : MediaLibraryService() {
         ): ListenableFuture<List<MediaItem>> {
             DebugLogger.log("onAddMediaItems() - ${mediaItems.size} item(s) from ${controller.packageName}", AUTO)
             mediaItems.forEach { DebugLogger.log("  mediaId=${it.mediaId}, title=${it.mediaMetadata.title}, uri=${it.localConfiguration?.uri}", AUTO) }
+
+            // Music library track tap (baw.7.1) — always a single tapped item;
+            // routed separately from the IPTV channel-resolution path below since
+            // the queue comes from musicPlaybackCoordinator, not vlcPlayerWrapper directly.
+            val tappedItem = mediaItems.singleOrNull()
+            if (tappedItem != null && tappedItem.mediaId.startsWith(MusicAutoMediaMapper.MUSIC_TRACK_PREFIX)) {
+                val future = SettableFuture.create<List<MediaItem>>()
+                serviceScope.launch {
+                    future.set(listOf(handleMusicTrackTap(tappedItem)))
+                }
+                return future
+            }
+
             val future = SettableFuture.create<List<MediaItem>>()
             serviceScope.launch {
                 // Wait for channels to load before resolving media items
@@ -565,8 +730,22 @@ class AudioPlaybackService : MediaLibraryService() {
 
                 val items: List<MediaItem> = when (parentId) {
                     ROOT_ID -> {
-                        val result = mutableListOf<MediaItem>()
-                        result.add(
+                        // Root sectioning (baw.7.1, iOS parity): "Channels" (streaming)
+                        // and "Music" are built as separate sections, then ordered by
+                        // the user's AutoSourceOrder setting. Re-check the Subsonic
+                        // account snapshot here (not the subsonicApi field) so the root
+                        // list is correct even if the reactive watcher hasn't fired yet.
+                        val hasSubsonic = accountManager.accounts.value.any { acct ->
+                            acct.isEnabled && acct.type is AccountType.Subsonic
+                        }
+                        val musicItems = if (hasSubsonic) {
+                            listOf(MusicAutoMediaMapper.musicRootItem())
+                        } else {
+                            emptyList()
+                        }
+
+                        val channelItems = mutableListOf<MediaItem>()
+                        channelItems.add(
                             buildBrowsableItem(
                                 FAVORITES_ID,
                                 "Favorites",
@@ -580,7 +759,7 @@ class AudioPlaybackService : MediaLibraryService() {
                         playlists.forEach { playlist ->
                             val entryCount = playlist.groups.sumOf { it.entries.size }
                             if (entryCount > 0) {
-                                result.add(
+                                channelItems.add(
                                     buildBrowsableItem(
                                         "$CUSTOM_PLAYLIST_PREFIX${playlist.id}",
                                         playlist.name,
@@ -589,14 +768,20 @@ class AudioPlaybackService : MediaLibraryService() {
                                 )
                             }
                         }
-                        result.addAll(groups.map {
+                        channelItems.addAll(groups.map {
                             buildBrowsableItem(
                                 it.name,
                                 it.name,
                                 "${it.channels.size} channels",
                             )
                         })
-                        result
+
+                        val order = if (hasSubsonic) {
+                            persistenceService.loadSettings().autoSourceOrder
+                        } else {
+                            AutoSourceOrder.STREAMING_FIRST
+                        }
+                        if (order == AutoSourceOrder.MUSIC_FIRST) musicItems + channelItems else channelItems + musicItems
                     }
                     FAVORITES_ID -> {
                         favorites.forEach { DebugLogger.log("  Favorite: id=${it.id}, name=${it.name}", AUTO) }
@@ -619,6 +804,11 @@ class AudioPlaybackService : MediaLibraryService() {
                             .build()
                     }
                     else -> when {
+                        // ---- Music browse tree (baw.7.1) — all music_* IDs are handled
+                        // here so they never fall through to the IPTV group-name lookup.
+                        MusicAutoMediaMapper.isMusicId(parentId) ->
+                            handleMusicChildren(parentId)
+
                         parentId.startsWith(CUSTOM_PLAYLIST_PREFIX) -> {
                             val playlistId = parentId.removePrefix(CUSTOM_PLAYLIST_PREFIX)
                             val playlist = customPlaylistManager.playlists.value.find { it.id == playlistId }
@@ -702,6 +892,205 @@ class AudioPlaybackService : MediaLibraryService() {
             return Futures.immediateFuture(
                 LibraryResult.ofItemList(ImmutableList.copyOf(results), params)
             )
+        }
+    }
+
+    // =========================================================================
+    // Music browse helpers (baw.7.1)
+    // =========================================================================
+
+    /**
+     * Routes a music_* [parentId] to the appropriate cache-backed children list.
+     *
+     * **No blocking network calls here.** All data comes from the Room cache
+     * ([musicLibraryRepository]) or the in-memory playlist cache ([cachedMusicPlaylists]).
+     * If the cache is empty, a valid empty list is returned — Auto will show an
+     * empty section rather than an ANR or crash. When background fetches complete
+     * they call [MediaLibrarySession.notifyChildrenChanged] to trigger a refresh.
+     */
+    private suspend fun handleMusicChildren(parentId: String): List<MediaItem> {
+        DebugLogger.log("handleMusicChildren() parentId=$parentId", AUTO)
+        return when {
+            parentId == MusicAutoMediaMapper.MUSIC_ROOT_ID ->
+                MusicAutoMediaMapper.musicRootChildren()
+
+            parentId == MusicAutoMediaMapper.MUSIC_ARTISTS_ID -> {
+                val artists = musicLibraryRepository.cachedArtists()
+                DebugLogger.log("handleMusicChildren() ARTISTS: ${artists.size} cached", AUTO)
+                MusicAutoMediaMapper.artistsItems(artists, ::coverArtUri)
+            }
+
+            parentId == MusicAutoMediaMapper.MUSIC_ALBUMS_ID -> {
+                DebugLogger.log("handleMusicChildren() ALBUMS: ${cachedMusicAlbums.size} cached", AUTO)
+                MusicAutoMediaMapper.albumsItems(cachedMusicAlbums.toList(), ::coverArtUri)
+            }
+
+            parentId == MusicAutoMediaMapper.MUSIC_SONGS_ID -> {
+                DebugLogger.log("handleMusicChildren() SONGS: ${cachedRandomSongs.size} cached", AUTO)
+                MusicAutoMediaMapper.tracksItems(cachedRandomSongs.toList(), ::coverArtUri)
+            }
+
+            parentId == MusicAutoMediaMapper.MUSIC_PLAYLISTS_ID -> {
+                DebugLogger.log("handleMusicChildren() PLAYLISTS: ${cachedMusicPlaylists.size} cached", AUTO)
+                MusicAutoMediaMapper.playlistsItems(cachedMusicPlaylists.toList(), ::coverArtUri)
+            }
+
+            parentId.startsWith(MusicAutoMediaMapper.MUSIC_ARTIST_PREFIX) -> {
+                val artistId = MusicAutoMediaMapper.artistIdFrom(parentId)
+                val albums = musicLibraryRepository.cachedAlbumsForArtist(artistId)
+                DebugLogger.log("handleMusicChildren() ARTIST=$artistId: ${albums.size} albums cached", AUTO)
+                MusicAutoMediaMapper.albumsItems(albums, ::coverArtUri)
+            }
+
+            parentId.startsWith(MusicAutoMediaMapper.MUSIC_ALBUM_PREFIX) -> {
+                val albumId = MusicAutoMediaMapper.albumIdFrom(parentId)
+                val tracks = musicLibraryRepository.cachedTracksForAlbum(albumId)
+                DebugLogger.log("handleMusicChildren() ALBUM=$albumId: ${tracks.size} tracks cached", AUTO)
+                MusicAutoMediaMapper.tracksItems(tracks, ::coverArtUri)
+            }
+
+            parentId.startsWith(MusicAutoMediaMapper.MUSIC_PLAYLIST_PREFIX) -> {
+                val playlistId = MusicAutoMediaMapper.playlistIdFrom(parentId)
+                val cached = cachedMusicPlaylistTracks[playlistId]
+                DebugLogger.log("handleMusicChildren() PLAYLIST=$playlistId: ${cached?.size ?: "uncached"}", AUTO)
+                if (cached != null) {
+                    MusicAutoMediaMapper.tracksItems(cached, ::coverArtUri)
+                } else {
+                    // Cache miss: fire background fetch and return empty now
+                    val api = subsonicApi
+                    if (api != null) {
+                        serviceScope.launch {
+                            try {
+                                val (_, tracks) = api.getPlaylist(playlistId)
+                                cachedMusicPlaylistTracks[playlistId] = tracks
+                                val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
+                                controllers.forEach { controller ->
+                                    mediaLibrarySession?.notifyChildrenChanged(
+                                        controller, parentId, tracks.size, null,
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                DebugLogger.log("Music playlist track fetch failed [$playlistId]: ${e.message}", AUTO)
+                            }
+                        }
+                    }
+                    emptyList()
+                }
+            }
+
+            else -> emptyList()
+        }
+    }
+
+    /**
+     * Resolves and plays a tapped `music_track_*` [item] (baw.7.1 — "tapping a
+     * track sets the queue from its context and plays", iOS parity). The queue
+     * is built from [lastBrowsedParentId] — the browse node the user was inside
+     * when they tapped (album / playlist / the Songs root) — mirroring
+     * [channelListForContext] for the IPTV path. Falls back to a single-track
+     * queue when the context can't be resolved (e.g. cold navigation before the
+     * relevant cache is populated).
+     */
+    private suspend fun handleMusicTrackTap(item: MediaItem): MediaItem {
+        val trackId = MusicAutoMediaMapper.trackIdFrom(item.mediaId)
+        DebugLogger.log("handleMusicTrackTap() trackId=$trackId, lastBrowsedParentId=$lastBrowsedParentId", AUTO)
+
+        val (contextTracks, albumTitle) = when {
+            lastBrowsedParentId?.startsWith(MusicAutoMediaMapper.MUSIC_ALBUM_PREFIX) == true -> {
+                val albumId = MusicAutoMediaMapper.albumIdFrom(lastBrowsedParentId!!)
+                musicLibraryRepository.cachedTracksForAlbum(albumId) to
+                    musicLibraryRepository.cachedAlbum(albumId)?.title
+            }
+            lastBrowsedParentId?.startsWith(MusicAutoMediaMapper.MUSIC_PLAYLIST_PREFIX) == true -> {
+                val playlistId = MusicAutoMediaMapper.playlistIdFrom(lastBrowsedParentId!!)
+                (cachedMusicPlaylistTracks[playlistId] ?: emptyList()) to
+                    cachedMusicPlaylists.find { it.id == playlistId }?.name
+            }
+            lastBrowsedParentId == MusicAutoMediaMapper.MUSIC_SONGS_ID ->
+                cachedRandomSongs.toList() to "Songs"
+            else -> emptyList<Track>() to null
+        }
+
+        // Fallback: context lost or cache empty — queue just the tapped track.
+        val queueTracks = contextTracks.ifEmpty {
+            musicLibraryRepository.cachedTrack(trackId)?.let { listOf(it) } ?: emptyList()
+        }
+        val api = resolveSubsonicApiNow()
+        if (api == null || queueTracks.isEmpty()) {
+            DebugLogger.log("handleMusicTrackTap() WARN: no Subsonic api or empty queue for trackId=$trackId", AUTO)
+            return item
+        }
+        val startIndex = queueTracks.indexOfFirst { it.id == trackId }.coerceAtLeast(0)
+        musicPlaybackCoordinator.playAlbum(queueTracks, startIndex, api, albumTitle)
+
+        val track = queueTracks.getOrNull(startIndex)
+        return item.buildUpon()
+            .setUri(api.streamUrl(trackId)?.toString())
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(track?.title)
+                    .setArtist(track?.artist)
+                    .setAlbumTitle(albumTitle)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                    .setIsPlayable(true)
+                    .apply { track?.coverArt?.let { covId -> coverArtUri(covId)?.let { setArtworkUri(it) } } }
+                    .build()
+            )
+            .build()
+    }
+
+    /**
+     * Fires a one-shot background fetch into [cache], swaps it in on success, and
+     * fires [MediaLibrarySession.notifyChildrenChanged] for [mediaId] so Auto
+     * refreshes the browse node once real data is available. Failures are logged
+     * and otherwise swallowed — the node just stays empty (baw.7.1).
+     */
+    private fun <T> CoroutineScope.prefetchMusicList(
+        mediaId: String,
+        cache: MutableList<T>,
+        label: String,
+        fetch: suspend () -> List<T>,
+    ) {
+        launch {
+            try {
+                val items = fetch()
+                cache.clear()
+                cache.addAll(items)
+                DebugLogger.log("Music $label cache updated: ${items.size} items", AUTO)
+                val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
+                controllers.forEach { controller ->
+                    mediaLibrarySession?.notifyChildrenChanged(controller, mediaId, items.size, null)
+                }
+            } catch (e: Exception) {
+                DebugLogger.log("Music $label pre-fetch failed: ${e.message}", AUTO)
+            }
+        }
+    }
+
+    /**
+     * Resolves a Subsonic cover-art ID to an authenticated artwork [Uri] for the
+     * currently-configured account, or null when no Subsonic account is active
+     * (baw.7.1 — cover art thumbnails on browse items). The Subsonic auth token
+     * is embedded in the URL's query string, so no special HTTP headers are
+     * needed for Auto's image loader to fetch it.
+     */
+    private fun coverArtUri(coverArtId: String): Uri? =
+        subsonicApi?.getCoverArtUrl(coverArtId)?.let { Uri.parse(it.toString()) }
+
+    /**
+     * Resolves a [NavidromeApi] for the currently-configured Subsonic account
+     * by reading [AccountManager.accounts] synchronously. Returns null when no
+     * Subsonic account is configured.
+     *
+     * Used in [onAddMediaItems] to play a music track without relying on the
+     * [subsonicApi] field which may lag behind the first accounts emission.
+     */
+    private fun resolveSubsonicApiNow(): NavidromeApi? {
+        val subsonic = accountManager.accounts.value
+            .filter { it.isEnabled }
+            .firstNotNullOfOrNull { it.type as? AccountType.Subsonic }
+        return subsonic?.let { s ->
+            subsonicApi ?: navidromeApiFactory.create(s.host, s.username, s.password).also { subsonicApi = it }
         }
     }
 

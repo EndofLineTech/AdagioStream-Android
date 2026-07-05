@@ -198,6 +198,22 @@ class NavidromeApi(
             ?: emptyList()
     }
 
+    /**
+     * Fetches a random sample of songs from `getRandomSongs.view` (baw.7.1 Auto
+     * "Songs" root category — iOS parity: random 100).
+     *
+     * @param size  Maximum number of songs to return; default 100.
+     */
+    suspend fun getRandomSongs(size: Int = 100): List<Track> {
+        val params = mapOf("size" to size.toString())
+        val url = buildUrl("getRandomSongs", params)
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/getRandomSongs.view")
+        val now = nowEpochSeconds()
+        val payload = fetchAndDecode(url, GetRandomSongsPayload.serializer())
+        return payload.response.randomSongs?.songs?.map { it.toRecord(updatedAt = now) }
+            ?: emptyList()
+    }
+
     // -------------------------------------------------------------------------
     // Search (baw.4.1)
     // -------------------------------------------------------------------------

@@ -150,6 +150,30 @@ class MusicLibraryRepository @Inject constructor(
 
     suspend fun cachedArtists(): List<Artist> = libraryDao.getArtists().map { it.toRecord() }
 
+    /** All cached albums, sorted by title (baw.7.1 Auto browse). */
+    suspend fun cachedAlbums(): List<Album> = libraryDao.getAlbums().map { it.toRecord() }
+
+    /** Cached albums for a given artist (baw.7.1 Auto browse: music_artist_* → album list). */
+    suspend fun cachedAlbumsForArtist(artistId: String): List<Album> =
+        libraryDao.getAlbumsForArtist(artistId).map { it.toRecord() }
+
+    /** Cached tracks for a given album, ordered by disc+track number (baw.7.1 Auto browse). */
+    suspend fun cachedTracksForAlbum(albumId: String): List<Track> =
+        libraryDao.getTracksForAlbum(albumId).map { it.toRecord() }
+
+    /**
+     * Looks up a single cached track by ID, or null when not in cache (baw.7.1
+     * Auto onAddMediaItems: resolves the tapped track before queueing the album).
+     */
+    suspend fun cachedTrack(trackId: String): Track? = libraryDao.getTrack(trackId)?.toRecord()
+
+    /**
+     * Looks up a single cached album by ID, or null when not in cache (baw.7.1
+     * Auto onAddMediaItems: resolves the album title for the now-playing metadata
+     * when a track is tapped from an album's track list).
+     */
+    suspend fun cachedAlbum(albumId: String): Album? = libraryDao.getAlbum(albumId)?.toRecord()
+
     /** The offline library: tracks whose download is completed. */
     suspend fun downloadedTracks(): List<Track> =
         libraryDao.getDownloadedTracks().map { it.toRecord() }

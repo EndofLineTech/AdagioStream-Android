@@ -398,6 +398,52 @@ class NavidromeApiBrowseTest {
     }
 
     // -------------------------------------------------------------------------
+    // getRandomSongs (baw.7.1 Auto "Songs" root category)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `getRandomSongs returns tracks`() = runTest {
+        server.enqueue(mockOk(GET_RANDOM_SONGS_FIXTURE))
+
+        val tracks = api.getRandomSongs()
+
+        assertEquals(2, tracks.size)
+        val titles = tracks.map { it.title }
+        assertTrue(titles.contains("Creep"))
+        assertTrue(titles.contains("Karma Police"))
+    }
+
+    @Test
+    fun `getRandomSongs request sends size param, default 100`() = runTest {
+        server.enqueue(mockOk(GET_RANDOM_SONGS_FIXTURE))
+
+        api.getRandomSongs()
+
+        val request = server.takeRequest()
+        assertEquals("/rest/getRandomSongs.view", request.url.encodedPath)
+        assertEquals("100", request.url.queryParameter("size"))
+    }
+
+    @Test
+    fun `getRandomSongs request sends custom size param`() = runTest {
+        server.enqueue(mockOk(GET_RANDOM_SONGS_FIXTURE))
+
+        api.getRandomSongs(size = 25)
+
+        val request = server.takeRequest()
+        assertEquals("25", request.url.queryParameter("size"))
+    }
+
+    @Test
+    fun `getRandomSongs returns empty list when randomSongs absent`() = runTest {
+        server.enqueue(mockOk("""{"subsonic-response":{"status":"ok","version":"1.16.1"}}"""))
+
+        val tracks = api.getRandomSongs()
+
+        assertTrue(tracks.isEmpty())
+    }
+
+    // -------------------------------------------------------------------------
     // getCoverArtUrl
     // -------------------------------------------------------------------------
 
@@ -587,6 +633,21 @@ class NavidromeApiBrowseTest {
                 "status": "ok",
                 "version": "1.16.1",
                 "songsByGenre": {
+                  "song": [
+                    {"id": "t10", "albumId": "al10", "artistId": "ar10", "title": "Creep",        "track": 1, "duration": 238},
+                    {"id": "t11", "albumId": "al11", "artistId": "ar11", "title": "Karma Police", "track": 3, "duration": 261}
+                  ]
+                }
+              }
+            }
+        """
+
+        private const val GET_RANDOM_SONGS_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "randomSongs": {
                   "song": [
                     {"id": "t10", "albumId": "al10", "artistId": "ar10", "title": "Creep",        "track": 1, "duration": 238},
                     {"id": "t11", "albumId": "al11", "artistId": "ar11", "title": "Karma Police", "track": 3, "duration": 261}

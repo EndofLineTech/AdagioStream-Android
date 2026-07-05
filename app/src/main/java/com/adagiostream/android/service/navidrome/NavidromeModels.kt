@@ -382,6 +382,24 @@ data class GetSongsByGenrePayload(
     )
 }
 
+/** Envelope for `getRandomSongs.view` (baw.7.1 Auto "Songs" root category). */
+@Serializable
+data class GetRandomSongsPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val randomSongs: SongsList? = null,
+    )
+
+    @Serializable
+    data class SongsList(
+        @SerialName("song") val songs: List<SubsonicTrackDto> = emptyList(),
+    )
+}
+
 // ----------------------------------------------------------------------------
 // DTO layer — handles Subsonic JSON quirks before producing domain records
 // ----------------------------------------------------------------------------

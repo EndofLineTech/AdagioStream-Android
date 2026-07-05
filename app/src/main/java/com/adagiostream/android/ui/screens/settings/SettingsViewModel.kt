@@ -7,6 +7,7 @@ import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.AppearanceMode
 import com.adagiostream.android.model.ArtworkDisplayMode
+import com.adagiostream.android.model.AutoSourceOrder
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
@@ -55,6 +56,12 @@ class SettingsViewModel @Inject constructor(
     val accountCount: StateFlow<Int> = accountManager.accounts
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    /** Whether a Subsonic/Navidrome account is configured (baw.7.1) — gates the
+     * Android Auto browse-order setting, which is meaningless without one. */
+    val hasSubsonicAccount: StateFlow<Boolean> = accountManager.accounts
+        .map { accounts -> accounts.any { it.isEnabled && it.type is AccountType.Subsonic } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val channelCount: StateFlow<Int> = accountManager.channels
         .map { it.size }
@@ -167,6 +174,12 @@ class SettingsViewModel @Inject constructor(
      */
     fun updateMusicTabEnabled(enabled: Boolean) {
         _settings.value = _settings.value.copy(musicTabEnabled = enabled)
+        save()
+    }
+
+    /** Android Auto browse-root section order (baw.7.1), Subsonic-only setting. */
+    fun updateAutoSourceOrder(order: AutoSourceOrder) {
+        _settings.value = _settings.value.copy(autoSourceOrder = order)
         save()
     }
 

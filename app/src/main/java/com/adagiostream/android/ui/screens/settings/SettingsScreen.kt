@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import com.adagiostream.android.BuildConfig
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.AutoSourceOrder
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.Channel
@@ -773,6 +774,7 @@ private fun FooterText(text: String) {
 internal fun DebugLogsSection(viewModel: SettingsViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val logSize by viewModel.debugLogSize.collectAsStateWithLifecycle()
+    val hasSubsonicAccount by viewModel.hasSubsonicAccount.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showShareLogDialog by remember { mutableStateOf(false) }
 
@@ -813,6 +815,31 @@ internal fun DebugLogsSection(viewModel: SettingsViewModel) {
         }
     }
     Spacer(modifier = Modifier.height(16.dp))
+
+    // ---- Android Auto Browse Order (baw.7.1) — only meaningful with a Subsonic account ----
+    if (hasSubsonicAccount) {
+        Text(
+            text = "Android Auto Browse Order",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            AutoSourceOrder.entries.forEachIndexed { index, order ->
+                SegmentedButton(
+                    selected = settings.autoSourceOrder == order,
+                    onClick = { viewModel.updateAutoSourceOrder(order) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = AutoSourceOrder.entries.size,
+                    ),
+                ) {
+                    Text(text = order.displayName, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        FooterText("Choose whether Channels or Music appears first in the Android Auto browse tree.")
+        Spacer(modifier = Modifier.height(16.dp))
+    }
 
     // ---- Debug Logs ----
     Text(
