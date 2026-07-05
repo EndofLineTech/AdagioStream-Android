@@ -17,8 +17,15 @@ interface LibraryTrackPlayer {
      * auto-advance and exposes seek/duration for the now-playing surface).
      *
      * Implementations stop any current radio/library playback first.
+     *
+     * @param startPositionMs when > 0, playback starts at this offset instead of
+     *   the beginning (baw.10 resume-at-position). Implementations should apply
+     *   this at open time (e.g. a VLC `start-time` media option) rather than
+     *   seeking after playback starts, so there is no audible blip from the
+     *   track's intro before the seek lands (baw.11 — the blip iOS had to mute
+     *   around doesn't exist here as long as the offset is structural).
      */
-    fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library)
+    fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library, startPositionMs: Long = 0L)
 
     /** Stops playback entirely (queue exhausted with no repeat). */
     fun stop()

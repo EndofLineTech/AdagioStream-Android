@@ -30,7 +30,12 @@ class PersistenceService(
         private const val GCM_IV_LENGTH = 12
     }
 
-    private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    // ponytail: lazy, not eager — AndroidKeyStore is only needed by the
+    // encrypted-accounts path (encrypt/decrypt below). Eager init made this
+    // whole class impossible to construct under Robolectric (no AndroidKeyStore
+    // provider) even for callers that never touch accounts, e.g. last-played
+    // persistence (baw.10). Deferring is behavior-identical on a real device.
+    private val keyStore: KeyStore by lazy { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } }
 
     private fun getOrCreateKey(): SecretKey {
         keyStore.getEntry(KEYSTORE_ALIAS, null)?.let { entry ->
@@ -203,13 +208,25 @@ class PersistenceService(
     private val lastPlayedFile: File
         get() = File(context.filesDir, "last_played.txt")
 
-    suspend fun saveLastPlayed(channelId: String) = mutex.withLock {
-        lastPlayedFile.writeText(channelId)
+    suspend fun saveLastPlayed(lastPlayed: LastPlayed) = mutex.withLock {
+        lastPlayedFile.writeText(json.encodeToString(lastPlayed))
     }
 
-    suspend fun loadLastPlayed(): String? = mutex.withLock {
+    /**
+     * Loads the last-played entry (baw.10). Pre-baw.10 files store a bare
+     * channel-id string (no JSON) — if decoding as [LastPlayed] fails, the raw
+     * text is treated as a legacy channel id rather than discarded.
+     */
+    suspend fun loadLastPlayed(): LastPlayed? = mutex.withLock {
         try {
-            if (lastPlayedFile.exists()) lastPlayedFile.readText().ifBlank { null } else null
+            if (!lastPlayedFile.exists()) return@withLock null
+            val text = lastPlayedFile.readText()
+            if (text.isBlank()) return@withLock null
+            try {
+                json.decodeFromString<LastPlayed>(text)
+            } catch (_: Exception) {
+                LastPlayed.Channel(text) // legacy plain-text format
+            }
         } catch (_: Exception) {
             null
         }
