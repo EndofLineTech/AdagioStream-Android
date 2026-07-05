@@ -520,6 +520,17 @@ class AccountManager @Inject constructor(
         trackMetadataJob = null
     }
 
+    /**
+     * The track that was playing on [channel] at [atEpochMillis] — used during
+     * time-shift catch-up so the display track matches the buffered audio
+     * instead of the live now-playing track. Null if the channel has no XM
+     * deeplink or no history covers that moment.
+     */
+    fun historicalTrackMetadata(channel: Channel, atEpochMillis: Long): TrackMetadata? {
+        val deeplink = xmPlaylistApi.deeplinkForChannel(channel.id) ?: return null
+        return xmPlaylistApi.trackAt(deeplink, atEpochMillis)
+    }
+
     private fun rebuildGroups() {
         val allGrouped = when (groupingMode) {
             ChannelGroupingMode.ALL_GROUPS -> _channels.value.groupBy { it.group }

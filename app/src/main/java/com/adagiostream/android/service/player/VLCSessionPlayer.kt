@@ -104,8 +104,16 @@ class VLCSessionPlayer(
                         }
                     }
 
-                    // Resolve dynamic artist text: SXM track > ESPN game > EPG program > channel name
-                    val trackMeta = accountManager?.trackMetadata?.value?.get(channel.name)
+                    // Resolve dynamic artist text: SXM track > ESPN game > EPG program > channel name.
+                    // During time-shift catch-up, show the track that was actually playing at the
+                    // buffered position (now - timeShiftMs) instead of the live now-playing track.
+                    val trackMeta = if (state is PlaybackState.CatchingUp) {
+                        val atMillis = System.currentTimeMillis() - vlcWrapper.timeShiftMs.value
+                        accountManager?.historicalTrackMetadata(channel, atMillis)
+                            ?: accountManager?.trackMetadata?.value?.get(channel.name)
+                    } else {
+                        accountManager?.trackMetadata?.value?.get(channel.name)
+                    }
                     val espnGame = espnScoreService?.gamesByChannel?.value?.get(channel.id)
 
                     val displayTitle: String
