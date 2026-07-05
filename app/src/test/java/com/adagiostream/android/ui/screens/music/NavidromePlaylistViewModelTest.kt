@@ -427,6 +427,51 @@ class NavidromePlaylistViewModelTest {
         assertEquals(before, viewModel.playlistTracks.value)
     }
 
+    @Test
+    fun `removeTrackAt ignores a second call while a removal is in flight`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(PLAYLIST_WITH_DUPLICATE_FIXTURE))
+
+        val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
+            id = "p1", name = "My Mix", songCount = 3,
+        )
+        viewModel.playlistDetailState.test {
+            assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadPlaylistDetail(fakePlaylist)
+            awaitItem() // Loading
+            assertEquals(NavidromePlaylistViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(3, viewModel.playlistTracks.value.size)
+
+        // Only ONE updatePlaylist + refresh pair queued: if the in-flight guard
+        // didn't fire, the second removeTrackAt() below would send a SECOND
+        // updatePlaylist request that finds no response queued and times out.
+        server.enqueue(statusOk()) // updatePlaylist for the first (and only) removal
+        server.enqueue(mockOk(PLAYLIST_AFTER_REMOVE_DUPLICATE_FIXTURE)) // refresh
+
+        assertTrue(!viewModel.isRemovingTrack.value)
+        viewModel.removeTrackAt(fakePlaylist, index = 0)
+        // The flag flips synchronously, before the network call suspends.
+        assertTrue(viewModel.isRemovingTrack.value)
+
+        // Second call arrives while the first is still in flight — must be
+        // ignored, even though index 0 is still in range of the
+        // (optimistically-shrunk) local list.
+        viewModel.removeTrackAt(fakePlaylist, index = 0)
+
+        // Wait for the in-flight removal to finish.
+        viewModel.isRemovingTrack.test {
+            var value = awaitItem()
+            while (value) value = awaitItem()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // getPlaylist (initial load) + updatePlaylist + getPlaylist (refresh) = 3 total.
+        assertEquals(3, server.requestCount)
+        assertEquals(2, viewModel.playlistTracks.value.size)
+    }
+
     // -------------------------------------------------------------------------
     // createPlaylist (baw.4.3)
     // -------------------------------------------------------------------------

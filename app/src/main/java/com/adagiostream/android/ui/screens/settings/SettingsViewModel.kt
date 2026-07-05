@@ -314,7 +314,18 @@ class SettingsViewModel @Inject constructor(
 
     private fun save() {
         viewModelScope.launch {
-            persistenceService.saveSettings(_settings.value)
+            // Read-modify-write (baw.16): shuffleEnabled/repeatMode are owned and
+            // persisted by MusicPlaybackCoordinator (baw.9.4). This VM's _settings
+            // is a snapshot from construction time, so whole-object saving it
+            // would clobber playback state persisted since. Preserve the
+            // coordinator-owned fields from disk; save everything else from here.
+            val persisted = persistenceService.loadSettings()
+            persistenceService.saveSettings(
+                _settings.value.copy(
+                    shuffleEnabled = persisted.shuffleEnabled,
+                    repeatMode = persisted.repeatMode,
+                ),
+            )
         }
     }
 }

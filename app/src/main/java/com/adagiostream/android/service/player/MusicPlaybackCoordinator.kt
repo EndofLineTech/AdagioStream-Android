@@ -79,12 +79,19 @@ class MusicPlaybackCoordinator @Inject constructor(
 
     private val _nowPlayingArtworkUrl = MutableStateFlow<String?>(null)
     private val _nowPlayingAlbumTitle = MutableStateFlow<String?>(null)
+    private val _shuffleEnabledFlow = MutableStateFlow(queue.shuffleEnabled)
 
     /** Album title for the current library session, surfaced as MediaSession album metadata (baw.3.4). */
     val nowPlayingAlbumTitle: StateFlow<String?> = _nowPlayingAlbumTitle.asStateFlow()
 
     /** Whether the underlying queue is shuffling — exposed through the session (baw.3.5). */
     val shuffleEnabled: Boolean get() = queue.shuffleEnabled
+
+    /**
+     * Reactive shuffle state for the UI (baw.16): the Up Next sheet hides its
+     * reorder handles while shuffle is on (see [moveQueueItem]).
+     */
+    val shuffleEnabledFlow: StateFlow<Boolean> = _shuffleEnabledFlow.asStateFlow()
 
     /** The underlying queue's repeat mode — exposed through the session (baw.3.5). */
     val repeatMode: RepeatMode get() = queue.repeatMode
@@ -151,6 +158,7 @@ class MusicPlaybackCoordinator @Inject constructor(
     /** Enables/disables shuffle on the underlying queue (baw.3.5) and persists it (baw.9.4). */
     fun setShuffle(enabled: Boolean) {
         queue.setShuffle(enabled)
+        _shuffleEnabledFlow.value = queue.shuffleEnabled
         persistPlaybackSettings()
     }
 
@@ -181,12 +189,20 @@ class MusicPlaybackCoordinator @Inject constructor(
     fun currentTrack(): Track? = queue.current()
 
     /**
-     * Reorders the "Up Next" queue (baw.9.3) — see [MusicQueueManager.moveItem]
-     * for the shuffle-interaction semantics. Playback of the current track is
+     * Reorders the "Up Next" queue (baw.9.3). Playback of the current track is
      * never restarted; only the player's queue snapshot is refreshed so the Up
      * Next screen / Android Auto immediately reflect the new order.
+     *
+     * INDEX DOMAIN (baw.16): [from]/[to] are CANONICAL queue positions — the
+     * order the Up Next sheet displays ([PlaybackSource.Library.queue]). While
+     * shuffle is on, [MusicQueueManager.moveItem] operates on the shuffle play
+     * order instead, so a canonical-domain move would land on the wrong track;
+     * reordering is therefore a no-op under shuffle, and the sheet hides its
+     * drag handles (Spotify-style). Tap-to-jump ([playIndex]) stays canonical
+     * in both modes and is unaffected.
      */
     fun moveQueueItem(from: Int, to: Int) {
+        if (queue.shuffleEnabled) return // ponytail: reorder disabled under shuffle; project play order into the sheet if PO ever wants it
         queue.moveItem(from, to)
         if (queue.isEmpty) return
         player.updateLibrarySource(PlaybackSource.Library(queue.queue, queue.currentIndex))

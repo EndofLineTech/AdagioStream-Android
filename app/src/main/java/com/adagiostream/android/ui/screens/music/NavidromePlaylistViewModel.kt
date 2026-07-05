@@ -294,6 +294,17 @@ class NavidromePlaylistViewModel @Inject constructor(
         }
     }
 
+    private val _isRemovingTrack = MutableStateFlow(false)
+
+    /**
+     * True while a [removeTrackAt] call is in flight (baw.16). The removal touches
+     * every row's index (a second concurrent removal would race against the
+     * server refresh and could target the wrong row once indices shift), so the
+     * UI disables the "Remove from Playlist" action for the whole list until this
+     * one completes.
+     */
+    val isRemovingTrack: StateFlow<Boolean> = _isRemovingTrack.asStateFlow()
+
     /**
      * Removes the track at [index] in the currently-displayed [playlistTracks] from
      * [playlist] (baw.9.2).
@@ -309,12 +320,18 @@ class NavidromePlaylistViewModel @Inject constructor(
      * succeeds — refreshes the playlist from the server so the client converges
      * on canonical state (e.g. if another client edited the playlist concurrently).
      * On API failure the optimistic removal is reverted.
+     *
+     * Ignores calls while a removal is already in flight ([isRemovingTrack]) —
+     * without this, a fast double-tap could fire a second `updatePlaylist` whose
+     * index no longer matches the (already-shifted) server-side list.
      */
     fun removeTrackAt(playlist: NavidromePlaylist, index: Int) {
         val currentApi = _api.value ?: return
+        if (_isRemovingTrack.value) return
         val oldTracks = _playlistTracks.value
         if (index !in oldTracks.indices) return
 
+        _isRemovingTrack.value = true
         _playlistTracks.value = oldTracks.toMutableList().apply { removeAt(index) }
 
         viewModelScope.launch {
@@ -328,6 +345,8 @@ class NavidromePlaylistViewModel @Inject constructor(
             } catch (_: Exception) {
                 // Revert optimistic removal.
                 _playlistTracks.value = oldTracks
+            } finally {
+                _isRemovingTrack.value = false
             }
         }
     }

@@ -58,6 +58,14 @@ class NowPlayingViewModel @Inject constructor(
     /** Reorders the library queue — see [MusicPlaybackCoordinator.moveQueueItem] (baw.9.3). */
     fun moveQueueItem(from: Int, to: Int) = musicPlaybackCoordinator.moveQueueItem(from, to)
 
+    /**
+     * Whether shuffle is on (baw.16). The Up Next sheet shows the CANONICAL
+     * queue, so drag-to-reorder is hidden while shuffling — canonical positions
+     * don't map onto the shuffle play order (see [MusicPlaybackCoordinator.moveQueueItem]).
+     * Tap-to-jump stays canonical in both modes.
+     */
+    val isShuffleEnabled: StateFlow<Boolean> = musicPlaybackCoordinator.shuffleEnabledFlow
+
     /** The active library track, or null when not playing library content (baw.9.3). */
     val currentLibraryTrack: StateFlow<Track?> = playbackSource
         .map { (it as? PlaybackSource.Library)?.currentTrack }

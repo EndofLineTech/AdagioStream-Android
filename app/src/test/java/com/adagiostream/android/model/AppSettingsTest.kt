@@ -1,6 +1,9 @@
 package com.adagiostream.android.model
 
+import com.adagiostream.android.service.player.RepeatMode
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppSettingsTest {
@@ -48,5 +51,35 @@ class AppSettingsTest {
         TextSizeMode.entries.forEach { mode ->
             assert(mode.displayName.isNotBlank()) { "${mode.name} has blank displayName" }
         }
+    }
+
+    // ---- shuffle/repeat persistence round-trip (baw.9.4 / baw.16) -----------
+
+    @Test
+    fun `AppSettings round-trips shuffleEnabled and repeatMode through JSON`() {
+        val json = Json { encodeDefaults = true }
+        val settings = AppSettings(shuffleEnabled = true, repeatMode = RepeatMode.All)
+
+        val encoded = json.encodeToString(AppSettings.serializer(), settings)
+        val decoded = json.decodeFromString(AppSettings.serializer(), encoded)
+
+        assertEquals(settings, decoded)
+        // Pin the on-disk key/value shape — a silent rename here would strand
+        // every user's persisted shuffle/repeat state on the next app read.
+        assertTrue(
+            "expected shuffleEnabled:true in persisted JSON but was: $encoded",
+            encoded.contains("\"shuffleEnabled\":true"),
+        )
+        assertTrue(
+            "expected repeatMode:All in persisted JSON but was: $encoded",
+            encoded.contains("\"repeatMode\":\"All\""),
+        )
+    }
+
+    @Test
+    fun `AppSettings defaults shuffleEnabled false and repeatMode Off`() {
+        val defaults = AppSettings()
+        assertEquals(false, defaults.shuffleEnabled)
+        assertEquals(RepeatMode.Off, defaults.repeatMode)
     }
 }

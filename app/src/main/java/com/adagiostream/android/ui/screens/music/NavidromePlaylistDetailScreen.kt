@@ -73,6 +73,7 @@ fun NavidromePlaylistDetailScreen(
     val detailState by viewModel.playlistDetailState.collectAsStateWithLifecycle()
     val tracks by viewModel.playlistTracks.collectAsStateWithLifecycle()
     val downloadStates by downloadsViewModel.downloadStates.collectAsStateWithLifecycle()
+    val isRemovingTrack by viewModel.isRemovingTrack.collectAsStateWithLifecycle()
 
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -229,6 +230,10 @@ fun NavidromePlaylistDetailScreen(
                             onRemoveFromPlaylist = {
                                 selectedPlaylist?.let { viewModel.removeTrackAt(it, index) }
                             },
+                            // Disabled while a removal is in flight (baw.16) — indices
+                            // shift once the server call lands, so a second tap before
+                            // it completes could remove the wrong row.
+                            isRemoveEnabled = !isRemovingTrack,
                             onDownloadTap = { state -> downloadsViewModel.onButtonTap(track, state) },
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
@@ -311,6 +316,7 @@ private fun PlaylistTrackRow(
     onClick: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onRemoveFromPlaylist: () -> Unit,
+    isRemoveEnabled: Boolean = true,
     onDownloadTap: (DownloadUiState) -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -375,6 +381,7 @@ private fun PlaylistTrackRow(
                 )
                 DropdownMenuItem(
                     text = { Text("Remove from Playlist", color = MaterialTheme.colorScheme.error) },
+                    enabled = isRemoveEnabled,
                     onClick = {
                         showMenu = false
                         onRemoveFromPlaylist()

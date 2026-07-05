@@ -511,6 +511,13 @@ private fun LibraryNowPlayingSheet(
  * tracks the drag position; the seek only actually fires on release
  * ([androidx.compose.material3.Slider]'s `onValueChangeFinished`), matching
  * standard scrubber UX and avoiding a flood of seeks mid-drag.
+ *
+ * SNAP-BACK GUARD (baw.16): libVLC applies a seek asynchronously, so the poll
+ * right after release can still read the pre-seek position and the slider
+ * visibly jumps backward before catching up. After release, the displayed
+ * position is pinned to the seek target until a poll lands within
+ * [SEEK_SETTLE_TOLERANCE_MS] of it, or [SEEK_SETTLE_TIMEOUT_MS] elapses
+ * (covers a seek that never lands exactly, e.g. keyframe rounding).
  */
 @Composable
 private fun LibrarySeekBar(
@@ -521,10 +528,27 @@ private fun LibrarySeekBar(
     var isDragging by remember { mutableStateOf(false) }
     var dragPositionMs by remember { mutableLongStateOf(0L) }
     var livePositionMs by remember { mutableLongStateOf(viewModel.currentPositionMs()) }
+    var pendingSeekMs by remember { mutableStateOf<Long?>(null) }
+    var pendingSeekDeadline by remember { mutableLongStateOf(0L) }
 
-    LaunchedEffect(isPlaying) {
+    LaunchedEffect(Unit) {
         while (true) {
-            if (!isDragging) livePositionMs = viewModel.currentPositionMs()
+            if (!isDragging) {
+                val polled = viewModel.currentPositionMs()
+                val target = pendingSeekMs
+                livePositionMs = when {
+                    target == null -> polled
+                    kotlin.math.abs(polled - target) <= SEEK_SETTLE_TOLERANCE_MS -> {
+                        pendingSeekMs = null
+                        polled
+                    }
+                    System.currentTimeMillis() >= pendingSeekDeadline -> {
+                        pendingSeekMs = null
+                        polled
+                    }
+                    else -> target
+                }
+            }
             delay(500L)
         }
     }
@@ -542,6 +566,8 @@ private fun LibrarySeekBar(
             onValueChangeFinished = {
                 viewModel.seekTo(dragPositionMs)
                 livePositionMs = dragPositionMs
+                pendingSeekMs = dragPositionMs
+                pendingSeekDeadline = System.currentTimeMillis() + SEEK_SETTLE_TIMEOUT_MS
                 isDragging = false
             },
         )
@@ -562,6 +588,12 @@ private fun LibrarySeekBar(
         }
     }
 }
+
+/** How close a poll must land to the seek target to count as "settled" (baw.16). */
+private const val SEEK_SETTLE_TOLERANCE_MS = 750L
+
+/** Longest we'll pin the display to the seek target before trusting the poll anyway (baw.16). */
+private const val SEEK_SETTLE_TIMEOUT_MS = 1_000L
 
 private fun formatTrackTime(ms: Long): String {
     val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
