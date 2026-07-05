@@ -64,9 +64,9 @@ jobs:
           if [ -z "${notes// /}" ]; then
             notes="Bug fixes and improvements."
           fi
-          printf '%s\n' "$notes" > distribution/whatsnew/whatsnew-en-US.txt
-          echo "--- whatsnew-en-US.txt ---"
-          cat distribution/whatsnew/whatsnew-en-US.txt
+          printf '%s\n' "$notes" > distribution/whatsnew/whatsnew-en-US
+          echo "--- whatsnew-en-US ---"
+          cat distribution/whatsnew/whatsnew-en-US
 
       - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1

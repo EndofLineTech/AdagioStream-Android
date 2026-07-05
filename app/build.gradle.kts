@@ -20,8 +20,8 @@ android {
         applicationId = "com.adagiostream.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 120
-        versionName = "1.0(120)"
+        versionCode = 121
+        versionName = "1.0(121)"
         ndk {
             abiFilters += "arm64-v8a"
         }
