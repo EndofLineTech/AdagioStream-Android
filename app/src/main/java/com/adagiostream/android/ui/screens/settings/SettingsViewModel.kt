@@ -166,14 +166,11 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Toggles the Music tab alpha feature gate (baw.2.6).
-     *
-     * When enabled, the Music tab appears in the bottom nav and the Navidrome
-     * library browse UI is accessible.  Intended for developer/alpha testing
-     * before the feature is promoted to general availability.
+     * Marks the one-time "We Reorganized" tip as seen (beads_adagio-15x.4) so
+     * [MainScreen] stops showing it after the next settings reload.
      */
-    fun updateMusicTabEnabled(enabled: Boolean) {
-        _settings.value = _settings.value.copy(musicTabEnabled = enabled)
+    fun markTabReorgTipSeen() {
+        _settings.value = _settings.value.copy(hasSeenTabReorgTip = true)
         save()
     }
 

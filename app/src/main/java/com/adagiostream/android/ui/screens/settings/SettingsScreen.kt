@@ -806,44 +806,6 @@ internal fun DebugLogsSection(viewModel: SettingsViewModel) {
     val context = LocalContext.current
     var showShareLogDialog by remember { mutableStateOf(false) }
 
-    // ---- Alpha Features ----
-    Text(
-        text = "Alpha Features",
-        style = MaterialTheme.typography.titleMedium,
-    )
-    Spacer(modifier = Modifier.height(8.dp))
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Music Tab (Navidrome)",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Text(
-                    text = "Show Music tab in the bottom navigation bar. Requires a Navidrome/Subsonic account in Settings → Accounts.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = settings.musicTabEnabled,
-                onCheckedChange = { viewModel.updateMusicTabEnabled(it) },
-            )
-        }
-    }
-    Spacer(modifier = Modifier.height(16.dp))
-
     // ---- Android Auto Browse Order (baw.7.1) — only meaningful with a Subsonic account ----
     if (hasSubsonicAccount) {
         Text(

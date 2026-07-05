@@ -21,17 +21,6 @@ data class AppSettings(
     val espnPollingIntervalSeconds: Int = 15,
     val channelGroupingMode: ChannelGroupingMode = ChannelGroupingMode.ALL_GROUPS,
     /**
-     * Alpha feature gate for the Music tab (baw.2.6).
-     *
-     * When `false` (the default), the Music tab is hidden from the bottom
-     * navigation bar and the Navidrome library browse UI is inaccessible.
-     * Set to `true` in Settings → Developer to expose the tab for testing
-     * without shipping an incomplete feature to all users.
-     *
-     * Matches the iOS gate-flip pattern used to promote E1→E3 incrementally.
-     */
-    val musicTabEnabled: Boolean = false,
-    /**
      * Android Auto browse-root ordering when a Subsonic account is configured
      * (baw.7.1, iOS parity: `CarPlaySourceOrder`). Only surfaced in Settings
      * when a Subsonic account exists.
@@ -55,6 +44,16 @@ data class AppSettings(
      * network browse/search requests. Radio/live tabs are unaffected.
      */
     val offlineMode: Boolean = false,
+    /**
+     * One-time "We Reorganized" tip flag (beads_adagio-15x.4).
+     *
+     * `false` until the dialog explaining the Favorites→pinned, Loved→tab and
+     * new Library tab moves has been shown once; then persisted `true` forever.
+     * Note: this can't cheaply distinguish an upgrading user from a fresh
+     * install (both reach `setupCompleted == true` the same way), so the tip
+     * is shown once to everyone — PO-accepted per beads_adagio-15x.4.
+     */
+    val hasSeenTabReorgTip: Boolean = false,
 )
 
 @Serializable

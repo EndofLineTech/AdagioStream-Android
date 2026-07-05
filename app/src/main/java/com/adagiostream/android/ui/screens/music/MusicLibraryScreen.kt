@@ -63,6 +63,7 @@ fun MusicLibraryScreen(
     onAlbumsClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
     onPlaylistsClick: () -> Unit = {},
+    onAddAccountClick: () -> Unit = {},
 ) {
     val api by viewModel.api.collectAsStateWithLifecycle()
     val artistsState by viewModel.artistsState.collectAsStateWithLifecycle()
@@ -103,14 +104,17 @@ fun MusicLibraryScreen(
         }
 
         when {
+            // No account configured takes precedence over the offline banner
+            // (beads_adagio-15x.3) — the Library tab is now always visible, and
+            // without an account there's nothing to browse online or offline.
+            api == null -> NoAccountEmptyState(onAddAccountClick = onAddAccountClick)
+
             // Offline mode replaces the whole browse UI with the downloaded-only
             // list under a persistent banner (baw.12 — mirrors iOS offlineBrowser).
             offlineMode -> OfflineLibrary(
                 tracks = downloadedTracks,
                 onTrackClick = { viewModel.playDownloadedTrack(it) },
             )
-
-            api == null -> NoAccountEmptyState()
 
             artistsState == NavidromeLibraryViewModel.LoadState.Loading ||
                 artistsState == NavidromeLibraryViewModel.LoadState.Idle -> {
@@ -289,8 +293,14 @@ private fun OfflineLibrary(
     }
 }
 
+/**
+ * Shown when no Subsonic/Navidrome account is configured (beads_adagio-15x.3).
+ * The Library tab is always visible now, so this is the first thing most
+ * users see here — the button jumps straight to account setup rather than
+ * making them find Settings → Accounts themselves.
+ */
 @Composable
-private fun NoAccountEmptyState() {
+private fun NoAccountEmptyState(onAddAccountClick: () -> Unit = {}) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
@@ -311,10 +321,13 @@ private fun NoAccountEmptyState() {
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                text = "Add a Navidrome or Subsonic server in Settings → Accounts to browse your music library.",
+                text = "Add a Navidrome or Subsonic server to browse your music library.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Button(onClick = onAddAccountClick) {
+                Text("Add Account")
+            }
         }
     }
 }

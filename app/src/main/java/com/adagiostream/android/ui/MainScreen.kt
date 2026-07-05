@@ -193,6 +193,9 @@ fun MainScreen(
                         onPlaylistsClick = {
                             navController.navigate(Screen.NavidromePlaylistList.route)
                         },
+                        onAddAccountClick = {
+                            navController.navigate(Screen.AddAccount.createRoute())
+                        },
                     )
                 }
                 // Search screen (baw.4.1)
