@@ -11,6 +11,7 @@ import com.adagiostream.android.testutil.MainDispatcherRule
 import com.adagiostream.android.testutil.TestFixtures
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -28,11 +29,12 @@ import org.junit.Test
  * Drives the REAL [MusicQueueManager] → [MusicPlaybackCoordinator] →
  * [NowPlayingViewModel] chain with only [VLCPlayerWrapper] faked (mirrors
  * [NowPlayingViewModelTest]'s `playbackSource` fake, but wires it to a real
- * coordinator instead of a mocked one). A regression that let a canonical-domain
- * drag reach [MusicQueueManager.moveItem] while shuffling would corrupt the
- * canonical queue here — a unit test on [MusicQueueManager] or
- * [MusicPlaybackCoordinator] alone couldn't catch that, since the bug lives in
- * how the ViewModel/UI wire the two together.
+ * coordinator instead of a mocked one). The original bug let a CANONICAL-domain
+ * drag index reach [MusicQueueManager.moveItem], which under shuffle interprets
+ * indices in the SHUFFLE PLAY ORDER — silently permuting the wrong upcoming
+ * tracks (the canonical queue itself was never touched). A unit test on
+ * [MusicQueueManager] or [MusicPlaybackCoordinator] alone couldn't catch that,
+ * since the bug lives in how the ViewModel/UI wire the two together.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class NowPlayingViewModelShuffleSeamTest {
@@ -90,10 +92,15 @@ class NowPlayingViewModelShuffleSeamTest {
         vm.moveQueueItem(from = 0, to = 2)
         advanceUntilIdle()
 
-        // Canonical queue is untouched — a canonical-domain move must not land
-        // on MusicQueueManager.moveItem's shuffle-order domain.
+        // THE discriminating assert: the pre-fix code forwarded the move to
+        // MusicQueueManager.moveItem and then refreshed the player snapshot via
+        // updateLibrarySource; the fixed early-return never reaches the player.
+        // (The canonical-queue asserts below alone are vacuous — the old buggy
+        // path permuted the shuffle play order, never the canonical queue.)
+        verify(exactly = 0) { vlcPlayer.updateLibrarySource(any()) }
+
+        // Canonical queue and the Up Next sheet's view of it stay unchanged.
         assertEquals(tracks, queue.queue)
-        // The Up Next sheet mirrors the canonical queue and must agree.
         assertEquals(tracks, vm.libraryQueue.value)
 
         job.cancel()

@@ -229,6 +229,23 @@ class MusicQueueManagerTest {
     }
 
     @Test
+    fun `moveItem with shuffle off replaces the queue list instance, never mutates in place`() {
+        // CONTRACT (baw.18): AudioPlaybackService persists the queue only when the
+        // PlaybackSource queue List INSTANCE changes (=== identity check). An
+        // in-place mutation here would mean reorders never re-persist, so resume
+        // after process death would silently restore the pre-reorder queue.
+        val tracks = TestFixtures.makeTracks(5)
+        manager.setQueue(tracks, startIndex = 0)
+        val before = manager.queue
+
+        manager.moveItem(from = 4, to = 0)
+
+        assertFalse("moveItem must replace the queue instance", before === manager.queue)
+        assertEquals(tracks, before) // the old instance is untouched
+        assertEquals(tracks[4], manager.queue[0]) // the new instance is reordered
+    }
+
+    @Test
     fun `moveItem keeps the currently playing track active when it moves`() {
         val tracks = TestFixtures.makeTracks(5)
         manager.setQueue(tracks, startIndex = 1) // track-1 is playing
