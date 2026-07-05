@@ -1,5 +1,6 @@
 package com.adagiostream.android.ui.screens.music
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -65,10 +67,13 @@ fun MusicLibraryScreen(
     val api by viewModel.api.collectAsStateWithLifecycle()
     val artistsState by viewModel.artistsState.collectAsStateWithLifecycle()
     val artists by viewModel.artists.collectAsStateWithLifecycle()
+    val offlineMode by viewModel.offlineMode.collectAsStateWithLifecycle()
+    val downloadedTracks by viewModel.downloadedTracks.collectAsStateWithLifecycle()
 
-    // Load artists on first appearance when an API is available.
-    LaunchedEffect(api) {
-        if (api != null && artistsState == NavidromeLibraryViewModel.LoadState.Idle) {
+    // Load artists on first appearance when an API is available (suppressed in
+    // offline mode — baw.12).
+    LaunchedEffect(api, offlineMode) {
+        if (!offlineMode && api != null && artistsState == NavidromeLibraryViewModel.LoadState.Idle) {
             viewModel.loadArtists()
         }
     }
@@ -85,7 +90,8 @@ fun MusicLibraryScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.weight(1f),
             )
-            if (api != null) {
+            // Search is network-only — hidden in offline mode (baw.12).
+            if (api != null && !offlineMode) {
                 IconButton(onClick = onSearchClick) {
                     Icon(
                         imageVector = Icons.Default.Search,
@@ -97,6 +103,13 @@ fun MusicLibraryScreen(
         }
 
         when {
+            // Offline mode replaces the whole browse UI with the downloaded-only
+            // list under a persistent banner (baw.12 — mirrors iOS offlineBrowser).
+            offlineMode -> OfflineLibrary(
+                tracks = downloadedTracks,
+                onTrackClick = { viewModel.playDownloadedTrack(it) },
+            )
+
             api == null -> NoAccountEmptyState()
 
             artistsState == NavidromeLibraryViewModel.LoadState.Loading ||
@@ -174,6 +187,103 @@ fun MusicLibraryScreen(
                     onAlbumsClick = onAlbumsClick,
                     onPlaylistsClick = onPlaylistsClick,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Offline-mode library (baw.12): persistent banner + downloaded-only track list.
+ * Copy mirrors iOS MusicLibraryView's offlineBrowser.
+ */
+@Composable
+private fun OfflineLibrary(
+    tracks: List<com.adagiostream.android.service.navidrome.Track>,
+    onTrackClick: (com.adagiostream.android.service.navidrome.Track) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Persistent banner — not dismissible, matching iOS.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.WifiOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Offline mode — showing downloaded music",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (tracks.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WifiOff,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(48.dp),
+                    )
+                    Text(
+                        text = "No Downloads",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "No downloaded tracks available. Turn off offline mode or download tracks first.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(tracks, key = { it.id }) { track ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = { onTrackClick(track) })
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = track.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            track.artist?.let { artist ->
+                                Text(
+                                    text = artist,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                }
             }
         }
     }

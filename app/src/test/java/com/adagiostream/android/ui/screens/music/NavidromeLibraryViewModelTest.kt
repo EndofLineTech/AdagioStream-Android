@@ -3,14 +3,21 @@ package com.adagiostream.android.ui.screens.music
 import app.cash.turbine.test
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
+import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.service.account.AccountRepository
+import com.adagiostream.android.service.library.MusicLibraryRepository
+import com.adagiostream.android.service.library.db.DownloadEntity
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.LibraryTrackPlayer
 import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import com.adagiostream.android.service.player.MusicQueueManager
 import com.adagiostream.android.service.player.PlaybackSource
 import com.adagiostream.android.testutil.MainDispatcherRule
+import io.mockk.coEvery
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.runTest
@@ -60,6 +67,20 @@ class NavidromeLibraryViewModelTest {
         override val accounts: StateFlow<List<Account>> = fakeAccountsFlow
     }
 
+    // Live settings feed — drives offline mode (baw.12).
+    private val settingsFlow = MutableStateFlow(AppSettings())
+    private val fakePersistenceService = mockk<PersistenceService> {
+        every { settings } returns settingsFlow
+        every { loadSettingsSync() } answers { settingsFlow.value }
+    }
+
+    // Download index feed — drives the offline downloaded-tracks listing (baw.12).
+    private val completedDownloadsFlow = MutableStateFlow<List<DownloadEntity>>(emptyList())
+    private val fakeLibraryRepository = mockk<MusicLibraryRepository> {
+        every { observeCompletedDownloads() } returns completedDownloadsFlow
+        coEvery { downloadedTracks() } returns emptyList()
+    }
+
     @Before
     fun setUp() {
         server = MockWebServer()
@@ -84,7 +105,13 @@ class NavidromeLibraryViewModelTest {
         viewModel = NavidromeLibraryViewModel(
             accountRepository = fakeAccountRepository,
             navidromeApiFactory = factory,
-            musicPlaybackCoordinator = MusicPlaybackCoordinator(MusicQueueManager(), fakeTrackPlayer),
+            musicPlaybackCoordinator = MusicPlaybackCoordinator(
+                MusicQueueManager(),
+                fakeTrackPlayer,
+                persistenceService = fakePersistenceService,
+            ),
+            persistenceService = fakePersistenceService,
+            libraryRepository = fakeLibraryRepository,
         )
     }
 
@@ -254,6 +281,11 @@ class NavidromeLibraryViewModelTest {
             // Second call should be a no-op
             viewModel.loadArtists()
             expectNoEvents() // no new Loading emitted
+
+            // Drain the in-flight request while the test Main dispatcher is still
+            // installed — otherwise its IO→Main resume lands after resetMain()
+            // and fails whichever test happens to run next.
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -630,6 +662,8 @@ class NavidromeLibraryViewModelTest {
             awaitItem() // Loading
             viewModel.loadGenres() // second call — no-op
             expectNoEvents()
+            // Drain the in-flight request (see `loadArtists is no-op while already Loading`).
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -833,6 +867,100 @@ class NavidromeLibraryViewModelTest {
     fun `playGenreTrack is no-op when no Subsonic account configured`() = runTest {
         viewModel.playGenreTrack(com.adagiostream.android.testutil.TestFixtures.makeTrack())
         assertTrue(playedSources.isEmpty())
+    }
+
+    // -------------------------------------------------------------------------
+    // Offline mode (baw.12)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `offline mode suppresses all network browse loads`() = runTest {
+        setSubsonicAccount()
+        settingsFlow.value = AppSettings(offlineMode = true)
+        // If any load slipped through, this response would be consumed.
+        server.enqueue(mockOk(ARTISTS_OK_FIXTURE))
+
+        viewModel.loadArtists()
+        viewModel.loadGenres()
+        viewModel.loadAlbumBrowseList()
+        viewModel.loadAlbums(
+            com.adagiostream.android.service.navidrome.Artist(id = "ar1", name = "X", albumCount = 1, updatedAt = 0),
+        )
+        viewModel.loadTracks(
+            com.adagiostream.android.service.navidrome.Album(id = "al1", artistId = "ar1", title = "Y", updatedAt = 0),
+        )
+        viewModel.loadSongsByGenre(
+            com.adagiostream.android.service.navidrome.SubsonicGenre(name = "Rock", songCount = 1, albumCount = 1),
+        )
+        viewModel.toggleStar(com.adagiostream.android.testutil.TestFixtures.makeTrack())
+
+        assertEquals("no network request may fire in offline mode", 0, server.requestCount)
+        assertEquals(NavidromeLibraryViewModel.LoadState.Idle, viewModel.artistsState.value)
+        assertEquals(NavidromeLibraryViewModel.LoadState.Idle, viewModel.genresState.value)
+        assertEquals(NavidromeLibraryViewModel.LoadState.Idle, viewModel.albumBrowseState.value)
+        assertEquals(NavidromeLibraryViewModel.LoadState.Idle, viewModel.albumsState.value)
+        assertEquals(NavidromeLibraryViewModel.LoadState.Idle, viewModel.tracksState.value)
+        assertEquals(NavidromeLibraryViewModel.LoadState.Idle, viewModel.genreTracksState.value)
+    }
+
+    @Test
+    fun `browse loads work again after offline mode is turned off`() = runTest {
+        setSubsonicAccount()
+        settingsFlow.value = AppSettings(offlineMode = true)
+        viewModel.loadArtists()
+        assertEquals(0, server.requestCount)
+
+        settingsFlow.value = AppSettings(offlineMode = false)
+        server.enqueue(mockOk(ARTISTS_OK_FIXTURE))
+
+        viewModel.artistsState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadArtists()
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `offlineMode state mirrors persisted settings`() = runTest {
+        assertEquals(false, viewModel.offlineMode.value)
+        settingsFlow.value = AppSettings(offlineMode = true)
+        assertEquals(true, viewModel.offlineMode.value)
+    }
+
+    @Test
+    fun `downloadedTracks refreshes from the repository when the download index changes`() = runTest {
+        val downloaded = listOf(
+            com.adagiostream.android.testutil.TestFixtures.makeTrack(id = "d1", title = "One"),
+            com.adagiostream.android.testutil.TestFixtures.makeTrack(id = "d2", title = "Two"),
+        )
+        coEvery { fakeLibraryRepository.downloadedTracks() } returns downloaded
+        completedDownloadsFlow.value = listOf(mockk(relaxed = true))
+
+        assertEquals(listOf("d1", "d2"), viewModel.downloadedTracks.value.map { it.id })
+    }
+
+    @Test
+    fun `playDownloadedTrack enqueues the downloaded list and starts from the tapped index`() = runTest {
+        setSubsonicAccount()
+        settingsFlow.value = AppSettings(offlineMode = true)
+
+        val downloaded = listOf(
+            com.adagiostream.android.testutil.TestFixtures.makeTrack(id = "d1", title = "One"),
+            com.adagiostream.android.testutil.TestFixtures.makeTrack(id = "d2", title = "Two"),
+        )
+        coEvery { fakeLibraryRepository.downloadedTracks() } returns downloaded
+        completedDownloadsFlow.value = listOf(mockk(relaxed = true))
+
+        viewModel.playDownloadedTrack(downloaded[1])
+
+        assertEquals(1, playedSources.size)
+        val source = playedSources.first()
+        assertEquals(2, source.queue.size) // whole downloaded list enqueued
+        assertEquals(1, source.index) // started from tapped index
+        assertEquals("d2", source.currentTrack.id)
+        assertEquals("no network request may fire for offline playback", 0, server.requestCount)
     }
 
     // -------------------------------------------------------------------------

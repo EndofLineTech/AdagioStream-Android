@@ -211,11 +211,21 @@ class MusicPlaybackCoordinator @Inject constructor(
         val durationSeconds = track.duration?.toLong()
         if (LibraryPlaybackPolicy.shouldSubmit(elapsedSeconds, durationSeconds)) {
             scrobbleSubmitted = true
-            scope.launch {
-                api.scrobble(track.id, submission = true)
+            if (!offlineMode()) {
+                scope.launch {
+                    api.scrobble(track.id, submission = true)
+                }
             }
         }
     }
+
+    /**
+     * Offline mode suppresses scrobbles — playback of downloaded tracks must
+     * fire no network requests (baw.12). `false` when no PersistenceService is
+     * wired (plain-JVM tests), matching pre-baw.12 behaviour.
+     */
+    private fun offlineMode(): Boolean =
+        persistenceService?.settings?.value?.offlineMode == true
 
     private fun advanceOrStop() {
         val next = queue.next()
@@ -239,9 +249,12 @@ class MusicPlaybackCoordinator @Inject constructor(
         ) ?: return
         _nowPlayingArtworkUrl.value = track.coverArt?.let { api.getCoverArtUrl(it)?.toString() }
         // Reset per-track scrobble guard and fire now-playing notification (baw.5.1).
+        // Suppressed in offline mode — no network calls while offline (baw.12).
         scrobbleSubmitted = false
-        scope.launch {
-            api.scrobble(track.id, submission = false)
+        if (!offlineMode()) {
+            scope.launch {
+                api.scrobble(track.id, submission = false)
+            }
         }
         player.playLibraryTrack(
             streamUrl = streamUrl,

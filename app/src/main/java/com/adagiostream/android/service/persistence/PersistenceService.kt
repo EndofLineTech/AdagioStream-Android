@@ -7,6 +7,8 @@ import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.CustomPlaylist
 import com.adagiostream.android.model.LovedTrack
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -157,6 +159,15 @@ class PersistenceService(
         favoritesFile.writeText(json.encodeToString(ids))
     }
 
+    /**
+     * Live settings — seeded from disk on first access, updated on every
+     * [saveSettings] (baw.12). Lets managers/ViewModels react to settings
+     * changed elsewhere (e.g. the offline-mode toggle in Settings) without
+     * re-reading the file.
+     */
+    private val _settings by lazy { MutableStateFlow(loadSettingsSync()) }
+    val settings: StateFlow<AppSettings> get() = _settings
+
     fun loadSettingsSync(): AppSettings {
         return try {
             if (settingsFile.exists()) {
@@ -175,6 +186,7 @@ class PersistenceService(
 
     suspend fun saveSettings(settings: AppSettings) = mutex.withLock {
         settingsFile.writeText(json.encodeToString(settings))
+        _settings.value = settings
     }
 
     suspend fun clearAllFavorites() = mutex.withLock {

@@ -170,6 +170,15 @@ class SettingsViewModel @Inject constructor(
         save()
     }
 
+    /**
+     * Toggles Offline Mode (baw.12): the Music tab shows only downloaded
+     * tracks and fires no network browse/search requests.
+     */
+    fun updateOfflineMode(enabled: Boolean) {
+        _settings.value = _settings.value.copy(offlineMode = enabled)
+        save()
+    }
+
     fun clearDebugLogs() {
         DebugLogger.clearLogs()
         debugLogSize.value = DebugLogger.logFileSize()

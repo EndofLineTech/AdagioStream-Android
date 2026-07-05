@@ -546,6 +546,34 @@ fun SettingsScreen(
                 }
             }
             FooterText("View downloaded songs, see how much space they use, and free up storage.")
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Offline Mode",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = settings.offlineMode,
+                        onCheckedChange = { viewModel.updateOfflineMode(it) },
+                    )
+                }
+            }
+            // Copy mirrors iOS DownloadsView footer.
+            FooterText("When enabled, the Music tab shows only your downloaded tracks and won't make any network requests.")
         }
 
         Spacer(modifier = Modifier.height(24.dp))

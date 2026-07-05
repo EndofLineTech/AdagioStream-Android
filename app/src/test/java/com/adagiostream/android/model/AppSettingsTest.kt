@@ -1,5 +1,6 @@
 package com.adagiostream.android.model
 
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -35,6 +36,20 @@ class AppSettingsTest {
         assertEquals(TextSizeMode.M, defaults.textSizeMode)
         assertEquals(SortMode.ALPHABETICAL, defaults.sortMode)
         assertEquals(SortMode.ALPHABETICAL, defaults.groupSortMode)
+    }
+
+    @Test
+    fun `offlineMode defaults false and survives a JSON round-trip`() {
+        val json = Json { ignoreUnknownKeys = true }
+        assertEquals(false, AppSettings().offlineMode)
+
+        val decoded = json.decodeFromString<AppSettings>(
+            json.encodeToString(AppSettings.serializer(), AppSettings(offlineMode = true)),
+        )
+        assertEquals(true, decoded.offlineMode)
+
+        // Settings blobs written before baw.12 have no offlineMode key — must decode to false.
+        assertEquals(false, json.decodeFromString<AppSettings>("{}").offlineMode)
     }
 
     @Test
