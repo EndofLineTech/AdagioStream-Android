@@ -80,6 +80,29 @@ class NowPlayingViewModel @Inject constructor(
     fun libraryNext() = musicPlaybackCoordinator.next()
     fun libraryPrevious() = musicPlaybackCoordinator.previous()
 
+    /**
+     * Duration of the current library track in milliseconds, or null when not
+     * playing library content / duration is unknown (baw.9.5). Radio is never
+     * seekable and has no duration — see [PlaybackContract].
+     */
+    val libraryDurationMs: StateFlow<Long?> = playbackSource
+        .map { source ->
+            (source as? PlaybackSource.Library)?.currentTrack?.duration
+                ?.takeIf { it > 0 }
+                ?.let { it * 1000L }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /**
+     * Current playback position in milliseconds — a plain (non-Flow) read of
+     * the live libVLC position, polled by the UI (baw.9.5). Only meaningful
+     * while [isLibrarySource] is true; radio has no seekable position.
+     */
+    fun currentPositionMs(): Long = vlcPlayer.currentPositionMs()
+
+    /** Seeks the current library track to [positionMs] (baw.9.5). No-op for radio. */
+    fun seekTo(positionMs: Long) = vlcPlayer.seekToPositionMs(positionMs)
+
     val isCasting: StateFlow<Boolean> = castManager.isCasting
     val castDeviceName: StateFlow<String?> = castManager.castDeviceName
 

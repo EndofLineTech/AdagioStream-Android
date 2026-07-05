@@ -168,4 +168,64 @@ class NowPlayingViewModelTest {
         vm.moveQueueItem(0, 3)
         verify { musicPlaybackCoordinator.moveQueueItem(0, 3) }
     }
+
+    // ---- seek bar (baw.9.5) -------------------------------------------------
+
+    @Test
+    fun `libraryDurationMs is null for radio`() = runTest {
+        val vm = createViewModel()
+        playbackSourceFlow.value = PlaybackSource.Radio(TestFixtures.makeChannel())
+
+        val job = backgroundScope.launch(mainDispatcherRule.dispatcher) {
+            vm.libraryDurationMs.collect {}
+        }
+        advanceUntilIdle()
+
+        assertEquals(null, vm.libraryDurationMs.value)
+        job.cancel()
+    }
+
+    @Test
+    fun `libraryDurationMs converts the track's duration from seconds to milliseconds`() = runTest {
+        val vm = createViewModel()
+        val track = TestFixtures.makeTrack(duration = 200)
+        playbackSourceFlow.value = PlaybackSource.Library(listOf(track), index = 0)
+
+        val job = backgroundScope.launch(mainDispatcherRule.dispatcher) {
+            vm.libraryDurationMs.collect {}
+        }
+        advanceUntilIdle()
+
+        assertEquals(200_000L, vm.libraryDurationMs.value)
+        job.cancel()
+    }
+
+    @Test
+    fun `libraryDurationMs is null when the track has no known duration`() = runTest {
+        val vm = createViewModel()
+        val track = TestFixtures.makeTrack(duration = null)
+        playbackSourceFlow.value = PlaybackSource.Library(listOf(track), index = 0)
+
+        val job = backgroundScope.launch(mainDispatcherRule.dispatcher) {
+            vm.libraryDurationMs.collect {}
+        }
+        advanceUntilIdle()
+
+        assertEquals(null, vm.libraryDurationMs.value)
+        job.cancel()
+    }
+
+    @Test
+    fun `currentPositionMs delegates to VLCPlayerWrapper`() = runTest {
+        every { vlcPlayer.currentPositionMs() } returns 42_000L
+        val vm = createViewModel()
+        assertEquals(42_000L, vm.currentPositionMs())
+    }
+
+    @Test
+    fun `seekTo delegates to VLCPlayerWrapper`() = runTest {
+        val vm = createViewModel()
+        vm.seekTo(15_000L)
+        verify { vlcPlayer.seekToPositionMs(15_000L) }
+    }
 }

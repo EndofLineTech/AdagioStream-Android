@@ -29,11 +29,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,6 +55,7 @@ import com.adagiostream.android.ui.components.CastButton
 import com.adagiostream.android.ui.components.RetryableAsyncImage
 import com.adagiostream.android.util.BitrateFormatter
 import com.adagiostream.android.util.rememberListeningTime
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -358,6 +362,7 @@ private fun LibraryNowPlayingSheet(
     val track by viewModel.currentLibraryTrack.collectAsStateWithLifecycle()
     val artworkUrl by viewModel.libraryArtworkUrl.collectAsStateWithLifecycle()
     val albumTitle by viewModel.libraryAlbumTitle.collectAsStateWithLifecycle()
+    val durationMs by viewModel.libraryDurationMs.collectAsStateWithLifecycle()
     var showUpNext by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val currentTrack = track ?: return
@@ -417,6 +422,18 @@ private fun LibraryNowPlayingSheet(
             if (playbackState is PlaybackState.Buffering) {
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            // Positional seek bar — library-only (baw.9.5). Radio keeps its
+            // existing "LIVE" seek-to-live button and gets no scrubber; a real,
+            // seekable duration only exists for on-demand tracks (PlaybackContract).
+            if (durationMs != null && durationMs!! > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LibrarySeekBar(
+                    viewModel = viewModel,
+                    isPlaying = playbackState is PlaybackState.Playing || playbackState is PlaybackState.CatchingUp,
+                    durationMs = durationMs!!,
+                )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -481,6 +498,76 @@ private fun LibraryNowPlayingSheet(
     if (showUpNext) {
         UpNextSheet(onDismiss = { showUpNext = false })
     }
+}
+
+/**
+ * Positional seek bar for library tracks (baw.9.5).
+ *
+ * Polls [NowPlayingViewModel.currentPositionMs] every 500ms — the same
+ * ticker-in-a-`LaunchedEffect` pattern already used for the listening-time
+ * clock ([com.adagiostream.android.util.rememberListeningTime]) — rather than
+ * threading position through a StateFlow the wrapper would have to poll itself.
+ * While the user is dragging, the live poll is suppressed and the slider
+ * tracks the drag position; the seek only actually fires on release
+ * ([androidx.compose.material3.Slider]'s `onValueChangeFinished`), matching
+ * standard scrubber UX and avoiding a flood of seeks mid-drag.
+ */
+@Composable
+private fun LibrarySeekBar(
+    viewModel: NowPlayingViewModel,
+    isPlaying: Boolean,
+    durationMs: Long,
+) {
+    var isDragging by remember { mutableStateOf(false) }
+    var dragPositionMs by remember { mutableLongStateOf(0L) }
+    var livePositionMs by remember { mutableLongStateOf(viewModel.currentPositionMs()) }
+
+    LaunchedEffect(isPlaying) {
+        while (true) {
+            if (!isDragging) livePositionMs = viewModel.currentPositionMs()
+            delay(500L)
+        }
+    }
+
+    val displayedPositionMs = if (isDragging) dragPositionMs else livePositionMs
+    val sliderValue = (displayedPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Slider(
+            value = sliderValue,
+            onValueChange = { fraction ->
+                isDragging = true
+                dragPositionMs = (fraction * durationMs).toLong()
+            },
+            onValueChangeFinished = {
+                viewModel.seekTo(dragPositionMs)
+                livePositionMs = dragPositionMs
+                isDragging = false
+            },
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = formatTrackTime(displayedPositionMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = formatTrackTime(durationMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun formatTrackTime(ms: Long): String {
+    val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
+    val m = totalSeconds / 60
+    val s = totalSeconds % 60
+    return "%d:%02d".format(m, s)
 }
 
 /** Isolated Composable so bitrate changes only recompose this text, not the entire sheet. */
