@@ -4,8 +4,10 @@ import app.cash.turbine.test
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
+import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.LibraryTrackPlayer
 import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import com.adagiostream.android.service.player.MusicQueueManager
@@ -14,6 +16,7 @@ import com.adagiostream.android.testutil.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -58,6 +61,13 @@ class NavidromeSearchViewModelTest {
         override val accounts: StateFlow<List<Account>> = fakeAccountsFlow
     }
 
+    // Live settings feed — drives offline mode (baw.17).
+    private val settingsFlow = MutableStateFlow(AppSettings())
+    private val fakePersistenceService = io.mockk.mockk<PersistenceService> {
+        io.mockk.every { settings } returns settingsFlow
+        io.mockk.every { loadSettingsSync() } answers { settingsFlow.value }
+    }
+
     @Before
     fun setUp() {
         server = MockWebServer()
@@ -84,6 +94,7 @@ class NavidromeSearchViewModelTest {
                 MusicQueueManager(),
                 fakeTrackPlayer,
             ),
+            persistenceService = fakePersistenceService,
         )
     }
 
@@ -147,6 +158,20 @@ class NavidromeSearchViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `offline mode suppresses network search`() = runTest {
+        setSubsonicAccount()
+        settingsFlow.value = AppSettings(offlineMode = true)
+        // If the search slipped through the gate, this response would be consumed.
+        server.enqueue(mockOk(SEARCH_OK_FIXTURE))
+
+        viewModel.onQueryChanged("rock")
+        advanceUntilIdle() // debounce window elapses
+
+        assertEquals("no network request may fire in offline mode", 0, server.requestCount)
+        assertEquals(NavidromeSearchViewModel.SearchState.Idle, viewModel.searchState.value)
     }
 
     @Test

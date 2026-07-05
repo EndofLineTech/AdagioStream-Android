@@ -48,6 +48,13 @@ data class AppSettings(
      */
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.Off,
+    /**
+     * Offline mode (baw.12) — mirrors the iOS `AppSettings.offlineMode` toggle.
+     *
+     * When `true`, the Music tab shows only downloaded tracks and fires no
+     * network browse/search requests. Radio/live tabs are unaffected.
+     */
+    val offlineMode: Boolean = false,
 )
 
 @Serializable

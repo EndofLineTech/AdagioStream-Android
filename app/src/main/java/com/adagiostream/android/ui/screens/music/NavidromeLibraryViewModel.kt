@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
+import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.navidrome.Album
 import com.adagiostream.android.service.navidrome.AlbumListType
 import com.adagiostream.android.service.navidrome.Artist
@@ -12,6 +13,7 @@ import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.service.navidrome.SubsonicGenre
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +43,8 @@ class NavidromeLibraryViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val navidromeApiFactory: NavidromeApiFactory,
     private val musicPlaybackCoordinator: MusicPlaybackCoordinator,
+    private val persistenceService: PersistenceService,
+    private val libraryRepository: MusicLibraryRepository,
 ) : ViewModel() {
 
     // -------------------------------------------------------------------------
@@ -99,6 +103,40 @@ class NavidromeLibraryViewModel @Inject constructor(
     }
 
     // -------------------------------------------------------------------------
+    // Offline mode (baw.12)
+    // -------------------------------------------------------------------------
+
+    private val _offlineMode = MutableStateFlow(false)
+
+    /** Whether Offline Mode is on — the Music tab shows downloads only and fires no network requests. */
+    val offlineMode: StateFlow<Boolean> = _offlineMode.asStateFlow()
+
+    private val _downloadedTracks = MutableStateFlow<List<Track>>(emptyList())
+
+    /** Completed downloads as playable [Track]s, newest first — the offline library listing. */
+    val downloadedTracks: StateFlow<List<Track>> = _downloadedTracks.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            persistenceService.settings.collect { _offlineMode.value = it.offlineMode }
+        }
+        // Refresh the offline listing whenever the completed-download index changes.
+        viewModelScope.launch {
+            libraryRepository.observeCompletedDownloads().collect {
+                _downloadedTracks.value = libraryRepository.downloadedTracks()
+            }
+        }
+    }
+
+    /**
+     * The API for network browse/search — `null` when Offline Mode is on, so
+     * every `load*` function below no-ops without firing a request (baw.12).
+     * Playback intentionally bypasses this gate: downloaded tracks resolve to
+     * local files via the coordinator's DownloadLocator.
+     */
+    private fun browseApi(): NavidromeApi? = if (_offlineMode.value) null else _api.value
+
+    // -------------------------------------------------------------------------
     // Artist list state
     // -------------------------------------------------------------------------
 
@@ -115,7 +153,7 @@ class NavidromeLibraryViewModel @Inject constructor(
      * stays [LoadState.Idle] (the screen renders the "no account" empty state).
      */
     fun loadArtists() {
-        val api = _api.value ?: return
+        val api = browseApi() ?: return
         if (_artistsState.value is LoadState.Loading) return
 
         viewModelScope.launch {
@@ -161,7 +199,7 @@ class NavidromeLibraryViewModel @Inject constructor(
     fun loadAlbums(artist: Artist) {
         // Skip if already loaded for this artist
         if (_selectedArtist.value?.id == artist.id && _albumsState.value == LoadState.Loaded) return
-        val api = _api.value ?: return
+        val api = browseApi() ?: return
         if (_albumsState.value is LoadState.Loading) return
 
         viewModelScope.launch {
@@ -219,7 +257,7 @@ class NavidromeLibraryViewModel @Inject constructor(
      */
     fun loadTracks(album: Album) {
         if (_selectedAlbum.value?.id == album.id && _tracksState.value == LoadState.Loaded) return
-        val api = _api.value ?: return
+        val api = browseApi() ?: return
         if (_tracksState.value is LoadState.Loading) return
 
         viewModelScope.launch {
@@ -272,6 +310,25 @@ class NavidromeLibraryViewModel @Inject constructor(
         )
     }
 
+    /**
+     * Starts playback from a tapped track in the offline (downloads-only) list
+     * (baw.12). Enqueues the WHOLE downloaded list from the tapped index —
+     * mirrors [playTrack]. Downloaded tracks resolve to local files via the
+     * coordinator's DownloadLocator, so no network is touched for audio and no
+     * configured account is required (api may be null — baw.17).
+     */
+    fun playDownloadedTrack(track: Track) {
+        val tracks = _downloadedTracks.value
+        val startIndex = tracks.indexOfFirst { it.id == track.id }
+        if (startIndex < 0) return
+        musicPlaybackCoordinator.playAlbum(
+            tracks = tracks,
+            startIndex = startIndex,
+            api = _api.value,
+            albumTitle = "Downloads",
+        )
+    }
+
     // -------------------------------------------------------------------------
     // Album browse list (baw.9.1) — getAlbumList2 with a selectable ordering.
     // -------------------------------------------------------------------------
@@ -293,7 +350,7 @@ class NavidromeLibraryViewModel @Inject constructor(
      * first so the load is never treated as a no-op duplicate request.
      */
     fun loadAlbumBrowseList(type: AlbumListType = _albumListType.value) {
-        val api = _api.value ?: return
+        val api = browseApi() ?: return
         if (_albumBrowseState.value is LoadState.Loading) return
 
         viewModelScope.launch {
@@ -339,7 +396,7 @@ class NavidromeLibraryViewModel @Inject constructor(
      * Results are sorted alphabetically by name.  Guards against concurrent loads.
      */
     fun loadGenres() {
-        val api = _api.value ?: return
+        val api = browseApi() ?: return
         if (_genresState.value is LoadState.Loading) return
 
         viewModelScope.launch {
@@ -385,7 +442,7 @@ class NavidromeLibraryViewModel @Inject constructor(
      */
     fun loadSongsByGenre(genre: SubsonicGenre) {
         if (_selectedGenre.value?.name == genre.name && _genreTracksState.value == LoadState.Loaded) return
-        val api = _api.value ?: return
+        val api = browseApi() ?: return
         if (_genreTracksState.value is LoadState.Loading) return
 
         viewModelScope.launch {
@@ -426,7 +483,7 @@ class NavidromeLibraryViewModel @Inject constructor(
      * [favoriteIds]): stars are a Navidrome-only concept, stored server-side.
      */
     fun toggleStar(track: Track) {
-        val api = _api.value ?: return
+        val api = browseApi() ?: return
         val newStarred = !(track.starred ?: false)
         val updated = track.copy(starred = newStarred)
 

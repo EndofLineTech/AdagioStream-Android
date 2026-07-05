@@ -9,6 +9,7 @@ import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.service.navidrome.NavidromePlaylist
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,7 +40,17 @@ class NavidromePlaylistViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val navidromeApiFactory: NavidromeApiFactory,
     private val musicPlaybackCoordinator: MusicPlaybackCoordinator,
+    private val persistenceService: PersistenceService,
 ) : ViewModel() {
+
+    /**
+     * The API for network playlist browse/CRUD — `null` when Offline Mode is on
+     * (baw.12/baw.17), so loads and edits no-op without firing a request even
+     * from a back-stack screen. The play bridge intentionally bypasses this gate
+     * (playback of downloaded tracks stays allowed offline).
+     */
+    private fun browseApi(): NavidromeApi? =
+        if (persistenceService.settings.value.offlineMode) null else _api.value
 
     // -------------------------------------------------------------------------
     // LoadState — same shape as NavidromeLibraryViewModel.LoadState
@@ -89,7 +100,7 @@ class NavidromePlaylistViewModel @Inject constructor(
      * Results are sorted alphabetically by name.  Guards against concurrent loads.
      */
     fun loadPlaylists() {
-        val currentApi = _api.value ?: return
+        val currentApi = browseApi() ?: return
         if (_playlistsState.value is LoadState.Loading) return
 
         viewModelScope.launch {
@@ -135,7 +146,7 @@ class NavidromePlaylistViewModel @Inject constructor(
         if (_selectedPlaylist.value?.id == playlist.id &&
             _playlistDetailState.value == LoadState.Loaded
         ) return
-        val currentApi = _api.value ?: return
+        val currentApi = browseApi() ?: return
         if (_playlistDetailState.value is LoadState.Loading) return
 
         viewModelScope.launch {
@@ -204,7 +215,7 @@ class NavidromePlaylistViewModel @Inject constructor(
      * Failed creates are dropped silently (no local state was optimistically added).
      */
     fun createPlaylist(name: String) {
-        val currentApi = _api.value ?: return
+        val currentApi = browseApi() ?: return
         viewModelScope.launch {
             try {
                 currentApi.createPlaylist(name)
@@ -223,7 +234,7 @@ class NavidromePlaylistViewModel @Inject constructor(
      * selected-playlist state.
      */
     fun renamePlaylist(playlist: NavidromePlaylist, newName: String) {
-        val currentApi = _api.value ?: return
+        val currentApi = browseApi() ?: return
         // Snapshot for revert
         val oldList = _playlists.value
         val oldSelected = _selectedPlaylist.value
@@ -254,7 +265,7 @@ class NavidromePlaylistViewModel @Inject constructor(
      * On API error, puts the playlist back and restores [LoadState.Loaded].
      */
     fun deletePlaylist(playlist: NavidromePlaylist) {
-        val currentApi = _api.value ?: return
+        val currentApi = browseApi() ?: return
         // Snapshot for revert
         val oldList = _playlists.value
         val oldState = _playlistsState.value
@@ -284,7 +295,7 @@ class NavidromePlaylistViewModel @Inject constructor(
      * by observing a dedicated error flow if needed in a future iteration.
      */
     fun addTrackToPlaylist(playlistId: String, trackId: String) {
-        val currentApi = _api.value ?: return
+        val currentApi = browseApi() ?: return
         viewModelScope.launch {
             try {
                 currentApi.updatePlaylist(id = playlistId, songIdsToAdd = listOf(trackId))
@@ -326,7 +337,7 @@ class NavidromePlaylistViewModel @Inject constructor(
      * index no longer matches the (already-shifted) server-side list.
      */
     fun removeTrackAt(playlist: NavidromePlaylist, index: Int) {
-        val currentApi = _api.value ?: return
+        val currentApi = browseApi() ?: return
         if (_isRemovingTrack.value) return
         val oldTracks = _playlistTracks.value
         if (index !in oldTracks.indices) return

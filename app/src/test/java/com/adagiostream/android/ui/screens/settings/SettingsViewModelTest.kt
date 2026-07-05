@@ -109,6 +109,23 @@ class SettingsViewModelTest {
         coVerify { persistenceService.saveSettings(match { it.appearanceMode == AppearanceMode.LIGHT }) }
     }
 
+    // --- Offline Mode (baw.12) ---
+
+    @Test
+    fun `updateOfflineMode updates settings and persists`() = runTest {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        vm.updateOfflineMode(true)
+        advanceUntilIdle()
+        assertEquals(true, vm.settings.value.offlineMode)
+        coVerify { persistenceService.saveSettings(match { it.offlineMode }) }
+
+        vm.updateOfflineMode(false)
+        advanceUntilIdle()
+        assertEquals(false, vm.settings.value.offlineMode)
+        coVerify { persistenceService.saveSettings(match { !it.offlineMode }) }
+    }
+
     // --- Text Size ---
 
     @Test

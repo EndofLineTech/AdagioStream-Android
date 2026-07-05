@@ -123,11 +123,14 @@ class MusicPlaybackCoordinator @Inject constructor(
      * [startPositionMs] (baw.10) seeks the started track to a saved position —
      * used when resuming a paused library track from lock screen / Bluetooth /
      * Android Auto instead of restarting it from 0.
+     *
+     * [api] may be null for a fully-downloaded offline session (baw.17) — tracks
+     * then play from local files only; undownloaded tracks stop playback.
      */
     fun playAlbum(
         tracks: List<Track>,
         startIndex: Int,
-        api: NavidromeApi,
+        api: NavidromeApi?,
         albumTitle: String? = null,
         startPositionMs: Long = 0L,
     ) {
@@ -247,11 +250,21 @@ class MusicPlaybackCoordinator @Inject constructor(
         val durationSeconds = track.duration?.toLong()
         if (LibraryPlaybackPolicy.shouldSubmit(elapsedSeconds, durationSeconds)) {
             scrobbleSubmitted = true
-            scope.launch {
-                api.scrobble(track.id, submission = true)
+            if (!offlineMode()) {
+                scope.launch {
+                    api.scrobble(track.id, submission = true)
+                }
             }
         }
     }
+
+    /**
+     * Offline mode suppresses scrobbles — playback of downloaded tracks must
+     * fire no network requests (baw.12). `false` when no PersistenceService is
+     * wired (plain-JVM tests), matching pre-baw.12 behaviour.
+     */
+    private fun offlineMode(): Boolean =
+        persistenceService?.settings?.value?.offlineMode == true
 
     private fun advanceOrStop() {
         val next = queue.next()
@@ -266,18 +279,30 @@ class MusicPlaybackCoordinator @Inject constructor(
 
     private fun playCurrent(startPositionMs: Long = 0L) {
         val track = queue.current() ?: return
-        val api = api ?: return
-        // Local-first (baw.6.3): a downloaded track plays from disk; otherwise stream.
+        val api = api
+        // Local-first (baw.6.3): a downloaded track plays from disk; otherwise
+        // stream. A null api (baw.17: fully-downloaded offline session with no
+        // account) can only play downloaded tracks — undownloaded ones resolve
+        // to null and playback stops.
         val localPath = downloadLocator.localPathFor(track.id)
         val streamUrl = LocalFirstResolver.resolve(
             localPath = localPath,
-            streamUrl = api.streamUrl(track.id)?.toString(),
+            streamUrl = api?.streamUrl(track.id)?.toString(),
         ) ?: return
-        _nowPlayingArtworkUrl.value = track.coverArt?.let { api.getCoverArtUrl(it)?.toString() }
+        // Cover art is a network fetch — suppressed in offline mode (baw.17).
+        // NowPlayingSheet and the media notification degrade to placeholder art.
+        _nowPlayingArtworkUrl.value = if (api == null || offlineMode()) {
+            null
+        } else {
+            track.coverArt?.let { api.getCoverArtUrl(it)?.toString() }
+        }
         // Reset per-track scrobble guard and fire now-playing notification (baw.5.1).
+        // Suppressed in offline mode — no network calls while offline (baw.12).
         scrobbleSubmitted = false
-        scope.launch {
-            api.scrobble(track.id, submission = false)
+        if (api != null && !offlineMode()) {
+            scope.launch {
+                api.scrobble(track.id, submission = false)
+            }
         }
         player.playLibraryTrack(
             streamUrl = streamUrl,

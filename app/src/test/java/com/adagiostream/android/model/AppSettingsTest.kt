@@ -42,6 +42,20 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `offlineMode defaults false and survives a JSON round-trip`() {
+        val json = Json { ignoreUnknownKeys = true }
+        assertEquals(false, AppSettings().offlineMode)
+
+        val decoded = json.decodeFromString<AppSettings>(
+            json.encodeToString(AppSettings.serializer(), AppSettings(offlineMode = true)),
+        )
+        assertEquals(true, decoded.offlineMode)
+
+        // Settings blobs written before baw.12 have no offlineMode key — must decode to false.
+        assertEquals(false, json.decodeFromString<AppSettings>("{}").offlineMode)
+    }
+
+    @Test
     fun `TextSizeMode values are ordered by scale`() {
         val factors = TextSizeMode.entries.map { it.scaleFactor }
         assertEquals(factors.sorted(), factors)
