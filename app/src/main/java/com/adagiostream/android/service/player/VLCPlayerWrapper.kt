@@ -591,6 +591,17 @@ class VLCPlayerWrapper(
         mediaPlayer.play()
     }
 
+    /**
+     * Refreshes the active library snapshot without restarting playback (baw.9.3).
+     * Used after a queue reorder so Up Next / Android Auto pick up the new order.
+     * No-op when the player is not currently in a library session (radio, or
+     * nothing playing) — a stale/late refresh must never override a live source.
+     */
+    override fun updateLibrarySource(source: PlaybackSource.Library) {
+        if (_playbackSource.value !is PlaybackSource.Library) return
+        _playbackSource.value = source
+    }
+
     /** Current playback position in milliseconds (library scrubber; baw.3.6). */
     fun currentPositionMs(): Long = mediaPlayer.time.coerceAtLeast(0L)
 

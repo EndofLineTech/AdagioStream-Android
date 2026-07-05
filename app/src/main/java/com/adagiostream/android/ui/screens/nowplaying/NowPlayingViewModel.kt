@@ -8,7 +8,10 @@ import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.player.CastManager
+import com.adagiostream.android.service.player.MusicPlaybackCoordinator
+import com.adagiostream.android.service.player.PlaybackSource
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,7 +27,58 @@ class NowPlayingViewModel @Inject constructor(
     private val vlcPlayer: VLCPlayerWrapper,
     private val accountManager: AccountManager,
     private val castManager: CastManager,
+    private val musicPlaybackCoordinator: MusicPlaybackCoordinator,
 ) : ViewModel() {
+
+    /** What the player is currently rendering — radio [Channel] or on-demand [PlaybackSource.Library]. */
+    val playbackSource: StateFlow<PlaybackSource?> = vlcPlayer.playbackSource
+
+    /**
+     * True while a library (on-demand) track is playing (baw.9.3 / baw.9.5).
+     * Drives whether "Up Next" and the positional seek bar are shown — both are
+     * library-only surfaces; radio keeps its existing live-only controls.
+     */
+    val isLibrarySource: StateFlow<Boolean> = playbackSource
+        .map { it is PlaybackSource.Library }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /** The current library queue, or empty when radio is playing / nothing queued (baw.9.3). */
+    val libraryQueue: StateFlow<List<Track>> = playbackSource
+        .map { (it as? PlaybackSource.Library)?.queue ?: emptyList() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Index of the active track within [libraryQueue], or -1 when not applicable (baw.9.3). */
+    val libraryQueueIndex: StateFlow<Int> = playbackSource
+        .map { (it as? PlaybackSource.Library)?.index ?: -1 }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), -1)
+
+    /** Jumps directly to [index] in the library queue (Up Next tap-to-jump; baw.9.3). */
+    fun playQueueIndex(index: Int) = musicPlaybackCoordinator.playIndex(index)
+
+    /** Reorders the library queue — see [MusicPlaybackCoordinator.moveQueueItem] (baw.9.3). */
+    fun moveQueueItem(from: Int, to: Int) = musicPlaybackCoordinator.moveQueueItem(from, to)
+
+    /** The active library track, or null when not playing library content (baw.9.3). */
+    val currentLibraryTrack: StateFlow<Track?> = playbackSource
+        .map { (it as? PlaybackSource.Library)?.currentTrack }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** Authenticated cover-art URL for the current library track (baw.9.3). */
+    val libraryArtworkUrl: StateFlow<String?> = musicPlaybackCoordinator.nowPlayingArtworkUrl
+
+    /** Album title for the current library session, if known (baw.9.3). */
+    val libraryAlbumTitle: StateFlow<String?> = musicPlaybackCoordinator.nowPlayingAlbumTitle
+
+    /**
+     * Skips to the next / previous library track (baw.9.3).
+     *
+     * Distinct from [playNext] / [playPrevious], which drive RADIO channel
+     * navigation via [VLCPlayerWrapper] — library navigation is owned by
+     * [MusicPlaybackCoordinator] instead, so these route there directly rather
+     * than risk the radio-only methods silently no-oping.
+     */
+    fun libraryNext() = musicPlaybackCoordinator.next()
+    fun libraryPrevious() = musicPlaybackCoordinator.previous()
 
     val isCasting: StateFlow<Boolean> = castManager.isCasting
     val castDeviceName: StateFlow<String?> = castManager.castDeviceName

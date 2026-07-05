@@ -22,4 +22,12 @@ interface LibraryTrackPlayer {
 
     /** Stops playback entirely (queue exhausted with no repeat). */
     fun stop()
+
+    /**
+     * Refreshes the active library snapshot (queue contents / current index)
+     * WITHOUT restarting playback (baw.9.3) — used after [MusicQueueManager.moveItem]
+     * so the Up Next screen / Android Auto queue reflect the new order immediately.
+     * Default no-op keeps existing [LibraryTrackPlayer] fakes source-compatible.
+     */
+    fun updateLibrarySource(source: PlaybackSource.Library) {}
 }

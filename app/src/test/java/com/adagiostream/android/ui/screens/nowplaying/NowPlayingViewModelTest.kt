@@ -4,7 +4,10 @@ import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.player.CastManager
+import com.adagiostream.android.service.player.MusicPlaybackCoordinator
+import com.adagiostream.android.service.player.PlaybackSource
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.testutil.MainDispatcherRule
 import com.adagiostream.android.testutil.TestFixtures
@@ -32,12 +35,14 @@ class NowPlayingViewModelTest {
     private val bitrateFlow = MutableStateFlow(0f)
     private val streamStartedAtFlow = MutableStateFlow<Long?>(null)
     private val epgEntriesFlow = MutableStateFlow<Map<String, List<EPGEntry>>>(emptyMap())
+    private val playbackSourceFlow = MutableStateFlow<PlaybackSource?>(null)
 
     private val vlcPlayer = mockk<VLCPlayerWrapper>(relaxed = true) {
         every { currentChannel } returns currentChannelFlow
         every { playbackState } returns playbackStateFlow
         every { bitrateKbps } returns bitrateFlow
         every { streamStartedAt } returns streamStartedAtFlow
+        every { playbackSource } returns playbackSourceFlow
     }
 
     private val accountManager = mockk<AccountManager>(relaxed = true) {
@@ -45,9 +50,10 @@ class NowPlayingViewModelTest {
     }
 
     private val castManager = mockk<CastManager>(relaxed = true)
+    private val musicPlaybackCoordinator = mockk<MusicPlaybackCoordinator>(relaxed = true)
 
     private fun createViewModel(): NowPlayingViewModel {
-        return NowPlayingViewModel(vlcPlayer, accountManager, castManager)
+        return NowPlayingViewModel(vlcPlayer, accountManager, castManager, musicPlaybackCoordinator)
     }
 
     @Test
@@ -111,5 +117,55 @@ class NowPlayingViewModelTest {
         val vm = createViewModel()
         vm.playPrevious()
         verify { vlcPlayer.playPrevious() }
+    }
+
+    // ---- library source / Up Next surface (baw.9.3) ------------------------
+
+    @Test
+    fun `isLibrarySource is false and libraryQueue is empty for radio`() = runTest {
+        val vm = createViewModel()
+        playbackSourceFlow.value = PlaybackSource.Radio(TestFixtures.makeChannel())
+
+        val job = backgroundScope.launch(mainDispatcherRule.dispatcher) {
+            vm.isLibrarySource.collect {}
+        }
+        advanceUntilIdle()
+
+        assertTrue(!vm.isLibrarySource.value)
+        assertTrue(vm.libraryQueue.value.isEmpty())
+        job.cancel()
+    }
+
+    @Test
+    fun `isLibrarySource is true and libraryQueue exposes the queue when playing library`() = runTest {
+        val vm = createViewModel()
+        val tracks: List<Track> = TestFixtures.makeTracks(3)
+        playbackSourceFlow.value = PlaybackSource.Library(tracks, index = 1)
+
+        val jobs = listOf(
+            backgroundScope.launch(mainDispatcherRule.dispatcher) { vm.isLibrarySource.collect {} },
+            backgroundScope.launch(mainDispatcherRule.dispatcher) { vm.libraryQueue.collect {} },
+            backgroundScope.launch(mainDispatcherRule.dispatcher) { vm.libraryQueueIndex.collect {} },
+        )
+        advanceUntilIdle()
+
+        assertTrue(vm.isLibrarySource.value)
+        assertEquals(tracks, vm.libraryQueue.value)
+        assertEquals(1, vm.libraryQueueIndex.value)
+        jobs.forEach { it.cancel() }
+    }
+
+    @Test
+    fun `playQueueIndex delegates to MusicPlaybackCoordinator`() = runTest {
+        val vm = createViewModel()
+        vm.playQueueIndex(2)
+        verify { musicPlaybackCoordinator.playIndex(2) }
+    }
+
+    @Test
+    fun `moveQueueItem delegates to MusicPlaybackCoordinator`() = runTest {
+        val vm = createViewModel()
+        vm.moveQueueItem(0, 3)
+        verify { musicPlaybackCoordinator.moveQueueItem(0, 3) }
     }
 }

@@ -140,6 +140,18 @@ class MusicPlaybackCoordinator @Inject constructor(
     fun currentTrack(): Track? = queue.current()
 
     /**
+     * Reorders the "Up Next" queue (baw.9.3) — see [MusicQueueManager.moveItem]
+     * for the shuffle-interaction semantics. Playback of the current track is
+     * never restarted; only the player's queue snapshot is refreshed so the Up
+     * Next screen / Android Auto immediately reflect the new order.
+     */
+    fun moveQueueItem(from: Int, to: Int) {
+        queue.moveItem(from, to)
+        if (queue.isEmpty) return
+        player.updateLibrarySource(PlaybackSource.Library(queue.queue, queue.currentIndex))
+    }
+
+    /**
      * Reports playback progress for the current library track (baw.5.1).
      *
      * When [LibraryPlaybackPolicy.shouldSubmit] returns `true` AND the scrobble

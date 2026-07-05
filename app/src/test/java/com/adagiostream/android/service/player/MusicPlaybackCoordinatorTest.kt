@@ -42,6 +42,7 @@ class MusicPlaybackCoordinatorTest {
     private class FakeLibraryTrackPlayer : LibraryTrackPlayer {
         val played = mutableListOf<Pair<String, PlaybackSource.Library>>()
         var stopCount = 0
+        var lastLibrarySourceUpdate: PlaybackSource.Library? = null
 
         override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library) {
             played += streamUrl to source
@@ -49,6 +50,10 @@ class MusicPlaybackCoordinatorTest {
 
         override fun stop() {
             stopCount++
+        }
+
+        override fun updateLibrarySource(source: PlaybackSource.Library) {
+            lastLibrarySourceUpdate = source
         }
 
         val lastSource: PlaybackSource.Library? get() = played.lastOrNull()?.second
@@ -277,6 +282,25 @@ class MusicPlaybackCoordinatorTest {
     fun `setRepeatMode updates the queue repeat mode`() {
         coordinator.setRepeatMode(RepeatMode.All)
         assertEquals(RepeatMode.All, queue.repeatMode)
+    }
+
+    // ---- moveQueueItem — Up Next reorder (baw.9.3) ------------------------
+
+    @Test
+    fun `moveQueueItem reorders the queue and refreshes the player's snapshot without restarting playback`() {
+        coordinator.playAlbum(tracks(5), startIndex = 0, api = api)
+        val playsBefore = fakePlayer.played.size
+
+        coordinator.moveQueueItem(from = 4, to = 0)
+
+        // Playback was not restarted.
+        assertEquals(0, fakePlayer.played.size - playsBefore)
+        // Queue itself reordered.
+        assertEquals("track-4", queue.queue[0].id)
+        // Player's snapshot was refreshed to match.
+        assertTrue(fakePlayer.lastLibrarySourceUpdate != null)
+        assertEquals(queue.queue, fakePlayer.lastLibrarySourceUpdate!!.queue)
+        assertEquals(queue.currentIndex, fakePlayer.lastLibrarySourceUpdate!!.index)
     }
 
     // ---- scrobble (baw.5.1) ----------------------------------------------

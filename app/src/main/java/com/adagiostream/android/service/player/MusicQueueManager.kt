@@ -163,6 +163,56 @@ class MusicQueueManager @Inject constructor() {
     /** Toggles shuffle on/off. */
     fun toggleShuffle() = setShuffle(!shuffleEnabled)
 
+    /**
+     * Moves the item at play-order position [from] to position [to] — backs the
+     * "Up Next" reorderable queue screen (baw.9.3).
+     *
+     * SHUFFLE SEMANTICS (design decision, baw.9.3): [from]/[to] are positions in
+     * the CURRENT PLAY ORDER — i.e. the same domain as [playOrder] — not
+     * necessarily canonical queue indices:
+     *
+     *  - Shuffle OFF: play order == canonical order, so this reorders [queue]
+     *    itself. The album/queue's underlying order changes permanently.
+     *  - Shuffle ON: only the shuffle permutation ([shuffleOrder]) is reordered.
+     *    [queue] and every track's canonical position are left untouched, so
+     *    turning shuffle back off resumes the original (un-shuffled) album
+     *    order. This matches standard music-app behaviour (Spotify/Apple
+     *    Music): dragging a row in "Up Next" changes what plays next without
+     *    silently reshuffling or permanently reordering the source album.
+     *
+     * In both cases the currently-playing track keeps playing — only the
+     * upcoming order changes, never the active index's target track.
+     *
+     * No-op when the queue is empty, indices are out of range, or from == to.
+     */
+    fun moveItem(from: Int, to: Int) {
+        if (queue.isEmpty()) return
+        val bound = if (shuffleEnabled) shuffleOrder.indices else queue.indices
+        if (from !in bound || to !in bound || from == to) return
+
+        if (shuffleEnabled) {
+            shuffleOrder = shuffleOrder.toMutableList().apply { add(to, removeAt(from)) }
+            shufflePosition = shiftIndex(shufflePosition, from, to)
+            currentIndex = shuffleOrder[shufflePosition]
+        } else {
+            queue = queue.toMutableList().apply { add(to, removeAt(from)) }
+            currentIndex = shiftIndex(currentIndex, from, to)
+        }
+    }
+
+    /**
+     * Recomputes [index] after moving an element from position [from] to [to] in
+     * the same list (standard "move element" index arithmetic — mirrors the
+     * `reorderable` library's own local-list update pattern used elsewhere in
+     * the app, e.g. LovedTracksScreen).
+     */
+    private fun shiftIndex(index: Int, from: Int, to: Int): Int = when {
+        index == from -> to
+        from < index && index <= to -> index - 1
+        from > index && index >= to -> index + 1
+        else -> index
+    }
+
     /** Cycles the repeat mode: Off → All → One → Off. */
     fun cycleRepeatMode() {
         repeatMode = repeatMode.next

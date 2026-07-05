@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
@@ -33,6 +34,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +71,18 @@ fun NowPlayingSheet(
     val epgEntries by viewModel.currentEPGEntries.collectAsStateWithLifecycle()
     val isCasting by viewModel.isCasting.collectAsStateWithLifecycle()
     val castDeviceName by viewModel.castDeviceName.collectAsStateWithLifecycle()
+    val isLibrarySource by viewModel.isLibrarySource.collectAsStateWithLifecycle()
+
+    // Library (on-demand) playback is a fundamentally different surface from
+    // live radio — no channel, no EPG/ESPN, a real seekable position, and a
+    // reorderable queue (baw.9.3 / baw.9.5). Branch out to a dedicated
+    // composable rather than threading `channel == null` checks through the
+    // entire radio-oriented body below, which stays untouched.
+    if (isLibrarySource) {
+        LibraryNowPlayingSheet(onDismiss = onDismiss, viewModel = viewModel)
+        return
+    }
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val channel = currentChannel ?: return
 
@@ -322,6 +338,149 @@ fun NowPlayingSheet(
         }
     }
 
+}
+
+/**
+ * Now Playing surface for on-demand library (Navidrome) tracks (baw.9.3 / baw.9.5).
+ *
+ * Deliberately separate from the radio-oriented [NowPlayingSheet] body: there is
+ * no channel/EPG/ESPN concept here, playback is source-agnostic play/pause/stop,
+ * and next/previous drive the library queue via [NowPlayingViewModel.libraryNext] /
+ * [NowPlayingViewModel.libraryPrevious] rather than the radio-only channel methods.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LibraryNowPlayingSheet(
+    onDismiss: () -> Unit,
+    viewModel: NowPlayingViewModel,
+) {
+    val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val track by viewModel.currentLibraryTrack.collectAsStateWithLifecycle()
+    val artworkUrl by viewModel.libraryArtworkUrl.collectAsStateWithLifecycle()
+    val albumTitle by viewModel.libraryAlbumTitle.collectAsStateWithLifecycle()
+    var showUpNext by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val currentTrack = track ?: return
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (artworkUrl != null) {
+                RetryableAsyncImage(
+                    model = artworkUrl,
+                    contentDescription = currentTrack.title,
+                    modifier = Modifier
+                        .size(160.dp)
+                        .clip(RoundedCornerShape(16.dp)),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = null,
+                    modifier = Modifier.size(160.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = currentTrack.title,
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
+            )
+
+            if (currentTrack.artist != null) {
+                Text(
+                    text = currentTrack.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (albumTitle != null) {
+                Text(
+                    text = albumTitle!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (playbackState is PlaybackState.Buffering) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { viewModel.libraryPrevious() }) {
+                    Icon(
+                        Icons.Default.SkipPrevious,
+                        contentDescription = "Previous",
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+
+                FilledIconButton(
+                    onClick = { viewModel.togglePlayPause() },
+                    modifier = Modifier.size(64.dp),
+                ) {
+                    Icon(
+                        imageVector = when (playbackState) {
+                            is PlaybackState.Playing, is PlaybackState.CatchingUp -> Icons.Default.Pause
+                            else -> Icons.Default.PlayArrow
+                        },
+                        contentDescription = "Play/Pause",
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+
+                IconButton(onClick = { viewModel.libraryNext() }) {
+                    Icon(
+                        Icons.Default.SkipNext,
+                        contentDescription = "Next",
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+
+                // Up Next — reorderable queue (baw.9.3). Library-only; radio has no queue.
+                IconButton(onClick = { showUpNext = true }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = "Up Next",
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+
+                IconButton(onClick = { viewModel.stop() }) {
+                    Icon(
+                        Icons.Default.Stop,
+                        contentDescription = "Stop",
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+
+    if (showUpNext) {
+        UpNextSheet(onDismiss = { showUpNext = false })
+    }
 }
 
 /** Isolated Composable so bitrate changes only recompose this text, not the entire sheet. */
