@@ -118,19 +118,8 @@ fun MainScreen(
                             )
                         }
                         NavigationBar {
-                            // Conditionally add Music when the alpha gate is enabled (baw.2.5, baw.2.6).
-                            // Inserted between MyM3Us and Settings for a balanced layout:
-                            //   Channels | Favorites | MyM3Us | Music | Settings
-                            val visibleNavItems = if (settings.musicTabEnabled) {
-                                val base = bottomNavItems.toMutableList()
-                                // Insert Music before Settings
-                                val settingsIdx = base.indexOfFirst { it == Screen.Settings }
-                                base.add(settingsIdx, Screen.Music)
-                                base
-                            } else {
-                                bottomNavItems
-                            }
-                            visibleNavItems.forEach { screen ->
+                            // Live · Library · Loved · Custom M3Us · Settings (beads_adagio-15x.2/.3).
+                            bottomNavItems.forEach { screen ->
                                 NavigationBarItem(
                                     icon = { Icon(screen.icon, contentDescription = screen.label) },
                                     label = { Text(screen.label) },

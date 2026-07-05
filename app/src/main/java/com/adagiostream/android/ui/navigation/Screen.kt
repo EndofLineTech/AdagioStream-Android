@@ -20,27 +20,33 @@ sealed class Screen(
     val label: String,
     val icon: ImageVector,
 ) {
-    data object Channels : Screen("channels", "Channels", Icons.Default.Radio)
+    /**
+     * IPTV channel list — labelled "Live" in the bottom nav (beads_adagio-15x.2).
+     * Route stays "channels" so deep links / saved nav state don't break.
+     */
+    data object Channels : Screen("channels", "Live", Icons.Default.Radio)
 
     /**
      * Full multi-channel EPG guide (beads_adagio-7pm) — reached from a top-bar icon on
      * [Channels], not a bottom-nav slot (tab layout is owned by another workstream).
      */
     data object Guide : Screen("guide", "Guide", Icons.Default.CalendarMonth)
-    data object Favorites : Screen("favorites", "Favorites", Icons.Default.Star)
+
     /**
-     * Loved tracks — retained as a route for deep-linking from Favorites.
-     *
-     * NOTE (baw.2.5): The 'Loved' tab was folded into Favorites to keep the
-     * bottom nav at 5 items (Material Design max) when the Music tab was added.
-     * The LovedTracksScreen is still accessible via a "Loved" button inside
-     * FavoritesScreen — it just no longer has its own bottom-nav slot.
+     * Favorites management screen (beads_adagio-15x.1) — no longer a bottom-nav
+     * destination. Favorites are pinned atop [Channels] instead; this route is
+     * reached via the "Manage" button on that pinned section, and hosts the
+     * drag-to-reorder UX.
      */
+    data object Favorites : Screen("favorites", "Favorites", Icons.Default.Star)
+
+    /** Loved tracks — promoted to a top-level bottom-nav tab (beads_adagio-15x.2). */
     data object Loved : Screen("loved", "Loved", Icons.Default.MusicNote)
     data object Accounts : Screen("accounts", "Accounts", Icons.Default.Storage)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
     data object Groups : Screen("groups", "Groups", Icons.Default.Folder)
-    data object MyM3Us : Screen("my_m3us", "My M3Us", Icons.AutoMirrored.Filled.PlaylistPlay)
+    /** Custom M3U playlists. Route stays "my_m3us" (beads_adagio-15x.2 renames the label only). */
+    data object MyM3Us : Screen("my_m3us", "Custom M3Us", Icons.AutoMirrored.Filled.PlaylistPlay)
     data object PlaylistDetail : Screen("playlist_detail/{playlistId}", "Playlist", Icons.AutoMirrored.Filled.PlaylistPlay) {
         fun createRoute(playlistId: String): String = "playlist_detail/$playlistId"
     }
@@ -54,15 +60,12 @@ sealed class Screen(
     }
 
     /**
-     * Music tab — Navidrome library browse (baw.2.5).
+     * Library tab — Navidrome library browse (baw.2.5).
      *
-     * Replaces the standalone 'Loved' bottom-nav slot.  Loved tracks are now
-     * accessed from inside FavoritesScreen, keeping the nav count at 5.
-     *
-     * Visibility is gated by [AppSettings.musicTabEnabled] (baw.2.6); when
-     * the flag is false the tab is hidden entirely (coded-but-dark).
+     * Labelled "Library" in the bottom nav and always visible (beads_adagio-15x.3
+     * removed the former musicTabEnabled alpha gate). Route stays "music".
      */
-    data object Music : Screen("music", "Music", Icons.Default.Headset)
+    data object Music : Screen("music", "Library", Icons.Default.Headset)
 
     // Music sub-routes (artist, album, and genre detail; no separate bottom-nav items)
     data object ArtistDetail : Screen("music/artist/{artistId}", "Artist", Icons.Default.Headset) {
@@ -130,17 +133,17 @@ sealed class Screen(
 }
 
 /**
- * Base bottom-nav items that are always visible.
+ * Bottom-nav tabs, in display order (beads_adagio-15x.2): Live · Library ·
+ * Loved · Custom M3Us · Settings.
  *
- * Music is NOT included here — it is conditionally appended in [MainScreen]
- * based on [AppSettings.musicTabEnabled] (baw.2.6 alpha gate).
- *
- * The previous 'Loved' item has been replaced by 'Music'; Loved content is
- * accessible from inside FavoritesScreen (baw.2.5 PO decision).
+ * Favorites has no bottom-nav slot — it's pinned atop [Screen.Channels]
+ * instead (beads_adagio-15x.1). Library ([Screen.Music]) is always present;
+ * the former musicTabEnabled alpha gate is gone (beads_adagio-15x.3).
  */
 val bottomNavItems = listOf(
     Screen.Channels,
-    Screen.Favorites,
+    Screen.Music,
+    Screen.Loved,
     Screen.MyM3Us,
     Screen.Settings,
 )
