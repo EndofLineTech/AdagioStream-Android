@@ -96,8 +96,10 @@ fun EPGBottomSheet(
     }
 }
 
+// internal (not private): reused by the multi-channel guide screen to avoid duplicating
+// program-row rendering. See ui/screens/guide/GuideScreen.kt.
 @Composable
-private fun EPGListingItem(entry: EPGEntry) {
+internal fun EPGListingItem(entry: EPGEntry) {
     val itemAlpha = if (entry.isCurrentlyAiring || entry.isUpcoming) 1f else 0.6f
     Column(
         modifier = Modifier

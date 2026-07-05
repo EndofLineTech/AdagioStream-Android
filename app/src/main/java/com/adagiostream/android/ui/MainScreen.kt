@@ -35,6 +35,7 @@ import com.adagiostream.android.ui.screens.accounts.AccountsScreen
 import com.adagiostream.android.ui.screens.accounts.AddAccountScreen
 import com.adagiostream.android.ui.screens.channels.ChannelsScreen
 import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
+import com.adagiostream.android.ui.screens.guide.GuideScreen
 import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
 import com.adagiostream.android.ui.screens.licenses.LicensesScreen
 import com.adagiostream.android.ui.screens.privacy.PrivacyPolicyScreen
@@ -167,7 +168,15 @@ fun MainScreen(
                     )
                 }
                 composable(Screen.Channels.route) {
-                    ChannelsScreen()
+                    ChannelsScreen(
+                        onOpenGuide = { navController.navigate(Screen.Guide.route) },
+                    )
+                }
+                composable(Screen.Guide.route) {
+                    GuideScreen(
+                        onBack = { navController.popBackStack() },
+                        onChannelTuned = { navController.popBackStack() },
+                    )
                 }
                 composable(Screen.Favorites.route) {
                     FavoritesScreen(

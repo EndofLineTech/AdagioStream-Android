@@ -1,6 +1,7 @@
 package com.adagiostream.android.ui.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
@@ -20,6 +21,12 @@ sealed class Screen(
     val icon: ImageVector,
 ) {
     data object Channels : Screen("channels", "Channels", Icons.Default.Radio)
+
+    /**
+     * Full multi-channel EPG guide (beads_adagio-7pm) — reached from a top-bar icon on
+     * [Channels], not a bottom-nav slot (tab layout is owned by another workstream).
+     */
+    data object Guide : Screen("guide", "Guide", Icons.Default.CalendarMonth)
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Star)
     /**
      * Loved tracks — retained as a route for deep-linking from Favorites.
