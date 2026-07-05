@@ -14,6 +14,17 @@ object UrlSanitizer {
         RegexOption.IGNORE_CASE,
     )
 
+    /**
+     * Matches Subsonic short-form auth params: u=, t=, s=
+     *
+     * Uses `[?&](u|t|s)=` to match only as a query param start — avoids
+     * over-matching arbitrary params like `type=`, `size=`, `url=`, etc.
+     *
+     * The leading `[?&]` is captured in group 1 so it can be preserved in
+     * the replacement output.
+     */
+    private val subsonicAuthParamPattern = Regex("""([?&])(u|t|s)=([^&\s]*)""")
+
     fun redact(text: String): String {
         var result = text
         result = queryParamPattern.replace(result) { "${it.groupValues[1]}****" }
@@ -22,6 +33,10 @@ object UrlSanitizer {
             "/$type/****/****/"
         }
         result = basicAuthHeaderPattern.replace(result) { "${it.groupValues[1]}****" }
+        // Redact Subsonic short-form auth params: u=, t=, s=
+        result = subsonicAuthParamPattern.replace(result) {
+            "${it.groupValues[1]}${it.groupValues[2]}=****"
+        }
         return result
     }
 

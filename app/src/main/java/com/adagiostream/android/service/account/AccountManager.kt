@@ -38,7 +38,7 @@ class AccountManager @Inject constructor(
     private val client: OkHttpClient,
     private val xmPlaylistApi: XMPlaylistApi,
     private val espnScoreService: ESPNScoreService,
-) {
+) : AccountRepository {
     companion object
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -47,7 +47,7 @@ class AccountManager @Inject constructor(
     private val epgParser = EPGParser(client)
 
     private val _accounts = MutableStateFlow<List<Account>>(emptyList())
-    val accounts: StateFlow<List<Account>> = _accounts.asStateFlow()
+    override val accounts: StateFlow<List<Account>> = _accounts.asStateFlow()
 
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
@@ -242,6 +242,9 @@ class AccountManager @Inject constructor(
                     val channels = when (account.type) {
                         is AccountType.M3U -> m3uParser.parse(account.type.url)
                         is AccountType.XtreamCodes -> xtreamApi.getChannels(account.type)
+                        // Subsonic/Navidrome accounts are music providers — they produce no
+                        // IPTV channels. Library browsing is handled separately in E2.
+                        is AccountType.Subsonic -> emptyList()
                     }
                     val strip = (account.type as? AccountType.XtreamCodes)?.stripStreamIDs == true
                     allChannels.addAll(channels.map {
@@ -446,6 +449,8 @@ class AccountManager @Inject constructor(
                         // EPG loading is best-effort; on-demand fallback still available
                     }
                 }
+                // Subsonic/Navidrome accounts have no EPG — music library only.
+                is AccountType.Subsonic -> Unit
             }
         }
 
@@ -513,6 +518,17 @@ class AccountManager @Inject constructor(
     fun stopTrackMetadataPolling() {
         trackMetadataJob?.cancel()
         trackMetadataJob = null
+    }
+
+    /**
+     * The track that was playing on [channel] at [atEpochMillis] — used during
+     * time-shift catch-up so the display track matches the buffered audio
+     * instead of the live now-playing track. Null if the channel has no XM
+     * deeplink or no history covers that moment.
+     */
+    fun historicalTrackMetadata(channel: Channel, atEpochMillis: Long): TrackMetadata? {
+        val deeplink = xmPlaylistApi.deeplinkForChannel(channel.id) ?: return null
+        return xmPlaylistApi.trackAt(deeplink, atEpochMillis)
     }
 
     private fun rebuildGroups() {

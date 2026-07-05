@@ -1,6 +1,9 @@
 package com.adagiostream.android.model
 
+import com.adagiostream.android.service.player.RepeatMode
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppSettingsTest {
@@ -35,6 +38,21 @@ class AppSettingsTest {
         assertEquals(TextSizeMode.M, defaults.textSizeMode)
         assertEquals(SortMode.ALPHABETICAL, defaults.sortMode)
         assertEquals(SortMode.ALPHABETICAL, defaults.groupSortMode)
+        assertEquals(AutoSourceOrder.STREAMING_FIRST, defaults.autoSourceOrder)
+    }
+
+    @Test
+    fun `offlineMode defaults false and survives a JSON round-trip`() {
+        val json = Json { ignoreUnknownKeys = true }
+        assertEquals(false, AppSettings().offlineMode)
+
+        val decoded = json.decodeFromString<AppSettings>(
+            json.encodeToString(AppSettings.serializer(), AppSettings(offlineMode = true)),
+        )
+        assertEquals(true, decoded.offlineMode)
+
+        // Settings blobs written before baw.12 have no offlineMode key — must decode to false.
+        assertEquals(false, json.decodeFromString<AppSettings>("{}").offlineMode)
     }
 
     @Test
@@ -48,5 +66,66 @@ class AppSettingsTest {
         TextSizeMode.entries.forEach { mode ->
             assert(mode.displayName.isNotBlank()) { "${mode.name} has blank displayName" }
         }
+    }
+
+    // ---- shuffle/repeat persistence round-trip (baw.9.4 / baw.16) -----------
+
+    @Test
+    fun `AppSettings round-trips shuffleEnabled and repeatMode through JSON`() {
+        val json = Json { encodeDefaults = true }
+        val settings = AppSettings(shuffleEnabled = true, repeatMode = RepeatMode.All)
+
+        val encoded = json.encodeToString(AppSettings.serializer(), settings)
+        val decoded = json.decodeFromString(AppSettings.serializer(), encoded)
+
+        assertEquals(settings, decoded)
+        // Pin the on-disk key/value shape — a silent rename here would strand
+        // every user's persisted shuffle/repeat state on the next app read.
+        assertTrue(
+            "expected shuffleEnabled:true in persisted JSON but was: $encoded",
+            encoded.contains("\"shuffleEnabled\":true"),
+        )
+        assertTrue(
+            "expected repeatMode:All in persisted JSON but was: $encoded",
+            encoded.contains("\"repeatMode\":\"All\""),
+        )
+    }
+
+    @Test
+    fun `AppSettings defaults shuffleEnabled false and repeatMode Off`() {
+        val defaults = AppSettings()
+        assertEquals(false, defaults.shuffleEnabled)
+        assertEquals(RepeatMode.Off, defaults.repeatMode)
+    }
+
+    // ---- tab reorg (beads_adagio-15x) ---------------------------------------
+
+    @Test
+    fun `hasSeenTabReorgTip defaults false and survives a JSON round-trip`() {
+        val json = Json { ignoreUnknownKeys = true }
+        assertEquals(false, AppSettings().hasSeenTabReorgTip)
+
+        val decoded = json.decodeFromString<AppSettings>(
+            json.encodeToString(AppSettings.serializer(), AppSettings(hasSeenTabReorgTip = true)),
+        )
+        assertEquals(true, decoded.hasSeenTabReorgTip)
+
+        // No key at all (pre-15x.4 blob) must decode to false, not throw.
+        assertEquals(false, json.decodeFromString<AppSettings>("{}").hasSeenTabReorgTip)
+    }
+
+    @Test
+    fun `a settings blob with the removed musicTabEnabled key still decodes`() {
+        // beads_adagio-15x.3 removed AppSettings.musicTabEnabled. Pre-upgrade
+        // users have this key sitting in their on-disk settings.json;
+        // ignoreUnknownKeys must let it decode instead of falling back to
+        // all-defaults (which would silently reset every other setting too).
+        val json = Json { ignoreUnknownKeys = true }
+        val legacyBlob = """{"musicTabEnabled":true,"debugLoggingEnabled":true}"""
+
+        val decoded = json.decodeFromString<AppSettings>(legacyBlob)
+
+        assertEquals(true, decoded.debugLoggingEnabled)
+        assertEquals(false, decoded.hasSeenTabReorgTip)
     }
 }

@@ -21,6 +21,52 @@ A feature-rich IPTV audio streaming app for Android. Manage multiple streaming p
 - **Privacy First** — Zero analytics, zero tracking, all data stored locally on device
 - **GDPR Compliant** — Export your data, delete all data, in-app privacy policy
 
+## Connecting a Navidrome / Subsonic Server
+
+> **Note:** Music library browsing and playback are in progress — this
+> release establishes the server connection foundation.
+
+To add a Navidrome (or any Subsonic-compatible) server:
+
+1. In the app, go to **Settings → Accounts** and tap **+**.
+2. Select the **Navidrome** tab.
+3. Fill in your server details:
+
+   | Field | Example |
+   |-------|---------|
+   | **Server URL** | `http://192.168.1.10:4533` or `https://music.example.com` |
+   | **Username** | your Navidrome username |
+   | **Password** | your Navidrome password |
+   | **Display Name** (optional) | `My Navidrome` — defaults to the server hostname |
+
+4. Tap **Test Connection**. Once the test passes, **Save** becomes available.
+
+### http vs. https
+
+Both `http://` and `https://` URLs are accepted. Most home Navidrome
+instances run on a local IP over plain http (e.g. `http://192.168.1.10:4533`
+on port 4533 by default); the app supports that.
+
+When you enter an `http://` URL, the app shows a warning: *"http is
+unencrypted. Your token auth is still safe, but the connection isn't private.
+Use https if your server supports it."* Authentication uses the Subsonic
+token + salt protocol (an MD5 hash of your password and a random salt), so
+your password is never transmitted in plaintext even over http. On a trusted
+home network, http is generally acceptable; if your server is exposed to the
+internet, use https.
+
+### Test Connection results
+
+| Result | What to do |
+|--------|------------|
+| **Connection successful** | Credentials accepted — tap **Save**. |
+| Incorrect username or password | Double-check your Navidrome username and password. |
+| Can't reach server — check the URL | Verify the URL and port; confirm the device is on the same network as the server. |
+| That doesn't look like a Subsonic/Navidrome server | The URL may point to the wrong service or an incorrect reverse-proxy path. |
+| Enter a valid server URL | Enter a full `http://` or `https://` URL including the port if required. |
+| Server error (HTTP _n_) | The server returned an unexpected error — try again or check server logs. |
+| Unexpected response from the server | The server responded but the app couldn't parse it — verify it is a Navidrome or Subsonic-compatible server. |
+
 ## Requirements
 
 - Android 8.0 (API 26) or newer

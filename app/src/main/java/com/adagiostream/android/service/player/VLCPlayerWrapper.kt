@@ -31,7 +31,7 @@ class VLCPlayerWrapper(
     private val context: Context,
     initialBufferSeconds: Int = 10,
     val castManager: CastManager,
-) {
+) : LibraryTrackPlayer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val _playbackState = kotlinx.coroutines.flow.MutableStateFlow<PlaybackState>(PlaybackState.Idle)
@@ -39,6 +39,20 @@ class VLCPlayerWrapper(
 
     private val _currentChannel = kotlinx.coroutines.flow.MutableStateFlow<Channel?>(null)
     val currentChannel: kotlinx.coroutines.flow.StateFlow<Channel?> = _currentChannel
+
+    // PlaybackSource seam (baw.3.7). Today only Radio is ever assigned — it
+    // mirrors _currentChannel during live playback. baw.3.2 will assign Library
+    // when a track is played. getState() and the EndReached handler branch on
+    // this via PlaybackContract; a null source is treated as live (conservative).
+    private val _playbackSource = kotlinx.coroutines.flow.MutableStateFlow<PlaybackSource?>(null)
+    val playbackSource: kotlinx.coroutines.flow.StateFlow<PlaybackSource?> = _playbackSource
+
+    /**
+     * Invoked when a [PlaybackSource.Library] track ends naturally (libVLC
+     * EndReached + AutoAdvance policy). Wired by baw.3.2 to advance the queue.
+     * Null / unused while only live radio plays.
+     */
+    var onLibraryTrackEnded: (() -> Unit)? = null
 
     private val _bitrateKbps = kotlinx.coroutines.flow.MutableStateFlow(0f)
     val bitrateKbps: kotlinx.coroutines.flow.StateFlow<Float> = _bitrateKbps
@@ -268,27 +282,38 @@ class VLCPlayerWrapper(
                 stopBitratePolling()
                 accumulateListeningSegment()
             }
-            MediaPlayer.Event.EndReached -> {
-                // Ignore stale events from channel switches or user-initiated stop
-                if (!isSwitchingChannels && _currentChannel.value != null) {
-                    // When buffer playback ends, go back to live
-                    if (isPlayingBufferedFile) {
-                        DebugLogger.log("TimeShift: buffer playback ended, returning to live", DebugLogger.Category.TIMESHIFT)
-                        isPlayingBufferedFile = false
-                        val liveChannel = liveChannelForCatchUp
-                        liveChannelForCatchUp = null
-                        if (liveChannel != null) {
-                            _timeShiftMs.value = 0L
-                            doPlay(liveChannel)
+            MediaPlayer.Event.EndReached -> when (PlaybackContract.endReachedPolicy(_playbackSource.value)) {
+                // Library track finished — auto-advance the queue (baw.3.2 wires the callback).
+                EndReachedPolicy.AutoAdvance -> {
+                    if (!isSwitchingChannels) {
+                        DebugLogger.log("EndReached — library track ended, auto-advancing", DebugLogger.Category.VLC)
+                        onLibraryTrackEnded?.invoke()
+                    }
+                }
+                // Live radio (or no source): unchanged behaviour — a live stream
+                // should never legitimately end, so treat EndReached as transient.
+                EndReachedPolicy.RetryAsError -> {
+                    // Ignore stale events from channel switches or user-initiated stop
+                    if (!isSwitchingChannels && _currentChannel.value != null) {
+                        // When buffer playback ends, go back to live
+                        if (isPlayingBufferedFile) {
+                            DebugLogger.log("TimeShift: buffer playback ended, returning to live", DebugLogger.Category.TIMESHIFT)
+                            isPlayingBufferedFile = false
+                            val liveChannel = liveChannelForCatchUp
+                            liveChannelForCatchUp = null
+                            if (liveChannel != null) {
+                                _timeShiftMs.value = 0L
+                                doPlay(liveChannel)
+                            }
+                        } else if (retryCount < MAX_RETRIES) {
+                            // Live streams shouldn't legitimately end — treat as a transient
+                            // failure (typical cause: network swap, e.g. wifi → mobile).
+                            retryConnection("Stream ended")
+                        } else {
+                            DebugLogger.log("EndReached — stream ended for ${_currentChannel.value?.name} (retries exhausted)", DebugLogger.Category.VLC)
+                            _playbackState.value = PlaybackState.Error("Stream ended")
+                            stopBitratePolling()
                         }
-                    } else if (retryCount < MAX_RETRIES) {
-                        // Live streams shouldn't legitimately end — treat as a transient
-                        // failure (typical cause: network swap, e.g. wifi → mobile).
-                        retryConnection("Stream ended")
-                    } else {
-                        DebugLogger.log("EndReached — stream ended for ${_currentChannel.value?.name} (retries exhausted)", DebugLogger.Category.VLC)
-                        _playbackState.value = PlaybackState.Error("Stream ended")
-                        stopBitratePolling()
                     }
                 }
             }
@@ -470,6 +495,7 @@ class VLCPlayerWrapper(
         stopBitratePolling()
 
         _currentChannel.value = channel
+        _playbackSource.value = PlaybackSource.Radio(channel)
         _playbackState.value = PlaybackState.Buffering
         _bitrateKbps.value = 0f
         peakBitrateKbps = 0f
@@ -506,6 +532,101 @@ class VLCPlayerWrapper(
         mediaPlayer.media = media
         media.release() // MediaPlayer holds its own reference
         mediaPlayer.play()
+    }
+
+    /**
+     * Plays a Navidrome library track from [streamUrl] (baw.3.2).
+     *
+     * Mirrors [doPlay] but for on-demand content: it switches the player out of
+     * radio mode (clears [currentChannel], so the live auto-reconnect / retry
+     * paths stay dormant) and sets [playbackSource] to [source]. From that point
+     * [PlaybackContract] routes EndReached to auto-advance and reports the track as
+     * seekable with a real duration. The canonical queue/index live in
+     * [MusicQueueManager]; this only renders the audio for the active track.
+     *
+     * [startPositionMs] (baw.10 resume-at-position) is applied via a VLC
+     * `:start-time=` media option BEFORE `mediaPlayer.play()` — the demuxer
+     * seeks during Opening, so no audio ever renders from position 0 and
+     * baw.11's iOS-style mute-during-seek workaround has no window to hide.
+     * This assumes the stream is seekable at open (local file or
+     * byte-range-servable HTTP — the same assumption [seekToPositionMs] makes
+     * for the scrubber); behavior against a forced-transcode Subsonic stream
+     * is unverified (tracked as baw.15).
+     */
+    override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library, startPositionMs: Long) {
+        DebugLogger.log(
+            "playLibraryTrack(): track=${source.currentTrack.title}, index=${source.index}/${source.queue.size}, startPositionMs=$startPositionMs",
+            DebugLogger.Category.PLAYER,
+        )
+        pendingPlayJob?.cancel()
+        retryJob?.cancel()
+        retryCount = 0
+        hasReceivedPlayingEvent = false
+
+        // Guard against stale VLC events FIRST, before updating state.
+        isSwitchingChannels = true
+        mediaPlayer.stop()
+        stopBitratePolling()
+
+        // Library, not radio: clear the channel so live-only logic (network
+        // reconnect, EndReached-as-error, XM polling) stays dormant.
+        _currentChannel.value = null
+        _playbackSource.value = source
+        _playbackState.value = PlaybackState.Buffering
+        _bitrateKbps.value = 0f
+        peakBitrateKbps = 0f
+        _streamStartedAt.value = System.currentTimeMillis()
+        _timeShiftMs.value = 0L
+        pausedAtSystemTime = 0L
+        _listeningTimeMs.value = 0L
+        listeningSegmentStartTime = 0L
+
+        ContextCompat.startForegroundService(
+            context, Intent(context, AudioPlaybackService::class.java)
+        )
+
+        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
+        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            DebugLogger.log("Library play blocked — audio focus denied", DebugLogger.Category.AUDIO)
+            _playbackState.value = PlaybackState.Idle
+            return
+        }
+
+        val media = Media(libVLC, Uri.parse(streamUrl))
+        media.setHWDecoderEnabled(true, false)
+        media.addOption(":no-video")
+        if (startPositionMs > 0) {
+            media.addOption(":start-time=${startPositionMs / 1000.0}")
+        }
+        mediaPlayer.media = media
+        media.release()
+        mediaPlayer.play()
+    }
+
+    /**
+     * Refreshes the active library snapshot without restarting playback (baw.9.3).
+     * Used after a queue reorder so Up Next / Android Auto pick up the new order.
+     * No-op when the player is not currently in a library session (radio, or
+     * nothing playing) — a stale/late refresh must never override a live source.
+     */
+    override fun updateLibrarySource(source: PlaybackSource.Library) {
+        if (_playbackSource.value !is PlaybackSource.Library) return
+        _playbackSource.value = source
+    }
+
+    /** Current playback position in milliseconds (library scrubber; baw.3.6). */
+    fun currentPositionMs(): Long = mediaPlayer.time.coerceAtLeast(0L)
+
+    /**
+     * Seeks the active library track to [positionMs], clamped into the track's
+     * known duration (baw.3.6). Live radio never calls this — it is non-seekable
+     * per [PlaybackContract].
+     */
+    fun seekToPositionMs(positionMs: Long) {
+        val durationMs = mediaPlayer.length // -1 when unknown
+        val target = clampSeekMs(positionMs, durationMs)
+        DebugLogger.log("seekToPositionMs(): requested=$positionMs, clamped=$target, len=$durationMs", DebugLogger.Category.PLAYER)
+        mediaPlayer.time = target
     }
 
     private fun retryConnection(reason: String) {
@@ -570,7 +691,7 @@ class VLCPlayerWrapper(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         DebugLogger.log("stop(): channel=${_currentChannel.value?.name}", DebugLogger.Category.PLAYER)
         pendingPlayJob?.cancel()
         retryJob?.cancel()
@@ -583,6 +704,7 @@ class VLCPlayerWrapper(
         hasReceivedPlayingEvent = false
         lastTeardownTime = System.currentTimeMillis()
         _currentChannel.value = null  // Clear before stop so async events are ignored
+        _playbackSource.value = null
         if (castManager.isCasting.value) {
             castManager.stop()
         }

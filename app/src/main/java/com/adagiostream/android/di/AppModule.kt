@@ -6,11 +6,15 @@ import com.adagiostream.android.service.metadata.ITunesSearchApi
 import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.CastManager
+import com.adagiostream.android.service.player.LibraryTrackPlayer
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import coil3.ImageLoader
 import coil3.disk.DiskCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.CachePolicy
+import com.adagiostream.android.service.navidrome.NavidromeCoverArtFetcher
+import com.adagiostream.android.service.navidrome.NavidromeCoverArtKeyer
+import com.adagiostream.android.service.navidrome.NavidromeCoverArtRequest
 import dagger.Module
 import okio.Path.Companion.toOkioPath
 import dagger.Provides
@@ -57,6 +61,16 @@ object AppModule {
         return VLCPlayerWrapper(context, settings.bufferDurationSeconds.coerceIn(5, 15), castManager)
     }
 
+    /**
+     * Binds the [VLCPlayerWrapper] singleton as the [LibraryTrackPlayer] port the
+     * [com.adagiostream.android.service.player.MusicPlaybackCoordinator] drives —
+     * the coordinator depends on the interface (not the concrete wrapper) so it is
+     * unit-testable on the JVM without native libVLC.
+     */
+    @Provides
+    @Singleton
+    fun provideLibraryTrackPlayer(wrapper: VLCPlayerWrapper): LibraryTrackPlayer = wrapper
+
     @Provides
     @Singleton
     fun provideXMPlaylistApi(client: OkHttpClient): XMPlaylistApi = XMPlaylistApi(client)
@@ -71,9 +85,20 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideImageLoader(@ApplicationContext context: Context): ImageLoader =
+    fun provideImageLoader(
+        @ApplicationContext context: Context,
+        client: OkHttpClient,
+    ): ImageLoader =
         ImageLoader.Builder(context)
-            .components { add(OkHttpNetworkFetcherFactory()) }
+            .components {
+                // Standard OkHttp fetcher for regular https:// URLs.
+                add(OkHttpNetworkFetcherFactory(callFactory = { client }))
+                // Navidrome cover art: stable cache key + authenticated URL fetch.
+                // The keyer MUST be registered before the fetcher factory so Coil
+                // uses it during cache-key resolution for NavidromeCoverArtRequest.
+                add(NavidromeCoverArtKeyer())
+                add(NavidromeCoverArtFetcher.Factory(client))
+            }
             .memoryCachePolicy(CachePolicy.ENABLED)
             .diskCache {
                 DiskCache.Builder()

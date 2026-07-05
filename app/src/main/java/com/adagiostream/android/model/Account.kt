@@ -29,4 +29,22 @@ sealed interface AccountType {
         val password: String,
         val stripStreamIDs: Boolean = false,
     ) : AccountType
+
+    /**
+     * A Navidrome / Subsonic music server account.
+     *
+     * Credentials ([password]) persist ONLY through the existing AES-256-GCM
+     * encrypted accounts store (PersistenceService / Android Keystore) — never
+     * in plaintext, never in Room/JSON library cache, never logged.
+     *
+     * Music accounts produce no IPTV channels; the [AccountManager.loadAllChannels]
+     * exhaustive `when` branch for Subsonic is a no-op.
+     */
+    @Serializable
+    @SerialName("subsonic")
+    data class Subsonic(
+        val host: String,
+        val username: String,
+        val password: String,
+    ) : AccountType
 }

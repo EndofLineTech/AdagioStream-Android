@@ -32,9 +32,19 @@ class SettingsViewModelTest {
     private val accountManager = mockk<AccountManager>(relaxed = true)
     private val vlcPlayerWrapper = mockk<VLCPlayerWrapper>(relaxed = true)
     private val espnScoreService = mockk<ESPNScoreService>(relaxed = true)
+    private val downloadManager = mockk<com.adagiostream.android.service.download.DownloadManager>(relaxed = true)
+    private val musicLibraryRepository =
+        mockk<com.adagiostream.android.service.library.MusicLibraryRepository>(relaxed = true)
 
     private fun createViewModel(): SettingsViewModel {
-        return SettingsViewModel(persistenceService, accountManager, vlcPlayerWrapper, espnScoreService)
+        return SettingsViewModel(
+            persistenceService,
+            accountManager,
+            vlcPlayerWrapper,
+            espnScoreService,
+            downloadManager,
+            musicLibraryRepository,
+        )
     }
 
     // --- Buffer Duration ---
@@ -97,6 +107,38 @@ class SettingsViewModelTest {
         vm.updateAppearanceMode(AppearanceMode.LIGHT)
         advanceUntilIdle()
         coVerify { persistenceService.saveSettings(match { it.appearanceMode == AppearanceMode.LIGHT }) }
+    }
+
+    // --- Offline Mode (baw.12) ---
+
+    @Test
+    fun `updateOfflineMode updates settings and persists`() = runTest {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        vm.updateOfflineMode(true)
+        advanceUntilIdle()
+        assertEquals(true, vm.settings.value.offlineMode)
+        coVerify { persistenceService.saveSettings(match { it.offlineMode }) }
+
+        vm.updateOfflineMode(false)
+        advanceUntilIdle()
+        assertEquals(false, vm.settings.value.offlineMode)
+        coVerify { persistenceService.saveSettings(match { !it.offlineMode }) }
+    }
+
+    // --- Tab reorg tip (beads_adagio-15x.4) ---
+
+    @Test
+    fun `markTabReorgTipSeen flips the flag and persists`() = runTest {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        assertEquals(false, vm.settings.value.hasSeenTabReorgTip)
+
+        vm.markTabReorgTipSeen()
+        advanceUntilIdle()
+
+        assertEquals(true, vm.settings.value.hasSeenTabReorgTip)
+        coVerify { persistenceService.saveSettings(match { it.hasSeenTabReorgTip }) }
     }
 
     // --- Text Size ---

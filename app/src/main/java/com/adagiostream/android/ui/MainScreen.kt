@@ -4,11 +4,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,10 +37,21 @@ import com.adagiostream.android.ui.screens.accounts.AccountsScreen
 import com.adagiostream.android.ui.screens.accounts.AddAccountScreen
 import com.adagiostream.android.ui.screens.channels.ChannelsScreen
 import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
+import com.adagiostream.android.ui.screens.guide.GuideScreen
 import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
 import com.adagiostream.android.ui.screens.licenses.LicensesScreen
 import com.adagiostream.android.ui.screens.privacy.PrivacyPolicyScreen
 import com.adagiostream.android.ui.screens.loved.LovedTracksScreen
+import com.adagiostream.android.ui.screens.music.AlbumBrowseScreen
+import com.adagiostream.android.ui.screens.music.AlbumDetailScreen
+import com.adagiostream.android.ui.screens.music.ArtistDetailScreen
+import com.adagiostream.android.ui.screens.music.GenreBrowseScreen
+import com.adagiostream.android.ui.screens.music.GenreDetailScreen
+import com.adagiostream.android.ui.screens.music.MusicLibraryScreen
+import com.adagiostream.android.ui.screens.music.NavidromePlaylistDetailScreen
+import com.adagiostream.android.ui.screens.music.NavidromePlaylistListScreen
+import com.adagiostream.android.ui.screens.music.SearchResultsScreen
+import com.adagiostream.android.ui.screens.music.StorageManagementScreen
 import com.adagiostream.android.ui.screens.m3us.MyM3UsScreen
 import com.adagiostream.android.ui.screens.m3us.PlaylistDetailScreen
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
@@ -107,6 +120,7 @@ fun MainScreen(
                             )
                         }
                         NavigationBar {
+                            // Live · Library · Loved · Custom M3Us · Settings (beads_adagio-15x.2/.3).
                             bottomNavItems.forEach { screen ->
                                 NavigationBarItem(
                                     icon = { Icon(screen.icon, contentDescription = screen.label) },
@@ -146,13 +160,131 @@ fun MainScreen(
                     )
                 }
                 composable(Screen.Channels.route) {
-                    ChannelsScreen()
+                    ChannelsScreen(
+                        onOpenGuide = { navController.navigate(Screen.Guide.route) },
+                        onManageFavorites = { navController.navigate(Screen.Favorites.route) },
+                    )
+                }
+                composable(Screen.Guide.route) {
+                    GuideScreen(
+                        onBack = { navController.popBackStack() },
+                        onChannelTuned = { navController.popBackStack() },
+                    )
                 }
                 composable(Screen.Favorites.route) {
                     FavoritesScreen()
                 }
                 composable(Screen.Loved.route) {
                     LovedTracksScreen()
+                }
+                // Library tab routes (baw.2.5) — always visible (beads_adagio-15x.3).
+                composable(Screen.Music.route) {
+                    MusicLibraryScreen(
+                        onArtistClick = { artistId ->
+                            navController.navigate(Screen.ArtistDetail.createRoute(artistId))
+                        },
+                        onGenresClick = {
+                            navController.navigate(Screen.GenreBrowse.route)
+                        },
+                        onAlbumsClick = {
+                            navController.navigate(Screen.AlbumBrowse.route)
+                        },
+                        onSearchClick = {
+                            navController.navigate(Screen.MusicSearch.route)
+                        },
+                        onPlaylistsClick = {
+                            navController.navigate(Screen.NavidromePlaylistList.route)
+                        },
+                        onAddAccountClick = {
+                            navController.navigate(Screen.AddAccount.createRoute())
+                        },
+                    )
+                }
+                // Search screen (baw.4.1)
+                composable(Screen.MusicSearch.route) {
+                    SearchResultsScreen(
+                        onBack = { navController.popBackStack() },
+                        onArtistClick = { artistId ->
+                            navController.navigate(Screen.ArtistDetail.createRoute(artistId))
+                        },
+                        onAlbumClick = { albumId ->
+                            navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                        },
+                    )
+                }
+                // Navidrome playlist list (baw.4.2)
+                composable(Screen.NavidromePlaylistList.route) {
+                    NavidromePlaylistListScreen(
+                        onBack = { navController.popBackStack() },
+                        onPlaylistClick = { playlistId ->
+                            navController.navigate(Screen.NavidromePlaylistDetail.createRoute(playlistId))
+                        },
+                    )
+                }
+                // Navidrome playlist detail (baw.4.2 / baw.4.3)
+                composable(
+                    route = Screen.NavidromePlaylistDetail.route,
+                    arguments = listOf(
+                        navArgument("playlistId") { type = NavType.StringType },
+                    ),
+                ) { backStackEntry ->
+                    val playlistId = backStackEntry.arguments?.getString("playlistId") ?: ""
+                    NavidromePlaylistDetailScreen(
+                        onBack = { navController.popBackStack() },
+                        playlistId = playlistId,
+                    )
+                }
+                composable(
+                    route = Screen.ArtistDetail.route,
+                    arguments = listOf(
+                        navArgument("artistId") { type = NavType.StringType },
+                    ),
+                ) {
+                    ArtistDetailScreen(
+                        onAlbumClick = { albumId ->
+                            navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = Screen.AlbumDetail.route,
+                    arguments = listOf(
+                        navArgument("albumId") { type = NavType.StringType },
+                    ),
+                ) {
+                    AlbumDetailScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                // Album browse route (baw.9.1)
+                composable(Screen.AlbumBrowse.route) {
+                    AlbumBrowseScreen(
+                        onAlbumClick = { albumId ->
+                            navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                // Genre browse routes (baw.2.4)
+                composable(Screen.GenreBrowse.route) {
+                    GenreBrowseScreen(
+                        onGenreClick = { genreName ->
+                            navController.navigate(Screen.GenreDetail.createRoute(genreName))
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = Screen.GenreDetail.route,
+                    arguments = listOf(
+                        navArgument("genreName") { type = NavType.StringType },
+                    ),
+                ) {
+                    GenreDetailScreen(
+                        onBack = { navController.popBackStack() },
+                        backStackEntry = it,
+                    )
                 }
                 composable(Screen.MyM3Us.route) {
                     MyM3UsScreen(
@@ -182,11 +314,19 @@ fun MainScreen(
                         onBack = { navController.popBackStack() },
                     )
                 }
+                composable(Screen.DownloadedMusic.route) {
+                    StorageManagementScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
                 composable(Screen.Settings.route) {
                     SettingsScreen(
                         viewModel = settingsViewModel,
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)
+                        },
+                        onNavigateToDownloads = {
+                            navController.navigate(Screen.DownloadedMusic.route)
                         },
                         onNavigateToGroups = {
                             navController.navigate(Screen.Groups.route)
@@ -241,6 +381,30 @@ fun MainScreen(
             NowPlayingSheet(
                 onDismiss = { showNowPlaying = false },
                 artworkDisplayMode = settings.artworkDisplayMode,
+            )
+        }
+
+        // One-time "We Reorganized" tip (beads_adagio-15x.4) — explains the tab
+        // moves once setup is complete. Can't cheaply tell an upgrading user
+        // from a fresh install, so this shows once to everyone (see AppSettings
+        // .hasSeenTabReorgTip kdoc). !showSplash: AlertDialog renders in its own
+        // Window above the Compose tree, so without this gate it would float
+        // over the splash animation (beads_adagio-15x.5).
+        if (!showSplash && !isOnSetup && settings.setupCompleted && !settings.hasSeenTabReorgTip) {
+            AlertDialog(
+                onDismissRequest = { settingsViewModel.markTabReorgTipSeen() },
+                title = { Text("We Reorganized") },
+                text = {
+                    Text(
+                        "Favorites now pin to the top of Live. Loved has its own tab. " +
+                            "And there's a new Library tab for your music.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { settingsViewModel.markTabReorgTipSeen() }) {
+                        Text("Got it")
+                    }
+                },
             )
         }
 

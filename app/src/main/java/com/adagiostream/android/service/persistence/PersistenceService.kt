@@ -7,8 +7,12 @@ import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.CustomPlaylist
 import com.adagiostream.android.model.LovedTrack
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -30,7 +34,14 @@ class PersistenceService(
         private const val GCM_IV_LENGTH = 12
     }
 
-    private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    // ponytail: lazy, not eager — AndroidKeyStore is only needed by the
+    // encrypted-accounts path (encrypt/decrypt below). Eager init made this
+    // whole class impossible to construct under Robolectric (no AndroidKeyStore
+    // provider) even for callers that never touch accounts, e.g. last-played
+    // persistence (baw.10). Note this relocates any keystore failure from
+    // DI-construction time to first encrypted-accounts use — a scoping
+    // improvement, not identical failure timing.
+    private val keyStore: KeyStore by lazy { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } }
 
     private fun getOrCreateKey(): SecretKey {
         keyStore.getEntry(KEYSTORE_ALIAS, null)?.let { entry ->
@@ -157,6 +168,15 @@ class PersistenceService(
         favoritesFile.writeText(json.encodeToString(ids))
     }
 
+    /**
+     * Live settings — seeded from disk on first access, updated on every
+     * [saveSettings] (baw.12). Lets managers/ViewModels react to settings
+     * changed elsewhere (e.g. the offline-mode toggle in Settings) without
+     * re-reading the file.
+     */
+    private val _settings by lazy { MutableStateFlow(loadSettingsSync()) }
+    val settings: StateFlow<AppSettings> get() = _settings
+
     fun loadSettingsSync(): AppSettings {
         return try {
             if (settingsFile.exists()) {
@@ -175,6 +195,7 @@ class PersistenceService(
 
     suspend fun saveSettings(settings: AppSettings) = mutex.withLock {
         settingsFile.writeText(json.encodeToString(settings))
+        _settings.value = settings
     }
 
     suspend fun clearAllFavorites() = mutex.withLock {
@@ -203,15 +224,56 @@ class PersistenceService(
     private val lastPlayedFile: File
         get() = File(context.filesDir, "last_played.txt")
 
-    suspend fun saveLastPlayed(channelId: String) = mutex.withLock {
-        lastPlayedFile.writeText(channelId)
+    // Position sidecar (baw.14): the full LastPlayed.LibraryTrack (whole queue)
+    // is written ONCE per queue by saveLastPlayed; pause/periodic ticks only
+    // rewrite this tiny "index positionMs" file, so the hot playback path never
+    // re-serializes the Track list. Cleared by any full saveLastPlayed().
+    private val lastPlayedPositionFile: File
+        get() = File(context.filesDir, "last_played_pos.txt")
+
+    suspend fun saveLastPlayed(lastPlayed: LastPlayed) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            lastPlayedFile.writeText(json.encodeToString(lastPlayed))
+            lastPlayedPositionFile.delete() // full save supersedes any stale sidecar
+        }
     }
 
-    suspend fun loadLastPlayed(): String? = mutex.withLock {
-        try {
-            if (lastPlayedFile.exists()) lastPlayedFile.readText().ifBlank { null } else null
-        } catch (_: Exception) {
-            null
+    /** Cheap position-only update against the queue already saved by [saveLastPlayed] (baw.14). */
+    suspend fun saveLastPlayedPosition(index: Int, positionMs: Long) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            lastPlayedPositionFile.writeText("$index $positionMs")
+        }
+    }
+
+    /**
+     * Loads the last-played entry (baw.10). Pre-baw.10 files store a bare
+     * channel-id string (no JSON) — if decoding as [LastPlayed] fails, the raw
+     * text is treated as a legacy channel id rather than discarded (a garbage
+     * id simply resolves to nothing downstream in ResumptionPolicy). A library
+     * entry is overlaid with the position sidecar when present (baw.14).
+     */
+    suspend fun loadLastPlayed(): LastPlayed? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            try {
+                if (!lastPlayedFile.exists()) return@withLock null
+                val text = lastPlayedFile.readText()
+                if (text.isBlank()) return@withLock null
+                val entry = try {
+                    json.decodeFromString<LastPlayed>(text)
+                } catch (_: Exception) {
+                    LastPlayed.Channel(text) // legacy plain-text format (or corrupt JSON)
+                }
+                if (entry is LastPlayed.LibraryTrack && lastPlayedPositionFile.exists()) {
+                    runCatching {
+                        val (index, positionMs) = lastPlayedPositionFile.readText().split(" ")
+                        entry.copy(index = index.toInt(), positionMs = positionMs.toLong())
+                    }.getOrDefault(entry) // corrupt sidecar → keep full-save values
+                } else {
+                    entry
+                }
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 
@@ -244,6 +306,7 @@ class PersistenceService(
             settingsFile,
             lovedTracksFile,
             lastPlayedFile,
+            lastPlayedPositionFile,
             customPlaylistsFile,
         ).forEach { file ->
             if (file.exists()) {

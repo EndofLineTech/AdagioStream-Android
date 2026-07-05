@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import com.adagiostream.android.BuildConfig
 import com.adagiostream.android.model.AppearanceMode
+import com.adagiostream.android.model.AutoSourceOrder
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.Channel
@@ -73,6 +74,7 @@ fun SettingsScreen(
     onNavigateToGroups: (() -> Unit)? = null,
     onNavigateToLicenses: (() -> Unit)? = null,
     onNavigateToPrivacyPolicy: (() -> Unit)? = null,
+    onNavigateToDownloads: (() -> Unit)? = null,
     onDataDeleted: (() -> Unit)? = null,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -511,6 +513,70 @@ fun SettingsScreen(
 
         FooterText("How often to refresh live sports scores from ESPN.com API. Off disables score updates entirely. Lower values show scores sooner but use more data.")
 
+        // ── Downloaded Music (E6) ────────────────────────────
+
+        if (onNavigateToDownloads != null) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Downloaded Music",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                onClick = onNavigateToDownloads,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Manage Downloads",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Go to Downloaded Music",
+                    )
+                }
+            }
+            FooterText("View downloaded songs, see how much space they use, and free up storage.")
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Offline Mode",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = settings.offlineMode,
+                        onCheckedChange = { viewModel.updateOfflineMode(it) },
+                    )
+                }
+            }
+            // Copy mirrors iOS DownloadsView footer.
+            FooterText("When enabled, the Music tab shows only your downloaded tracks and won't make any network requests.")
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
 
@@ -736,9 +802,36 @@ private fun FooterText(text: String) {
 internal fun DebugLogsSection(viewModel: SettingsViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val logSize by viewModel.debugLogSize.collectAsStateWithLifecycle()
+    val hasSubsonicAccount by viewModel.hasSubsonicAccount.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showShareLogDialog by remember { mutableStateOf(false) }
 
+    // ---- Android Auto Browse Order (baw.7.1) — only meaningful with a Subsonic account ----
+    if (hasSubsonicAccount) {
+        Text(
+            text = "Android Auto Browse Order",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            AutoSourceOrder.entries.forEachIndexed { index, order ->
+                SegmentedButton(
+                    selected = settings.autoSourceOrder == order,
+                    onClick = { viewModel.updateAutoSourceOrder(order) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = AutoSourceOrder.entries.size,
+                    ),
+                ) {
+                    Text(text = order.displayName, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        FooterText("Choose whether Channels or Music appears first in the Android Auto browse tree.")
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+
+    // ---- Debug Logs ----
     Text(
         text = "Debug Logs",
         style = MaterialTheme.typography.titleMedium,

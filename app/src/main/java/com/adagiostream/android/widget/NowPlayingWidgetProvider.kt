@@ -6,15 +6,15 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.view.KeyEvent
 import android.widget.RemoteViews
 import com.adagiostream.android.MainActivity
 import com.adagiostream.android.R
+import com.adagiostream.android.service.player.AudioPlaybackService
 
 class NowPlayingWidgetProvider : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_TOGGLE_PLAY = "com.adagiostream.android.TOGGLE_PLAY"
-
         private const val PREFS_NAME = "widget_prefs"
         private const val KEY_CHANNEL = "channel_name"
         private const val KEY_STATUS = "status"
@@ -64,16 +64,23 @@ class NowPlayingWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.widget_channel_name, openPending)
             views.setOnClickPendingIntent(R.id.widget_artwork, openPending)
 
-            // Tap play/pause -> toggle
-            val toggleIntent = Intent(context, NowPlayingWidgetProvider::class.java).apply {
-                action = ACTION_TOGGLE_PLAY
-            }
-            val togglePending = PendingIntent.getBroadcast(
-                context, 1, toggleIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            // Tap play/pause -> toggle. Send a media-button intent straight to the
+            // playback service (same mechanism headset/Bluetooth buttons use); Media3's
+            // MediaSessionService.onStartCommand() dispatches it to the session's player.
+            // getForegroundService starts the service if the app process is dead.
+            val togglePending = PendingIntent.getForegroundService(
+                context, 1, buildToggleIntent(context), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             views.setOnClickPendingIntent(R.id.widget_play_pause, togglePending)
 
             return views
+        }
+
+        /** Visible for testing: the media-button intent used to toggle play/pause. */
+        internal fun buildToggleIntent(context: Context): Intent {
+            return Intent(Intent.ACTION_MEDIA_BUTTON, null, context, AudioPlaybackService::class.java).apply {
+                putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
+            }
         }
     }
 
@@ -84,15 +91,5 @@ class NowPlayingWidgetProvider : AppWidgetProvider() {
         val isPlaying = prefs.getBoolean(KEY_IS_PLAYING, false)
         val views = buildRemoteViews(context, channelName, status, isPlaying)
         appWidgetManager.updateAppWidget(appWidgetIds, views)
-    }
-
-    override fun onReceive(context: Context, intent: Intent) {
-        super.onReceive(context, intent)
-        if (intent.action == ACTION_TOGGLE_PLAY) {
-            // Send a media button intent to toggle playback via the media session
-            val mediaIntent = Intent("com.adagiostream.android.TOGGLE_PLAY_PAUSE")
-            mediaIntent.setPackage(context.packageName)
-            context.sendBroadcast(mediaIntent)
-        }
     }
 }

@@ -7,12 +7,15 @@ import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.AppearanceMode
 import com.adagiostream.android.model.ArtworkDisplayMode
+import com.adagiostream.android.model.AutoSourceOrder
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.download.DownloadManager
+import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.VLCPlayerWrapper
@@ -41,6 +44,8 @@ class SettingsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val vlcPlayerWrapper: VLCPlayerWrapper,
     private val espnScoreService: ESPNScoreService,
+    private val downloadManager: DownloadManager,
+    private val musicLibraryRepository: MusicLibraryRepository,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(persistenceService.loadSettingsSync().let {
@@ -51,6 +56,12 @@ class SettingsViewModel @Inject constructor(
     val accountCount: StateFlow<Int> = accountManager.accounts
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    /** Whether a Subsonic/Navidrome account is configured (baw.7.1) — gates the
+     * Android Auto browse-order setting, which is meaningless without one. */
+    val hasSubsonicAccount: StateFlow<Boolean> = accountManager.accounts
+        .map { accounts -> accounts.any { it.isEnabled && it.type is AccountType.Subsonic } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val channelCount: StateFlow<Int> = accountManager.channels
         .map { it.size }
@@ -154,6 +165,30 @@ class SettingsViewModel @Inject constructor(
         save()
     }
 
+    /**
+     * Marks the one-time "We Reorganized" tip as seen (beads_adagio-15x.4) so
+     * [MainScreen] stops showing it after the next settings reload.
+     */
+    fun markTabReorgTipSeen() {
+        _settings.value = _settings.value.copy(hasSeenTabReorgTip = true)
+        save()
+    }
+
+    /** Android Auto browse-root section order (baw.7.1), Subsonic-only setting. */
+    fun updateAutoSourceOrder(order: AutoSourceOrder) {
+        _settings.value = _settings.value.copy(autoSourceOrder = order)
+        save()
+    }
+
+    /**
+     * Toggles Offline Mode (baw.12): the Music tab shows only downloaded
+     * tracks and fires no network browse/search requests.
+     */
+    fun updateOfflineMode(enabled: Boolean) {
+        _settings.value = _settings.value.copy(offlineMode = enabled)
+        save()
+    }
+
     fun clearDebugLogs() {
         DebugLogger.clearLogs()
         debugLogSize.value = DebugLogger.logFileSize()
@@ -240,6 +275,13 @@ class SettingsViewModel @Inject constructor(
                                         put("username", JsonPrimitive(type.username))
                                         // Password intentionally omitted
                                     }
+                                    // Subsonic accounts: type only; credentials omitted intentionally.
+                                    is AccountType.Subsonic -> {
+                                        put("type", JsonPrimitive("subsonic"))
+                                        put("host", JsonPrimitive(type.host))
+                                        put("username", JsonPrimitive(type.username))
+                                        // Password intentionally omitted from diagnostic export
+                                    }
                                 }
                             })
                         }
@@ -281,6 +323,9 @@ class SettingsViewModel @Inject constructor(
             vlcPlayerWrapper.stop()
             accountManager.resetAll()
             persistenceService.deleteAllData()
+            // E6: also clear the Navidrome cache DB + downloaded files (delete-all path).
+            downloadManager.deleteAll()
+            musicLibraryRepository.clearLibraryCache()
             DebugLogger.clearLogs()
             _dataDeleted.value = true
         }
@@ -288,7 +333,18 @@ class SettingsViewModel @Inject constructor(
 
     private fun save() {
         viewModelScope.launch {
-            persistenceService.saveSettings(_settings.value)
+            // Read-modify-write (baw.16): shuffleEnabled/repeatMode are owned and
+            // persisted by MusicPlaybackCoordinator (baw.9.4). This VM's _settings
+            // is a snapshot from construction time, so whole-object saving it
+            // would clobber playback state persisted since. Preserve the
+            // coordinator-owned fields from disk; save everything else from here.
+            val persisted = persistenceService.loadSettings()
+            persistenceService.saveSettings(
+                _settings.value.copy(
+                    shuffleEnabled = persisted.shuffleEnabled,
+                    repeatMode = persisted.repeatMode,
+                ),
+            )
         }
     }
 }

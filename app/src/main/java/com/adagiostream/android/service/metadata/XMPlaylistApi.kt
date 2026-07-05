@@ -12,7 +12,10 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-class XMPlaylistApi(private val client: OkHttpClient) {
+class XMPlaylistApi(
+    private val client: OkHttpClient,
+    private val baseUrl: String = "https://xmplaylist.com/api",
+) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -44,7 +47,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
             DebugLogger.log("Found ${sxmChannels.size} SXM channels to match", DebugLogger.Category.SXM)
 
             // Fetch station list
-            val request = Request.Builder().url("$BASE_URL/station").build()
+            val request = Request.Builder().url("$baseUrl/station").build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 DebugLogger.log("Station list API returned ${response.code}", DebugLogger.Category.SXM)
@@ -128,7 +131,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
      */
     suspend fun getFeed(): Map<String, TrackMetadata> = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder().url("$BASE_URL/feed").build()
+            val request = Request.Builder().url("$baseUrl/feed").build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 DebugLogger.log("Feed API returned ${response.code}", DebugLogger.Category.SXM)
@@ -172,10 +175,12 @@ class XMPlaylistApi(private val client: OkHttpClient) {
 
     /**
      * Fetch the most recent track for a specific station by deeplink.
+     * Also merges every track in the response into the 10-minute [trackHistory]
+     * so [trackAt] can answer "what was playing" for time-shift catch-up.
      */
     suspend fun getRecentTrack(deeplink: String): TrackMetadata? = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder().url("$BASE_URL/station/$deeplink").build()
+            val request = Request.Builder().url("$baseUrl/station/$deeplink").build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 DebugLogger.log("API returned ${response.code} for $deeplink", DebugLogger.Category.SXM)
@@ -183,27 +188,71 @@ class XMPlaylistApi(private val client: OkHttpClient) {
             }
             val body = response.body.string()
             val apiResponse = json.decodeFromString<XMApiResponse>(body)
-            val latest = apiResponse.results.firstOrNull() ?: return@withContext null
-            val track = latest.track ?: return@withContext null
-            val title = track.title ?: return@withContext null
-            val artists = track.artists
-            if (artists.isEmpty()) return@withContext null
-
-            TrackMetadata(
-                artist = artists.joinToString(", "),
-                title = title,
-                album = null,
-                albumArtURL = latest.spotify?.albumImageLarge?.takeIf { UrlSanitizer.isHttpUrl(it) },
-                timestamp = 0L,
-            )
+            val tracks = apiResponse.results.mapNotNull { it.toTrackMetadataOrNull() }
+            mergeIntoHistory(deeplink, tracks)
+            tracks.firstOrNull()
         } catch (e: Exception) {
             DebugLogger.log("Failed to fetch track for $deeplink: ${e.message}", DebugLogger.Category.SXM)
             null
         }
     }
 
-    companion object {
-        private const val BASE_URL = "https://xmplaylist.com/api"
+    private fun XMResult.toTrackMetadataOrNull(): TrackMetadata? {
+        val title = track?.title ?: return null
+        val artists = track.artists
+        if (artists.isEmpty()) return null
+        return TrackMetadata(
+            artist = artists.joinToString(", "),
+            title = title,
+            album = null,
+            albumArtURL = spotify?.albumImageLarge?.takeIf { UrlSanitizer.isHttpUrl(it) },
+            timestamp = parseTimestampMillis(timestamp),
+        )
+    }
+
+    private fun parseTimestampMillis(iso: String?): Long {
+        if (iso == null) return 0L
+        return try {
+            java.time.Instant.parse(iso).toEpochMilli()
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
+    // Timestamped track history per deeplink, newest-first — mirrors iOS
+    // SXMMetadataService's 10-minute trackHistory used by showTrack(at:).
+    // ConcurrentHashMap (baw.13 MAJOR-2): mergeIntoHistory() writes on
+    // Dispatchers.IO (poll loop) while trackAt() reads from Main; values are
+    // always replaced wholesale with a fresh immutable List, so a thread-safe
+    // map (no per-key locking) is sufficient — no partial-list mutation to race on.
+    private val trackHistory = java.util.concurrent.ConcurrentHashMap<String, List<TrackMetadata>>()
+    private val historyWindowMs = 10 * 60 * 1000L // 10 minutes
+
+    private fun mergeIntoHistory(deeplink: String, tracks: List<TrackMetadata>) {
+        if (tracks.isEmpty()) return
+        val cutoff = System.currentTimeMillis() - historyWindowMs
+        val merged = ((trackHistory[deeplink] ?: emptyList()) + tracks)
+            .distinct()
+            .filter { it.timestamp >= cutoff }
+            .sortedByDescending { it.timestamp }
+        trackHistory[deeplink] = merged
+    }
+
+    /**
+     * The track that was playing at [atEpochMillis] — the most recent history
+     * entry whose timestamp is at or before that moment. Used during time-shift
+     * catch-up so the display track matches the buffered audio, not live.
+     * Null when history is empty or [atEpochMillis] predates everything kept
+     * (history only spans [historyWindowMs]).
+     *
+     * The freshness bound is relative to [atEpochMillis] (the query time), not
+     * just [mergeIntoHistory]'s poll-time pruning (baw.13 MINOR-4): if polling
+     * has stopped, stale entries older than [historyWindowMs] would otherwise
+     * never get pruned and could still be returned as a "hit".
+     */
+    fun trackAt(deeplink: String, atEpochMillis: Long): TrackMetadata? {
+        val minTimestamp = maxOf(1L, atEpochMillis - historyWindowMs)
+        return trackHistory[deeplink]?.firstOrNull { it.timestamp in minTimestamp..atEpochMillis }
     }
 
     // --- API Response Models ---
@@ -229,6 +278,7 @@ class XMPlaylistApi(private val client: OkHttpClient) {
         @SerialName("track") val track: XMTrackInfo? = null,
         @SerialName("spotify") val spotify: XMSpotifyInfo? = null,
         @SerialName("channelId") val channelId: String? = null,
+        @SerialName("timestamp") val timestamp: String? = null,
     )
 
     @Serializable

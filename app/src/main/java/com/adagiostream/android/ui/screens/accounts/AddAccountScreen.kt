@@ -1,15 +1,24 @@
 package com.adagiostream.android.ui.screens.accounts
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -17,17 +26,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -39,9 +43,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.material3.Switch
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -53,6 +59,7 @@ fun AddAccountScreen(
     viewModel: AddAccountViewModel = hiltViewModel(),
 ) {
     val isXtream by viewModel.isXtream.collectAsStateWithLifecycle()
+    val isSubsonic by viewModel.isSubsonic.collectAsStateWithLifecycle()
     val name by viewModel.name.collectAsStateWithLifecycle()
     val m3uUrl by viewModel.m3uUrl.collectAsStateWithLifecycle()
     val host by viewModel.host.collectAsStateWithLifecycle()
@@ -64,6 +71,7 @@ fun AddAccountScreen(
     val saveComplete by viewModel.saveComplete.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val addAccountResult by viewModel.addAccountResult.collectAsStateWithLifecycle()
+    val connectionTestState by viewModel.connectionTestState.collectAsStateWithLifecycle()
     var passwordVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(saveComplete) {
@@ -77,7 +85,7 @@ fun AddAccountScreen(
             text = {
                 Text(
                     "Loaded ${result.channelCount} channels in ${result.newGroupCount} new groups. " +
-                        "New groups are hidden by default \u2014 enable them in Settings \u2192 Groups."
+                        "New groups are hidden by default — enable them in Settings → Groups."
                 )
             },
             confirmButton = {
@@ -107,112 +115,128 @@ fun AddAccountScreen(
             if (!viewModel.isEditing) {
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     SegmentedButton(
-                        selected = !isXtream,
-                        onClick = { viewModel.setIsXtream(false) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        selected = !isXtream && !isSubsonic,
+                        onClick = {
+                            viewModel.setIsSubsonic(false)
+                            viewModel.setIsXtream(false)
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
                     ) {
-                        Text("M3U Playlist")
+                        Text("M3U")
                     }
                     SegmentedButton(
                         selected = isXtream,
                         onClick = { viewModel.setIsXtream(true) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
                     ) {
-                        Text("Xtream Codes")
+                        Text("Xtream")
+                    }
+                    SegmentedButton(
+                        selected = isSubsonic,
+                        onClick = { viewModel.setIsSubsonic(true) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                    ) {
+                        Text("Navidrome")
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            OutlinedTextField(
-                value = name,
-                onValueChange = { viewModel.setName(it) },
-                label = { Text("Account Name") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (isXtream) {
-                OutlinedTextField(
-                    value = host,
-                    onValueChange = { viewModel.setHost(it) },
-                    label = { Text("Server URL") },
-                    placeholder = { Text("http://example.com:8080") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+            when {
+                isSubsonic -> SubsonicForm(
+                    host = host,
+                    username = username,
+                    password = password,
+                    name = name,
+                    passwordVisible = passwordVisible,
+                    onPasswordVisibilityToggle = { passwordVisible = !passwordVisible },
+                    showHttpWarning = viewModel.isHostCleartextHttp(),
+                    connectionTestState = connectionTestState,
+                    onHostChange = { viewModel.setHost(it) },
+                    onUsernameChange = { viewModel.setUsername(it) },
+                    onPasswordChange = { viewModel.setPassword(it) },
+                    onNameChange = { viewModel.setName(it) },
+                    onTestConnection = { viewModel.testConnection() },
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { viewModel.setUsername(it) },
-                    label = { Text("Username") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { viewModel.setPassword(it) },
-                    label = { Text("Password") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Text,
-                        autoCorrectEnabled = false,
-                    ),
-                    trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (passwordVisible) "Hide password" else "Show password",
+
+                else -> {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { viewModel.setName(it) },
+                        label = { Text("Account Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (isXtream) {
+                        OutlinedTextField(
+                            value = host,
+                            onValueChange = { viewModel.setHost(it) },
+                            label = { Text("Server URL") },
+                            placeholder = { Text("http://example.com:8080") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { viewModel.setUsername(it) },
+                            label = { Text("Username") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        PasswordField(
+                            value = password,
+                            onValueChange = { viewModel.setPassword(it) },
+                            passwordVisible = passwordVisible,
+                            onToggle = { passwordVisible = !passwordVisible },
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Clean up channel names",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                Text(
+                                    text = "Remove number prefixes from channel names (e.g. \"5204 | ESPN\", \"5204 - ESPN\" become \"ESPN\")",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = stripStreamIDs,
+                                onCheckedChange = { viewModel.setStripStreamIDs(it) },
                             )
                         }
-                    },
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Clean up channel names",
-                            style = MaterialTheme.typography.bodyLarge,
+                    } else {
+                        OutlinedTextField(
+                            value = m3uUrl,
+                            onValueChange = { viewModel.setM3uUrl(it) },
+                            label = { Text("M3U URL") },
+                            placeholder = { Text("http://example.com/playlist.m3u") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
                         )
-                        Text(
-                            text = "Remove number prefixes from channel names (e.g. \"5204 | ESPN\", \"5204 - ESPN\" become \"ESPN\")",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = epgUrl,
+                            onValueChange = { viewModel.setEpgUrl(it) },
+                            label = { Text("EPG URL (Optional)") },
+                            placeholder = { Text("http://example.com/epg.xml") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
                         )
                     }
-                    Switch(
-                        checked = stripStreamIDs,
-                        onCheckedChange = { viewModel.setStripStreamIDs(it) },
-                    )
                 }
-            } else {
-                OutlinedTextField(
-                    value = m3uUrl,
-                    onValueChange = { viewModel.setM3uUrl(it) },
-                    label = { Text("M3U URL") },
-                    placeholder = { Text("http://example.com/playlist.m3u") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = epgUrl,
-                    onValueChange = { viewModel.setEpgUrl(it) },
-                    label = { Text("EPG URL (Optional)") },
-                    placeholder = { Text("http://example.com/epg.xml") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
             }
 
             errorMessage?.let { msg ->
@@ -226,17 +250,198 @@ fun AddAccountScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // For Subsonic, saving is gated on a successful connection test.
+            val saveEnabled = !isSaving && viewModel.isValid() &&
+                (!isSubsonic || connectionTestState is ConnectionTestState.Success)
+
             Button(
                 onClick = { viewModel.save() },
-                enabled = !isSaving && viewModel.isValid(),
-                modifier = Modifier.fillMaxWidth(),
+                enabled = saveEnabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
             ) {
                 if (isSaving) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
                 } else {
                     Text("Save")
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SubsonicForm(
+    host: String,
+    username: String,
+    password: String,
+    name: String,
+    passwordVisible: Boolean,
+    onPasswordVisibilityToggle: () -> Unit,
+    showHttpWarning: Boolean,
+    connectionTestState: ConnectionTestState,
+    onHostChange: (String) -> Unit,
+    onUsernameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onNameChange: (String) -> Unit,
+    onTestConnection: () -> Unit,
+) {
+    val testing = connectionTestState is ConnectionTestState.Testing
+
+    OutlinedTextField(
+        value = host,
+        onValueChange = onHostChange,
+        label = { Text("Server URL") },
+        placeholder = { Text("http://192.168.1.10:4533") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        enabled = !testing,
+    )
+
+    if (showHttpWarning) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = "Warning",
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text(
+                text = "http is unencrypted. Your token auth is still safe, but the " +
+                    "connection isn't private. Use https if your server supports it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+    OutlinedTextField(
+        value = username,
+        onValueChange = onUsernameChange,
+        label = { Text("Username") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        enabled = !testing,
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+    PasswordField(
+        value = password,
+        onValueChange = onPasswordChange,
+        passwordVisible = passwordVisible,
+        onToggle = onPasswordVisibilityToggle,
+        enabled = !testing,
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+    OutlinedTextField(
+        value = name,
+        onValueChange = onNameChange,
+        label = { Text("Display Name (Optional)") },
+        placeholder = { Text("My Navidrome") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        enabled = !testing,
+    )
+
+    Spacer(modifier = Modifier.height(16.dp))
+    OutlinedButton(
+        onClick = onTestConnection,
+        enabled = !testing && host.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .semantics { contentDescription = "Test Connection" },
+    ) {
+        if (testing) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text("Testing…")
+        } else {
+            Text("Test Connection")
+        }
+    }
+
+    // Inline result of the connection test.
+    when (val state = connectionTestState) {
+        is ConnectionTestState.Success -> {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Connection successful",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = "Connection successful",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
+        is ConnectionTestState.Error -> {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = "Connection failed",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = state.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+
+        else -> Unit
+    }
+}
+
+@Composable
+private fun PasswordField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    passwordVisible: Boolean,
+    onToggle: () -> Unit,
+    enabled: Boolean = true,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text("Password") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        enabled = enabled,
+        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Text,
+            autoCorrectEnabled = false,
+        ),
+        trailingIcon = {
+            IconButton(onClick = onToggle) {
+                Icon(
+                    imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                )
+            }
+        },
+    )
 }
