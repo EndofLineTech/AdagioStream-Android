@@ -5,12 +5,14 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
@@ -46,6 +48,7 @@ import com.adagiostream.android.service.playlist.CustomPlaylistManager
 @Composable
 fun ChannelsScreen(
     viewModel: ChannelsViewModel = hiltViewModel(),
+    onOpenGuide: () -> Unit = {},
 ) {
     val groups by viewModel.filteredGroups.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -60,23 +63,31 @@ fun ChannelsScreen(
     var addToPlaylistChannel by remember { mutableStateOf<Channel?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { viewModel.updateSearch(it) },
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            placeholder = { Text("Search channels") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.updateSearch("") }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { viewModel.updateSearch(it) },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Search channels") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.updateSearch("") }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear")
+                        }
                     }
-                }
-            },
-            singleLine = true,
-        )
+                },
+                singleLine = true,
+            )
+            IconButton(onClick = onOpenGuide) {
+                Icon(Icons.Default.CalendarMonth, contentDescription = "Program guide")
+            }
+        }
 
         if (isLoading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
