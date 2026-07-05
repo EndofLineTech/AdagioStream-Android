@@ -387,8 +387,10 @@ fun MainScreen(
         // One-time "We Reorganized" tip (beads_adagio-15x.4) — explains the tab
         // moves once setup is complete. Can't cheaply tell an upgrading user
         // from a fresh install, so this shows once to everyone (see AppSettings
-        // .hasSeenTabReorgTip kdoc).
-        if (!isOnSetup && settings.setupCompleted && !settings.hasSeenTabReorgTip) {
+        // .hasSeenTabReorgTip kdoc). !showSplash: AlertDialog renders in its own
+        // Window above the Compose tree, so without this gate it would float
+        // over the splash animation (beads_adagio-15x.5).
+        if (!showSplash && !isOnSetup && settings.setupCompleted && !settings.hasSeenTabReorgTip) {
             AlertDialog(
                 onDismissRequest = { settingsViewModel.markTabReorgTipSeen() },
                 title = { Text("We Reorganized") },

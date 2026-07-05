@@ -156,6 +156,7 @@ fun ChannelsScreen(
                                 trackMetadata = feedMetadata[channel.id],
                                 espnGame = espnGames[channel.id],
                                 currentProgram = epgProgram,
+                                onLongClick = { addToPlaylistChannel = channel },
                             )
                         }
                         item(key = "pinned_favorites_divider") {
