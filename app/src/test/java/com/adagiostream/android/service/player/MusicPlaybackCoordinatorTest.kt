@@ -1,8 +1,10 @@
 package com.adagiostream.android.service.player
 
+import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.service.download.DownloadLocator
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.testutil.TestFixtures
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -301,6 +303,62 @@ class MusicPlaybackCoordinatorTest {
         assertTrue(fakePlayer.lastLibrarySourceUpdate != null)
         assertEquals(queue.queue, fakePlayer.lastLibrarySourceUpdate!!.queue)
         assertEquals(queue.currentIndex, fakePlayer.lastLibrarySourceUpdate!!.index)
+    }
+
+    // ---- persist shuffle + repeat (baw.9.4) --------------------------------
+
+    /** Simulates a persisted-settings store — no real file I/O. */
+    private fun fakePersistence(initial: AppSettings): PersistenceService {
+        var stored = initial
+        val ps = mockk<PersistenceService>()
+        every { ps.loadSettingsSync() } answers { stored }
+        coEvery { ps.loadSettings() } coAnswers { stored }
+        coEvery { ps.saveSettings(any()) } coAnswers { stored = firstArg(); Unit }
+        return ps
+    }
+
+    @Test
+    fun `restores shuffle and repeat from persisted settings on construction`() {
+        val persisted = AppSettings(shuffleEnabled = true, repeatMode = RepeatMode.All)
+        val ps = fakePersistence(persisted)
+
+        val restoredCoordinator = MusicPlaybackCoordinator(
+            MusicQueueManager(),
+            fakePlayer,
+            persistenceService = ps,
+        )
+
+        assertEquals(true, restoredCoordinator.shuffleEnabled)
+        assertEquals(RepeatMode.All, restoredCoordinator.repeatMode)
+    }
+
+    @Test
+    fun `setShuffle and setRepeatMode survive a simulated restart`() {
+        // First "session": persistence starts empty (defaults), user turns shuffle
+        // on and sets repeat-one; those writes land in the fake store.
+        val ps = fakePersistence(AppSettings())
+        val firstSessionQueue = MusicQueueManager()
+        val firstSession = MusicPlaybackCoordinator(firstSessionQueue, fakePlayer, persistenceService = ps)
+        firstSession.scope = testScope
+
+        firstSession.setShuffle(true)
+        firstSession.setRepeatMode(RepeatMode.One)
+
+        // "Restart": a brand-new coordinator (and queue) reads from the SAME
+        // persisted store and must come back with the saved values.
+        val restarted = MusicPlaybackCoordinator(MusicQueueManager(), fakePlayer, persistenceService = ps)
+
+        assertEquals(true, restarted.shuffleEnabled)
+        assertEquals(RepeatMode.One, restarted.repeatMode)
+    }
+
+    @Test
+    fun `setShuffle is a no-op persistence-wise without a PersistenceService`() {
+        // Default (no persistenceService) coordinator — must not throw.
+        coordinator.setShuffle(true)
+        coordinator.setRepeatMode(RepeatMode.All)
+        assertTrue(queue.shuffleEnabled)
+        assertEquals(RepeatMode.All, queue.repeatMode)
     }
 
     // ---- scrobble (baw.5.1) ----------------------------------------------

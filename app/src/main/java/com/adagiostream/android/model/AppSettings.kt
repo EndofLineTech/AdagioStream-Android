@@ -1,5 +1,6 @@
 package com.adagiostream.android.model
 
+import com.adagiostream.android.service.player.RepeatMode
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -30,6 +31,17 @@ data class AppSettings(
      * Matches the iOS gate-flip pattern used to promote E1→E3 incrementally.
      */
     val musicTabEnabled: Boolean = false,
+    /**
+     * Persisted library-playback shuffle/repeat state (baw.9.4).
+     *
+     * [MusicQueueManager][com.adagiostream.android.service.player.MusicQueueManager]
+     * previously held these only in memory, so they reset every app restart.
+     * Restored by [MusicPlaybackCoordinator][com.adagiostream.android.service.player.MusicPlaybackCoordinator]
+     * on construction and saved whenever the user changes either. Radio
+     * playback is unaffected — it never reads these fields.
+     */
+    val shuffleEnabled: Boolean = false,
+    val repeatMode: RepeatMode = RepeatMode.Off,
 )
 
 @Serializable

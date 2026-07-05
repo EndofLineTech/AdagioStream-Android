@@ -4,6 +4,7 @@ import com.adagiostream.android.service.download.DownloadLocator
 import com.adagiostream.android.service.download.LocalFirstResolver
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.service.persistence.PersistenceService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +41,12 @@ class MusicPlaybackCoordinator @Inject constructor(
      * so the JVM coordinator tests (and the no-download path) keep streaming.
      */
     private val downloadLocator: DownloadLocator = DownloadLocator.None,
+    /**
+     * Persists shuffle/repeat across restarts (baw.9.4). Optional — `null` in
+     * plain-JVM tests that don't exercise persistence; Hilt always supplies a
+     * real instance in production (see [com.adagiostream.android.di.AppModule]).
+     */
+    private val persistenceService: PersistenceService? = null,
 ) {
 
     /** The [NavidromeApi] backing the current library session; null until [playAlbum]. */
@@ -56,6 +63,19 @@ class MusicPlaybackCoordinator @Inject constructor(
 
     /** Guard that ensures the scrobble submission fires at most once per track (baw.5.1). */
     private var scrobbleSubmitted = false
+
+    init {
+        // Restore shuffle/repeat from the last session (baw.9.4). Synchronous —
+        // mirrors SettingsViewModel's initial-value read — so restoration is
+        // deterministic and complete before this constructor returns, rather
+        // than racing whatever calls setShuffle/playAlbum next. Radio never
+        // reads these fields, so this has no effect on live playback.
+        persistenceService?.let { ps ->
+            val settings = ps.loadSettingsSync()
+            queue.setShuffle(settings.shuffleEnabled)
+            queue.repeatMode = settings.repeatMode
+        }
+    }
 
     private val _nowPlayingArtworkUrl = MutableStateFlow<String?>(null)
     private val _nowPlayingAlbumTitle = MutableStateFlow<String?>(null)
@@ -128,12 +148,33 @@ class MusicPlaybackCoordinator @Inject constructor(
         playCurrent()
     }
 
-    /** Enables/disables shuffle on the underlying queue (baw.3.5). */
-    fun setShuffle(enabled: Boolean) = queue.setShuffle(enabled)
+    /** Enables/disables shuffle on the underlying queue (baw.3.5) and persists it (baw.9.4). */
+    fun setShuffle(enabled: Boolean) {
+        queue.setShuffle(enabled)
+        persistPlaybackSettings()
+    }
 
-    /** Sets the repeat mode on the underlying queue (baw.3.5). */
+    /** Sets the repeat mode on the underlying queue (baw.3.5) and persists it (baw.9.4). */
     fun setRepeatMode(mode: RepeatMode) {
         queue.repeatMode = mode
+        persistPlaybackSettings()
+    }
+
+    /**
+     * Saves the current shuffle/repeat state to [AppSettings] so it survives an
+     * app restart (baw.9.4). Read-modify-write against the latest persisted
+     * settings so this never clobbers unrelated settings fields changed
+     * elsewhere (e.g. concurrently in Settings). No-op when no
+     * [persistenceService] was supplied (plain-JVM tests).
+     */
+    private fun persistPlaybackSettings() {
+        val ps = persistenceService ?: return
+        scope.launch {
+            val current = ps.loadSettings()
+            ps.saveSettings(
+                current.copy(shuffleEnabled = queue.shuffleEnabled, repeatMode = queue.repeatMode),
+            )
+        }
     }
 
     /** The currently-active library track, or null when nothing is queued. */
