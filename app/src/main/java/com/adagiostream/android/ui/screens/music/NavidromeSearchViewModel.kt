@@ -9,6 +9,7 @@ import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.service.navidrome.NavidromeSearchResult
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -38,7 +39,15 @@ class NavidromeSearchViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val navidromeApiFactory: NavidromeApiFactory,
     private val musicPlaybackCoordinator: MusicPlaybackCoordinator,
+    private val persistenceService: PersistenceService,
 ) : ViewModel() {
+
+    /**
+     * The API for network search — `null` when Offline Mode is on (baw.12/baw.17),
+     * so searches no-op without firing a request even from a back-stack screen.
+     */
+    private fun browseApi(): NavidromeApi? =
+        if (persistenceService.settings.value.offlineMode) null else _api.value
 
     // -------------------------------------------------------------------------
     // API resolution (mirrors NavidromeLibraryViewModel pattern)
@@ -130,7 +139,7 @@ class NavidromeSearchViewModel @Inject constructor(
 
         searchJob = viewModelScope.launch {
             delay(300L) // debounce window
-            val currentApi = _api.value ?: return@launch
+            val currentApi = browseApi() ?: return@launch
             _searchState.value = SearchState.Loading
             try {
                 val results = currentApi.search3(query)

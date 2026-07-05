@@ -312,6 +312,7 @@ class MusicPlaybackCoordinatorTest {
         var stored = initial
         val ps = mockk<PersistenceService>()
         every { ps.loadSettingsSync() } answers { stored }
+        every { ps.settings } returns kotlinx.coroutines.flow.MutableStateFlow(initial)
         coEvery { ps.loadSettings() } coAnswers { stored }
         coEvery { ps.saveSettings(any()) } coAnswers { stored = firstArg(); Unit }
         return ps
@@ -423,5 +424,66 @@ class MusicPlaybackCoordinatorTest {
         coordinator.reportPlaybackProgress(300L)
 
         coVerify(exactly = 0) { mockApi.scrobble(any(), any()) }
+    }
+
+    // ---- offline mode gating (baw.12 / baw.17) -----------------------------
+
+    /** [makeMockApi] variant with a resolvable cover-art URL for artwork-gating tests. */
+    private fun makeMockApiWithArt(): NavidromeApi = makeMockApi().also { mock ->
+        every { mock.getCoverArtUrl(any(), any()) } returns
+            "https://music.example.com/rest/getCoverArt.view?id=c1".toHttpUrl()
+    }
+
+    @Test
+    fun `offline mode suppresses scrobbles and the artwork url`() {
+        val ps = fakePersistence(AppSettings(offlineMode = true))
+        val offline = MusicPlaybackCoordinator(queue, fakePlayer, persistenceService = ps)
+        offline.scope = testScope
+        val mockApi = makeMockApiWithArt()
+
+        offline.playAlbum(tracks(1), startIndex = 0, api = mockApi)
+
+        // Playback itself still starts…
+        assertEquals("track-0", fakePlayer.lastTrackId)
+        // …but no artwork fetch URL is exposed to the sheet / media notification…
+        assertNull(offline.nowPlayingArtworkUrl.value)
+        // …and neither the now-playing nor the threshold scrobble fires.
+        offline.reportPlaybackProgress(90L) // 50% of the 180s fixture track
+        coVerify(exactly = 0) { mockApi.scrobble(any(), any()) }
+    }
+
+    @Test
+    fun `scrobbles and artwork fire normally when offline mode is off`() {
+        val ps = fakePersistence(AppSettings(offlineMode = false))
+        val online = MusicPlaybackCoordinator(queue, fakePlayer, persistenceService = ps)
+        online.scope = testScope
+        val mockApi = makeMockApiWithArt()
+
+        online.playAlbum(tracks(1), startIndex = 0, api = mockApi)
+
+        assertEquals(
+            "https://music.example.com/rest/getCoverArt.view?id=c1",
+            online.nowPlayingArtworkUrl.value,
+        )
+        coVerify(exactly = 1) { mockApi.scrobble("track-0", submission = false) }
+
+        online.reportPlaybackProgress(90L)
+        coVerify(exactly = 1) { mockApi.scrobble("track-0", submission = true) }
+    }
+
+    @Test
+    fun `playAlbum with null api plays downloaded tracks from local files`() {
+        // baw.17: a fully-downloaded offline session needs no configured account.
+        val locator = DownloadLocator { id ->
+            if (id == "track-0") "/data/music/downloads/track-0.mp3" else null
+        }
+        val local = MusicPlaybackCoordinator(queue, fakePlayer, locator)
+        local.scope = testScope
+
+        local.playAlbum(tracks(1), startIndex = 0, api = null)
+
+        val url = fakePlayer.lastStreamUrl!!
+        assertTrue("expected a file:// uri but was $url", url.startsWith("file:"))
+        assertNull(local.nowPlayingArtworkUrl.value)
     }
 }

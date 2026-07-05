@@ -314,17 +314,17 @@ class NavidromeLibraryViewModel @Inject constructor(
      * Starts playback from a tapped track in the offline (downloads-only) list
      * (baw.12). Enqueues the WHOLE downloaded list from the tapped index —
      * mirrors [playTrack]. Downloaded tracks resolve to local files via the
-     * coordinator's DownloadLocator, so no network is touched for audio.
+     * coordinator's DownloadLocator, so no network is touched for audio and no
+     * configured account is required (api may be null — baw.17).
      */
     fun playDownloadedTrack(track: Track) {
-        val api = _api.value ?: return
         val tracks = _downloadedTracks.value
         val startIndex = tracks.indexOfFirst { it.id == track.id }
         if (startIndex < 0) return
         musicPlaybackCoordinator.playAlbum(
             tracks = tracks,
             startIndex = startIndex,
-            api = api,
+            api = _api.value,
             albumTitle = "Downloads",
         )
     }

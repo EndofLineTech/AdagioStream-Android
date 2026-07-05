@@ -103,8 +103,11 @@ class MusicPlaybackCoordinator @Inject constructor(
      * Replaces the queue with [tracks], starts playback from [startIndex], and
      * remembers [api] for the rest of this library session (PO decision: tapping a
      * track enqueues the WHOLE album and starts from the tapped index — baw.3.8).
+     *
+     * [api] may be null for a fully-downloaded offline session (baw.17) — tracks
+     * then play from local files only; undownloaded tracks stop playback.
      */
-    fun playAlbum(tracks: List<Track>, startIndex: Int, api: NavidromeApi, albumTitle: String? = null) {
+    fun playAlbum(tracks: List<Track>, startIndex: Int, api: NavidromeApi?, albumTitle: String? = null) {
         this.api = api
         _nowPlayingAlbumTitle.value = albumTitle
         queue.setQueue(tracks, startIndex)
@@ -240,18 +243,27 @@ class MusicPlaybackCoordinator @Inject constructor(
 
     private fun playCurrent() {
         val track = queue.current() ?: return
-        val api = api ?: return
-        // Local-first (baw.6.3): a downloaded track plays from disk; otherwise stream.
+        val api = api
+        // Local-first (baw.6.3): a downloaded track plays from disk; otherwise
+        // stream. A null api (baw.17: fully-downloaded offline session with no
+        // account) can only play downloaded tracks — undownloaded ones resolve
+        // to null and playback stops.
         val localPath = downloadLocator.localPathFor(track.id)
         val streamUrl = LocalFirstResolver.resolve(
             localPath = localPath,
-            streamUrl = api.streamUrl(track.id)?.toString(),
+            streamUrl = api?.streamUrl(track.id)?.toString(),
         ) ?: return
-        _nowPlayingArtworkUrl.value = track.coverArt?.let { api.getCoverArtUrl(it)?.toString() }
+        // Cover art is a network fetch — suppressed in offline mode (baw.17).
+        // NowPlayingSheet and the media notification degrade to placeholder art.
+        _nowPlayingArtworkUrl.value = if (api == null || offlineMode()) {
+            null
+        } else {
+            track.coverArt?.let { api.getCoverArtUrl(it)?.toString() }
+        }
         // Reset per-track scrobble guard and fire now-playing notification (baw.5.1).
         // Suppressed in offline mode — no network calls while offline (baw.12).
         scrobbleSubmitted = false
-        if (!offlineMode()) {
+        if (api != null && !offlineMode()) {
             scope.launch {
                 api.scrobble(track.id, submission = false)
             }
