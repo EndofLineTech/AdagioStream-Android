@@ -445,6 +445,99 @@ class NavidromeLibraryViewModelTest {
     }
 
     // -------------------------------------------------------------------------
+    // Album browse list (baw.9.1) — loadAlbumBrowseList / selectAlbumListType
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `initial albumBrowseState is Idle and default list type is Newest`() = runTest {
+        assertEquals(
+            com.adagiostream.android.service.navidrome.AlbumListType.NEWEST,
+            viewModel.albumListType.value,
+        )
+        viewModel.albumBrowseState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadAlbumBrowseList transitions Idle then Loading then Loaded on success`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(ALBUM_LIST_OK_FIXTURE))
+
+        viewModel.albumBrowseState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadAlbumBrowseList()
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loading, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(2, viewModel.albumBrowseList.value.size)
+    }
+
+    @Test
+    fun `loadAlbumBrowseList transitions to Empty when server returns no albums`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(ALBUM_LIST_EMPTY_FIXTURE))
+
+        viewModel.albumBrowseState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadAlbumBrowseList()
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadAlbumBrowseList is no-op when no Subsonic account configured`() = runTest {
+        viewModel.albumBrowseState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadAlbumBrowseList()
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `selectAlbumListType updates the picker and reloads with the new type`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(ALBUM_LIST_OK_FIXTURE))
+        server.enqueue(mockOk(ALBUM_LIST_EMPTY_FIXTURE))
+
+        // First load — default NEWEST.
+        viewModel.albumBrowseState.test {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadAlbumBrowseList()
+            awaitItem() // Loading
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // Switch to RANDOM — must re-request (not a no-op) and land on Empty.
+        viewModel.albumBrowseState.test {
+            viewModel.selectAlbumListType(com.adagiostream.android.service.navidrome.AlbumListType.RANDOM)
+            val states = mutableListOf<NavidromeLibraryViewModel.LoadState>()
+            repeat(5) {
+                states.add(awaitItem())
+                if (states.last() == NavidromeLibraryViewModel.LoadState.Empty) return@test
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(
+            com.adagiostream.android.service.navidrome.AlbumListType.RANDOM,
+            viewModel.albumListType.value,
+        )
+
+        val request = server.takeRequest()
+        assertEquals("newest", request.url.queryParameter("type"))
+        val secondRequest = server.takeRequest()
+        assertEquals("random", secondRequest.url.queryParameter("type"))
+    }
+
+    // -------------------------------------------------------------------------
     // Genre browse (baw.2.4) — loadGenres state machine
     // -------------------------------------------------------------------------
 
@@ -818,6 +911,33 @@ class NavidromeLibraryViewModelTest {
                     {"id":"t3","albumId":"al1","artistId":"ar1","title":"Karma Police","track":3,"duration":261}
                   ]
                 }
+              }
+            }
+        """
+
+        // Album list fixtures (baw.9.1)
+
+        private const val ALBUM_LIST_OK_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "albumList2": {
+                  "album": [
+                    {"id":"al1","artistId":"ar1","name":"OK Computer","songCount":12,"year":1997},
+                    {"id":"al2","artistId":"ar1","name":"Kid A","songCount":10,"year":2000}
+                  ]
+                }
+              }
+            }
+        """
+
+        private const val ALBUM_LIST_EMPTY_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "albumList2": { "album": [] }
               }
             }
         """

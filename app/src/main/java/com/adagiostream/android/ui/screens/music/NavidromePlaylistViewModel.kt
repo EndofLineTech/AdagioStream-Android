@@ -294,6 +294,63 @@ class NavidromePlaylistViewModel @Inject constructor(
         }
     }
 
+    private val _isRemovingTrack = MutableStateFlow(false)
+
+    /**
+     * True while a [removeTrackAt] call is in flight (baw.16). The removal touches
+     * every row's index (a second concurrent removal would race against the
+     * server refresh and could target the wrong row once indices shift), so the
+     * UI disables the "Remove from Playlist" action for the whole list until this
+     * one completes.
+     */
+    val isRemovingTrack: StateFlow<Boolean> = _isRemovingTrack.asStateFlow()
+
+    /**
+     * Removes the track at [index] in the currently-displayed [playlistTracks] from
+     * [playlist] (baw.9.2).
+     *
+     * CRITICAL: `updatePlaylist`'s `songIndexToRemove` param is INDEX-based, not
+     * song-ID-based. With duplicate tracks in a playlist (the same song appearing
+     * twice), removing by ID would be ambiguous — the server has no way to know
+     * which occurrence to drop. This method always sends the exact 0-based [index]
+     * of the row the user tapped/swiped in the list currently on screen, so
+     * duplicates are handled correctly regardless of which occurrence is removed.
+     *
+     * Optimistically removes the row locally, then — once the server call
+     * succeeds — refreshes the playlist from the server so the client converges
+     * on canonical state (e.g. if another client edited the playlist concurrently).
+     * On API failure the optimistic removal is reverted.
+     *
+     * Ignores calls while a removal is already in flight ([isRemovingTrack]) —
+     * without this, a fast double-tap could fire a second `updatePlaylist` whose
+     * index no longer matches the (already-shifted) server-side list.
+     */
+    fun removeTrackAt(playlist: NavidromePlaylist, index: Int) {
+        val currentApi = _api.value ?: return
+        if (_isRemovingTrack.value) return
+        val oldTracks = _playlistTracks.value
+        if (index !in oldTracks.indices) return
+
+        _isRemovingTrack.value = true
+        _playlistTracks.value = oldTracks.toMutableList().apply { removeAt(index) }
+
+        viewModelScope.launch {
+            try {
+                currentApi.updatePlaylist(id = playlist.id, indicesToRemove = listOf(index))
+                // Refresh from server afterward for canonical state (baw.9.2).
+                val (updatedPlaylist, tracks) = currentApi.getPlaylist(playlist.id)
+                _selectedPlaylist.value = updatedPlaylist
+                _playlistTracks.value = tracks
+                _playlistDetailState.value = if (tracks.isEmpty()) LoadState.Empty else LoadState.Loaded
+            } catch (_: Exception) {
+                // Revert optimistic removal.
+                _playlistTracks.value = oldTracks
+            } finally {
+                _isRemovingTrack.value = false
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------

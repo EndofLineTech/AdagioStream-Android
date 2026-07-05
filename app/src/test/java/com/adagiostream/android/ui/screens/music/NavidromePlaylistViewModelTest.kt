@@ -9,6 +9,7 @@ import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.service.player.LibraryTrackPlayer
 import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import com.adagiostream.android.service.player.MusicQueueManager
+import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.player.PlaybackSource
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.testutil.MainDispatcherRule
@@ -325,6 +326,155 @@ class NavidromePlaylistViewModelTest {
     }
 
     // -------------------------------------------------------------------------
+    // removeTrackAt — index-based removal, duplicate-safe (baw.9.2)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `removeTrackAt with duplicate tracks targets the exact tapped index`() = runTest {
+        setSubsonicAccount()
+        // Playlist has the SAME song ("s1") at index 0 and index 2.
+        server.enqueue(mockOk(PLAYLIST_WITH_DUPLICATE_FIXTURE))
+
+        val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
+            id = "p1", name = "My Mix", songCount = 3,
+        )
+        viewModel.playlistDetailState.test {
+            assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadPlaylistDetail(fakePlaylist)
+            awaitItem() // Loading
+            assertEquals(NavidromePlaylistViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val tracks = viewModel.playlistTracks.value
+        assertEquals(3, tracks.size)
+        assertEquals("s1", tracks[0].id)
+        assertEquals("s2", tracks[1].id)
+        assertEquals("s1", tracks[2].id) // duplicate of index 0
+
+        // Remove the SECOND occurrence (index 2), not the first.
+        server.enqueue(statusOk()) // updatePlaylist response
+        server.enqueue(mockOk(PLAYLIST_AFTER_REMOVE_DUPLICATE_FIXTURE)) // refresh
+
+        viewModel.removeTrackAt(fakePlaylist, index = 2)
+
+        // Optimistic removal — the tapped row (index 2) is gone immediately.
+        assertEquals(2, viewModel.playlistTracks.value.size)
+
+        // The updatePlaylist request must target index 2, never index 0.
+        val playlistsRequest = server.takeRequest() // consumed by loadPlaylistDetail (getPlaylist)
+        assertTrue(playlistsRequest.url.encodedPath.contains("getPlaylist"))
+        val updateRequest = server.takeRequest()
+        assertTrue(updateRequest.url.encodedPath.contains("updatePlaylist"))
+        assertEquals("2", updateRequest.url.queryParameter("songIndexToRemove"))
+    }
+
+    @Test
+    fun `removeTrackAt reverts the optimistic removal on API error`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(PLAYLIST_DETAIL_FIXTURE))
+
+        val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
+            id = "p1", name = "My Mix", songCount = 2,
+        )
+        viewModel.playlistDetailState.test {
+            assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadPlaylistDetail(fakePlaylist)
+            awaitItem() // Loading
+            assertEquals(NavidromePlaylistViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val originalTracks = viewModel.playlistTracks.value
+        assertEquals(2, originalTracks.size)
+
+        server.enqueue(
+            mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":70,"message":"Not found"}}}"""),
+        )
+
+        viewModel.removeTrackAt(fakePlaylist, index = 0)
+
+        // Wait for the revert.
+        viewModel.playlistTracks.test {
+            val states = mutableListOf<List<Track>>()
+            repeat(5) {
+                states.add(awaitItem())
+                if (states.last().size == originalTracks.size) return@test
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(originalTracks, viewModel.playlistTracks.value)
+    }
+
+    @Test
+    fun `removeTrackAt is a no-op for an out-of-range index`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(PLAYLIST_DETAIL_FIXTURE))
+
+        val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
+            id = "p1", name = "My Mix", songCount = 2,
+        )
+        viewModel.playlistDetailState.test {
+            assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadPlaylistDetail(fakePlaylist)
+            awaitItem() // Loading
+            assertEquals(NavidromePlaylistViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val before = viewModel.playlistTracks.value
+        viewModel.removeTrackAt(fakePlaylist, index = 99)
+
+        assertEquals(before, viewModel.playlistTracks.value)
+    }
+
+    @Test
+    fun `removeTrackAt ignores a second call while a removal is in flight`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(mockOk(PLAYLIST_WITH_DUPLICATE_FIXTURE))
+
+        val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
+            id = "p1", name = "My Mix", songCount = 3,
+        )
+        viewModel.playlistDetailState.test {
+            assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadPlaylistDetail(fakePlaylist)
+            awaitItem() // Loading
+            assertEquals(NavidromePlaylistViewModel.LoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(3, viewModel.playlistTracks.value.size)
+
+        // Only ONE updatePlaylist + refresh pair queued: if the in-flight guard
+        // didn't fire, the second removeTrackAt() below would send a SECOND
+        // updatePlaylist request that finds no response queued and times out.
+        server.enqueue(statusOk()) // updatePlaylist for the first (and only) removal
+        server.enqueue(mockOk(PLAYLIST_AFTER_REMOVE_DUPLICATE_FIXTURE)) // refresh
+
+        assertTrue(!viewModel.isRemovingTrack.value)
+        viewModel.removeTrackAt(fakePlaylist, index = 0)
+        // The flag flips synchronously, before the network call suspends.
+        assertTrue(viewModel.isRemovingTrack.value)
+
+        // Second call arrives while the first is still in flight — must be
+        // ignored, even though index 0 is still in range of the
+        // (optimistically-shrunk) local list.
+        viewModel.removeTrackAt(fakePlaylist, index = 0)
+
+        // Wait for the in-flight removal to finish.
+        viewModel.isRemovingTrack.test {
+            var value = awaitItem()
+            while (value) value = awaitItem()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // getPlaylist (initial load) + updatePlaylist + getPlaylist (refresh) = 3 total.
+        assertEquals(3, server.requestCount)
+        assertEquals(2, viewModel.playlistTracks.value.size)
+    }
+
+    // -------------------------------------------------------------------------
     // createPlaylist (baw.4.3)
     // -------------------------------------------------------------------------
 
@@ -555,6 +705,44 @@ class NavidromePlaylistViewModelTest {
                     {"id":"p1","name":"My Mix","songCount":10},
                     {"id":"p2","name":"Workout Jams","songCount":25},
                     {"id":"p3","name":"Brand New Mix","songCount":0}
+                  ]
+                }
+              }
+            }
+        """
+
+        // Duplicate-track fixtures (baw.9.2) — same song ("s1") at index 0 and 2.
+        private const val PLAYLIST_WITH_DUPLICATE_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "playlist": {
+                  "id": "p1",
+                  "name": "My Mix",
+                  "songCount": 3,
+                  "entry": [
+                    {"id":"s1","albumId":"al1","artistId":"ar1","title":"Comfortably Numb","artist":"Pink Floyd","track":1,"duration":382},
+                    {"id":"s2","albumId":"al1","artistId":"ar1","title":"Wish You Were Here","artist":"Pink Floyd","track":2,"duration":315},
+                    {"id":"s1","albumId":"al1","artistId":"ar1","title":"Comfortably Numb","artist":"Pink Floyd","track":1,"duration":382}
+                  ]
+                }
+              }
+            }
+        """
+
+        private const val PLAYLIST_AFTER_REMOVE_DUPLICATE_FIXTURE = """
+            {
+              "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "playlist": {
+                  "id": "p1",
+                  "name": "My Mix",
+                  "songCount": 2,
+                  "entry": [
+                    {"id":"s1","albumId":"al1","artistId":"ar1","title":"Comfortably Numb","artist":"Pink Floyd","track":1,"duration":382},
+                    {"id":"s2","albumId":"al1","artistId":"ar1","title":"Wish You Were Here","artist":"Pink Floyd","track":2,"duration":315}
                   ]
                 }
               }

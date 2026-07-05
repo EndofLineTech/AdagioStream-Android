@@ -4,6 +4,7 @@ import com.adagiostream.android.service.download.DownloadLocator
 import com.adagiostream.android.service.download.LocalFirstResolver
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.service.persistence.PersistenceService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +41,12 @@ class MusicPlaybackCoordinator @Inject constructor(
      * so the JVM coordinator tests (and the no-download path) keep streaming.
      */
     private val downloadLocator: DownloadLocator = DownloadLocator.None,
+    /**
+     * Persists shuffle/repeat across restarts (baw.9.4). Optional — `null` in
+     * plain-JVM tests that don't exercise persistence; Hilt always supplies a
+     * real instance in production (see [com.adagiostream.android.di.AppModule]).
+     */
+    private val persistenceService: PersistenceService? = null,
 ) {
 
     /** The [NavidromeApi] backing the current library session; null until [playAlbum]. */
@@ -57,25 +64,40 @@ class MusicPlaybackCoordinator @Inject constructor(
     /** Guard that ensures the scrobble submission fires at most once per track (baw.5.1). */
     private var scrobbleSubmitted = false
 
+    init {
+        // Restore shuffle/repeat from the last session (baw.9.4). Synchronous —
+        // mirrors SettingsViewModel's initial-value read — so restoration is
+        // deterministic and complete before this constructor returns, rather
+        // than racing whatever calls setShuffle/playAlbum next. Radio never
+        // reads these fields, so this has no effect on live playback.
+        persistenceService?.let { ps ->
+            val settings = ps.loadSettingsSync()
+            queue.setShuffle(settings.shuffleEnabled)
+            queue.repeatMode = settings.repeatMode
+        }
+    }
+
     private val _nowPlayingArtworkUrl = MutableStateFlow<String?>(null)
     private val _nowPlayingAlbumTitle = MutableStateFlow<String?>(null)
 
     /** Album title for the current library session, surfaced as MediaSession album metadata (baw.3.4). */
     val nowPlayingAlbumTitle: StateFlow<String?> = _nowPlayingAlbumTitle.asStateFlow()
 
+    // NOTE: declared AFTER the settings-restore init block above so the flows
+    // are seeded with the RESTORED shuffle/repeat, not the defaults (baw.9.4).
     private val _shuffleEnabledFlow = MutableStateFlow(queue.shuffleEnabled)
+    private val _repeatModeFlow = MutableStateFlow(queue.repeatMode)
 
     /**
-     * Whether the underlying queue is shuffling, as a [StateFlow] (baw.13 MINOR-3):
-     * lets observers (e.g. the custom-button layout refresh) react to toggles from
-     * *any* controller, not just the one that tapped the button.
+     * Whether the underlying queue is shuffling, as a [StateFlow]. Serves both
+     * reactive consumers: the custom-button layout refresh (baw.13 MINOR-3 —
+     * reacts to toggles from *any* controller) and the Up Next sheet's
+     * drag-handle gate (baw.16 — see [moveQueueItem]).
      */
     val shuffleEnabledFlow: StateFlow<Boolean> = _shuffleEnabledFlow.asStateFlow()
 
     /** Whether the underlying queue is shuffling — exposed through the session (baw.3.5). */
     val shuffleEnabled: Boolean get() = shuffleEnabledFlow.value
-
-    private val _repeatModeFlow = MutableStateFlow(queue.repeatMode)
 
     /** The underlying queue's repeat mode, as a [StateFlow] (baw.13 MINOR-3) — see [shuffleEnabledFlow]. */
     val repeatModeFlow: StateFlow<RepeatMode> = _repeatModeFlow.asStateFlow()
@@ -152,20 +174,59 @@ class MusicPlaybackCoordinator @Inject constructor(
         playCurrent()
     }
 
-    /** Enables/disables shuffle on the underlying queue (baw.3.5). */
+    /** Enables/disables shuffle on the underlying queue (baw.3.5) and persists it (baw.9.4). */
     fun setShuffle(enabled: Boolean) {
         queue.setShuffle(enabled)
         _shuffleEnabledFlow.value = queue.shuffleEnabled
+        persistPlaybackSettings()
     }
 
-    /** Sets the repeat mode on the underlying queue (baw.3.5). */
+    /** Sets the repeat mode on the underlying queue (baw.3.5) and persists it (baw.9.4). */
     fun setRepeatMode(mode: RepeatMode) {
         queue.repeatMode = mode
         _repeatModeFlow.value = mode
+        persistPlaybackSettings()
+    }
+
+    /**
+     * Saves the current shuffle/repeat state to [AppSettings] so it survives an
+     * app restart (baw.9.4). Read-modify-write against the latest persisted
+     * settings so this never clobbers unrelated settings fields changed
+     * elsewhere (e.g. concurrently in Settings). No-op when no
+     * [persistenceService] was supplied (plain-JVM tests).
+     */
+    private fun persistPlaybackSettings() {
+        val ps = persistenceService ?: return
+        scope.launch {
+            val current = ps.loadSettings()
+            ps.saveSettings(
+                current.copy(shuffleEnabled = queue.shuffleEnabled, repeatMode = queue.repeatMode),
+            )
+        }
     }
 
     /** The currently-active library track, or null when nothing is queued. */
     fun currentTrack(): Track? = queue.current()
+
+    /**
+     * Reorders the "Up Next" queue (baw.9.3). Playback of the current track is
+     * never restarted; only the player's queue snapshot is refreshed so the Up
+     * Next screen / Android Auto immediately reflect the new order.
+     *
+     * INDEX DOMAIN (baw.16): [from]/[to] are CANONICAL queue positions — the
+     * order the Up Next sheet displays ([PlaybackSource.Library.queue]). While
+     * shuffle is on, [MusicQueueManager.moveItem] operates on the shuffle play
+     * order instead, so a canonical-domain move would land on the wrong track;
+     * reordering is therefore a no-op under shuffle, and the sheet hides its
+     * drag handles (Spotify-style). Tap-to-jump ([playIndex]) stays canonical
+     * in both modes and is unaffected.
+     */
+    fun moveQueueItem(from: Int, to: Int) {
+        if (queue.shuffleEnabled) return // ponytail: reorder disabled under shuffle; project play order into the sheet if PO ever wants it
+        queue.moveItem(from, to)
+        if (queue.isEmpty) return
+        player.updateLibrarySource(PlaybackSource.Library(queue.queue, queue.currentIndex))
+    }
 
     /**
      * Reports playback progress for the current library track (baw.5.1).

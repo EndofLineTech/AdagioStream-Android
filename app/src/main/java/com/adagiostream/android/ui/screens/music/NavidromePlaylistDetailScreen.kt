@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
@@ -73,6 +73,7 @@ fun NavidromePlaylistDetailScreen(
     val detailState by viewModel.playlistDetailState.collectAsStateWithLifecycle()
     val tracks by viewModel.playlistTracks.collectAsStateWithLifecycle()
     val downloadStates by downloadsViewModel.downloadStates.collectAsStateWithLifecycle()
+    val isRemovingTrack by viewModel.isRemovingTrack.collectAsStateWithLifecycle()
 
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -215,12 +216,24 @@ fun NavidromePlaylistDetailScreen(
 
             NavidromePlaylistViewModel.LoadState.Loaded -> {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(tracks, key = { it.id }) { track ->
+                    // Composite key (index + id): playlists can contain the same song
+                    // more than once, so the id alone is not a stable/unique key.
+                    itemsIndexed(tracks, key = { index, track -> "$index-${track.id}" }) { index, track ->
                         PlaylistTrackRow(
                             track = track,
                             downloadState = downloadStates[track.id] ?: DownloadUiState.NOT_DOWNLOADED,
                             onClick = { viewModel.playPlaylistTrack(track) },
                             onAddToPlaylist = { addToPlaylistTrackId = track.id },
+                            // Removal is index-based (baw.9.2) — always the row's
+                            // position in THIS list, never the track id, so
+                            // duplicate tracks remove the exact tapped occurrence.
+                            onRemoveFromPlaylist = {
+                                selectedPlaylist?.let { viewModel.removeTrackAt(it, index) }
+                            },
+                            // Disabled while a removal is in flight (baw.16) — indices
+                            // shift once the server call lands, so a second tap before
+                            // it completes could remove the wrong row.
+                            isRemoveEnabled = !isRemovingTrack,
                             onDownloadTap = { state -> downloadsViewModel.onButtonTap(track, state) },
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
@@ -302,8 +315,12 @@ private fun PlaylistTrackRow(
     downloadState: DownloadUiState,
     onClick: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onRemoveFromPlaylist: () -> Unit,
+    isRemoveEnabled: Boolean = true,
     onDownloadTap: (DownloadUiState) -> Unit,
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -341,14 +358,36 @@ private fun PlaylistTrackRow(
             )
         }
 
-        // "Add to Playlist" overflow (baw.4.3).
-        IconButton(onClick = onAddToPlaylist, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = Icons.Default.MoreVert,
-                contentDescription = "Add to playlist",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
+        // Overflow — "Add to Playlist" (baw.4.3) + "Remove from Playlist" (baw.9.2).
+        Box {
+            IconButton(onClick = { showMenu = true }, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Add to Playlist") },
+                    onClick = {
+                        showMenu = false
+                        onAddToPlaylist()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Remove from Playlist", color = MaterialTheme.colorScheme.error) },
+                    enabled = isRemoveEnabled,
+                    onClick = {
+                        showMenu = false
+                        onRemoveFromPlaylist()
+                    },
+                )
+            }
         }
     }
 }

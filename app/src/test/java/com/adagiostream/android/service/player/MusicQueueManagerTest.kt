@@ -214,6 +214,121 @@ class MusicQueueManagerTest {
         repeat(tracks.size + 1) { assertTrue(manager.next() != null) }
     }
 
+    // ---- moveItem (baw.9.3) — Up Next reorder ------------------------------
+
+    @Test
+    fun `moveItem reorders the canonical queue when shuffle is off`() {
+        val tracks = TestFixtures.makeTracks(5)
+        manager.setQueue(tracks, startIndex = 0)
+
+        manager.moveItem(from = 4, to = 0) // move last track to the front
+
+        assertEquals(tracks[4], manager.queue[0])
+        assertEquals(tracks[0], manager.queue[1])
+        assertEquals((0 until 5).toList(), manager.playOrder()) // still canonical order
+    }
+
+    @Test
+    fun `moveItem with shuffle off replaces the queue list instance, never mutates in place`() {
+        // CONTRACT (baw.18): AudioPlaybackService persists the queue only when the
+        // PlaybackSource queue List INSTANCE changes (=== identity check). An
+        // in-place mutation here would mean reorders never re-persist, so resume
+        // after process death would silently restore the pre-reorder queue.
+        val tracks = TestFixtures.makeTracks(5)
+        manager.setQueue(tracks, startIndex = 0)
+        val before = manager.queue
+
+        manager.moveItem(from = 4, to = 0)
+
+        assertFalse("moveItem must replace the queue instance", before === manager.queue)
+        assertEquals(tracks, before) // the old instance is untouched
+        assertEquals(tracks[4], manager.queue[0]) // the new instance is reordered
+    }
+
+    @Test
+    fun `moveItem keeps the currently playing track active when it moves`() {
+        val tracks = TestFixtures.makeTracks(5)
+        manager.setQueue(tracks, startIndex = 1) // track-1 is playing
+
+        manager.moveItem(from = 1, to = 4) // drag the now-playing row to the end
+
+        assertEquals(tracks[1], manager.current())
+        assertEquals(4, manager.currentIndex)
+    }
+
+    @Test
+    fun `moveItem shifts currentIndex when an earlier item moves past it`() {
+        val tracks = TestFixtures.makeTracks(5)
+        manager.setQueue(tracks, startIndex = 2) // track-2 is playing
+
+        manager.moveItem(from = 0, to = 3) // move track-0 from before to after current
+
+        // track-2 shifts left by one since something before it moved past it.
+        assertEquals(tracks[2], manager.current())
+        assertEquals(1, manager.currentIndex)
+    }
+
+    @Test
+    fun `moveItem is a no-op on an empty queue`() {
+        manager.moveItem(0, 1) // must not throw
+        assertTrue(manager.isEmpty)
+    }
+
+    @Test
+    fun `moveItem is a no-op for out-of-range or equal indices`() {
+        val tracks = TestFixtures.makeTracks(3)
+        manager.setQueue(tracks, startIndex = 0)
+
+        manager.moveItem(from = 0, to = 0)
+        manager.moveItem(from = -1, to = 1)
+        manager.moveItem(from = 1, to = 99)
+
+        assertEquals(tracks, manager.queue)
+    }
+
+    @Test
+    fun `moveItem when shuffled reorders only the play order, not the canonical queue`() {
+        val tracks = TestFixtures.makeTracks(6)
+        manager.random = Random(99)
+        manager.setShuffle(true)
+        manager.setQueue(tracks, startIndex = 0) // track-0 pinned first in shuffle order
+
+        val canonicalBefore = manager.queue
+        val orderBefore = manager.playOrder()
+
+        // Move the item at shuffle-order position 1 to the end of the play order.
+        manager.moveItem(from = 1, to = orderBefore.lastIndex)
+
+        // Canonical queue (album order) is untouched by a shuffle-mode reorder.
+        assertEquals(canonicalBefore, manager.queue)
+        // But the upcoming play order has changed.
+        assertTrue(manager.playOrder() != orderBefore)
+        assertEquals(orderBefore.size, manager.playOrder().toSet().size) // still a full permutation
+        // The currently playing track (still pinned first) is unaffected.
+        assertEquals(tracks[0], manager.current())
+    }
+
+    @Test
+    fun `moveItem when shuffled preserves the currently playing track through a reorder`() {
+        val tracks = TestFixtures.makeTracks(6)
+        manager.random = Random(7)
+        manager.setQueue(tracks, startIndex = 3)
+        manager.setShuffle(true)
+        manager.next() // advance so the "now playing" row isn't at shuffle position 0
+
+        val nowPlaying = manager.current()
+        val playingShufflePos = manager.playOrder().indexOf(manager.currentIndex)
+
+        // Drag the first upcoming row to the very end — must not disturb playback.
+        manager.moveItem(from = 0, to = manager.playOrder().lastIndex)
+
+        assertEquals(nowPlaying, manager.current())
+        // Re-disabling shuffle resumes the ORIGINAL canonical order untouched.
+        manager.setShuffle(false)
+        assertEquals(tracks, manager.queue)
+        assertTrue("sanity: a playing position existed pre-move", playingShufflePos >= 0)
+    }
+
     // ---- repeat mode cycle ------------------------------------------------
 
     @Test

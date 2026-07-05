@@ -40,6 +40,7 @@ import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
 import com.adagiostream.android.ui.screens.licenses.LicensesScreen
 import com.adagiostream.android.ui.screens.privacy.PrivacyPolicyScreen
 import com.adagiostream.android.ui.screens.loved.LovedTracksScreen
+import com.adagiostream.android.ui.screens.music.AlbumBrowseScreen
 import com.adagiostream.android.ui.screens.music.AlbumDetailScreen
 import com.adagiostream.android.ui.screens.music.ArtistDetailScreen
 import com.adagiostream.android.ui.screens.music.GenreBrowseScreen
@@ -198,6 +199,9 @@ fun MainScreen(
                         onGenresClick = {
                             navController.navigate(Screen.GenreBrowse.route)
                         },
+                        onAlbumsClick = {
+                            navController.navigate(Screen.AlbumBrowse.route)
+                        },
                         onSearchClick = {
                             navController.navigate(Screen.MusicSearch.route)
                         },
@@ -260,6 +264,15 @@ fun MainScreen(
                     ),
                 ) {
                     AlbumDetailScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                // Album browse route (baw.9.1)
+                composable(Screen.AlbumBrowse.route) {
+                    AlbumBrowseScreen(
+                        onAlbumClick = { albumId ->
+                            navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                        },
                         onBack = { navController.popBackStack() },
                     )
                 }

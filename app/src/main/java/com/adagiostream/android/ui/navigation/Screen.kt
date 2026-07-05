@@ -73,6 +73,13 @@ sealed class Screen(
     }
 
     /**
+     * Album browse — getAlbumList2 with a selectable ordering (baw.9.1).
+     * Accessible from inside [MusicLibraryScreen]; tapping an album navigates
+     * to the existing [AlbumDetail] route.
+     */
+    data object AlbumBrowse : Screen("music/albums", "Albums", Icons.Default.MusicNote)
+
+    /**
      * Genre browse — list of all genres (baw.2.4).
      * Accessible from inside [MusicLibraryScreen].
      */
