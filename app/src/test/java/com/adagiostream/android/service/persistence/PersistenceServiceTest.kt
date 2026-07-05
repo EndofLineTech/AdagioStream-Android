@@ -1,5 +1,6 @@
 package com.adagiostream.android.service.persistence
 
+import com.adagiostream.android.service.player.ResumptionPolicy
 import com.adagiostream.android.testutil.TestFixtures
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -71,5 +72,65 @@ class PersistenceServiceTest {
         val loaded = service.loadLastPlayed()
 
         assertEquals(LastPlayed.Channel("legacy-channel-id"), loaded)
+    }
+
+    @Test
+    fun `truncated JSON does not throw and degrades to nothing-to-resume`() = runTest {
+        // baw.14: a partial write (process death mid-save) must never crash
+        // resume — decode fails, the raw text falls back to Channel(garbage),
+        // and the policy resolves that to NothingToResume (no channel matches).
+        val file = java.io.File(RuntimeEnvironment.getApplication().filesDir, "last_played.txt")
+        file.writeText("""{"type":"library_track","queue":[{"id":"tr""")
+
+        val loaded = service.loadLastPlayed()
+
+        assertTrue(loaded is LastPlayed.Channel)
+        val plan = ResumptionPolicy.resolve(
+            lastPlayed = loaded,
+            channels = emptyList(),
+            hasSubsonicApi = true,
+        )
+        assertEquals(ResumptionPolicy.Plan.NothingToResume, plan)
+    }
+
+    // ---- position sidecar (baw.14) -----------------------------------------
+
+    @Test
+    fun `position sidecar overlays index and position onto the saved library queue`() = runTest {
+        val queue = TestFixtures.makeTracks(3)
+        service.saveLastPlayed(LastPlayed.LibraryTrack(queue = queue, index = 0, positionMs = 0L))
+
+        service.saveLastPlayedPosition(index = 2, positionMs = 73_000L)
+        val loaded = service.loadLastPlayed() as LastPlayed.LibraryTrack
+
+        assertEquals(queue, loaded.queue) // queue untouched by position-only writes
+        assertEquals(2, loaded.index)
+        assertEquals(73_000L, loaded.positionMs)
+    }
+
+    @Test
+    fun `full save clears a stale position sidecar`() = runTest {
+        service.saveLastPlayed(LastPlayed.LibraryTrack(queue = TestFixtures.makeTracks(3), index = 0, positionMs = 0L))
+        service.saveLastPlayedPosition(index = 2, positionMs = 73_000L)
+
+        // New queue full-save — the old sidecar must not leak into it.
+        val newQueue = TestFixtures.makeTracks(2)
+        service.saveLastPlayed(LastPlayed.LibraryTrack(queue = newQueue, index = 1, positionMs = 5_000L))
+        val loaded = service.loadLastPlayed() as LastPlayed.LibraryTrack
+
+        assertEquals(newQueue, loaded.queue)
+        assertEquals(1, loaded.index)
+        assertEquals(5_000L, loaded.positionMs)
+    }
+
+    @Test
+    fun `corrupt position sidecar is ignored in favour of full-save values`() = runTest {
+        service.saveLastPlayed(LastPlayed.LibraryTrack(queue = TestFixtures.makeTracks(2), index = 1, positionMs = 9_000L))
+        java.io.File(RuntimeEnvironment.getApplication().filesDir, "last_played_pos.txt").writeText("not numbers")
+
+        val loaded = service.loadLastPlayed() as LastPlayed.LibraryTrack
+
+        assertEquals(1, loaded.index)
+        assertEquals(9_000L, loaded.positionMs)
     }
 }

@@ -205,23 +205,40 @@ class AudioPlaybackService : MediaLibraryService() {
 
         // Persist last played library track + position (baw.10): mirrors the
         // channel save above so onPlaybackResumption can rebuild library
-        // playback (queue + track + position), not just channels. Saves on
-        // every track-start/pause (state change) plus a periodic snapshot
-        // below, so process death loses at most a few seconds of progress.
+        // playback (queue + track + position), not just channels.
+        //
+        // Write strategy (baw.14 review): the full queue is serialized ONCE per
+        // queue (identity change — MusicQueueManager keeps the same List across
+        // track advances); every other trigger (track advance, pause, the 10s
+        // tick) only rewrites the tiny position sidecar. Emissions are deduped
+        // on source identity + state class — never full Track-list equality —
+        // and the writes themselves run on Dispatchers.IO inside
+        // PersistenceService, off this Main-dispatcher scope.
         serviceScope.launch {
+            var fullySavedQueue: List<Track>? = null
             combine(
                 vlcPlayerWrapper.playbackSource,
                 vlcPlayerWrapper.playbackState,
-            ) { source, _ -> source }.collect { source ->
-                if (source is PlaybackSource.Library) saveLibraryLastPlayed(source)
-            }
+            ) { source, state -> source to state }
+                .distinctUntilChanged { (oldSource, oldState), (newSource, newState) ->
+                    oldSource === newSource && oldState::class == newState::class
+                }
+                .collect { (source, _) ->
+                    if (source !is PlaybackSource.Library) return@collect
+                    if (source.queue !== fullySavedQueue) {
+                        fullySavedQueue = source.queue
+                        saveLibraryLastPlayed(source)
+                    } else {
+                        persistenceService.saveLastPlayedPosition(source.index, vlcPlayerWrapper.currentPositionMs())
+                    }
+                }
         }
         serviceScope.launch {
             while (true) {
                 delay(10_000L)
                 val source = vlcPlayerWrapper.playbackSource.value
                 if (source is PlaybackSource.Library && vlcPlayerWrapper.playbackState.value is PlaybackState.Playing) {
-                    saveLibraryLastPlayed(source)
+                    persistenceService.saveLastPlayedPosition(source.index, vlcPlayerWrapper.currentPositionMs())
                 }
             }
         }
@@ -688,45 +705,53 @@ class AudioPlaybackService : MediaLibraryService() {
             DebugLogger.log("onPlaybackResumption() - from ${controller.packageName}", AUTO)
             val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
             serviceScope.launch {
-                val lastPlayed = persistenceService.loadLastPlayed()
-                DebugLogger.log("onPlaybackResumption() - lastPlayed=$lastPlayed", AUTO)
-                // baw.10: route on WHAT was last playing, not channels only — a
-                // paused library track must resume itself, not the last radio
-                // station. resolveSubsonicApiNow() (not the reactive `subsonicApi`
-                // field) so a cold process resuming before that flow's first
-                // emission still resolves the account.
-                val api = resolveSubsonicApiNow()
-                val plan = ResumptionPolicy.resolve(
-                    lastPlayed = lastPlayed,
-                    channels = accountManager.channels.value,
-                    hasSubsonicApi = api != null,
-                )
-                val items = when (plan) {
-                    is ResumptionPolicy.Plan.ResumeChannel -> {
-                        DebugLogger.log("onPlaybackResumption() - resuming channel: ${plan.channel.name}", AUTO)
-                        vlcPlayerWrapper.setChannelList(channelListForContext(plan.channel))
-                        vlcPlayerWrapper.play(plan.channel)
-                        listOf(buildPlayableItem(plan.channel))
+                // baw.14: an unset SettableFuture hangs the requesting controller
+                // (lock screen / BT / Auto) forever — ANY throw in here must
+                // still resolve the future, degrading to "nothing to resume".
+                try {
+                    val lastPlayed = persistenceService.loadLastPlayed()
+                    DebugLogger.log("onPlaybackResumption() - lastPlayed=$lastPlayed", AUTO)
+                    // baw.10: route on WHAT was last playing, not channels only — a
+                    // paused library track must resume itself, not the last radio
+                    // station. resolveSubsonicApiNow() (not the reactive `subsonicApi`
+                    // field) so a cold process resuming before that flow's first
+                    // emission still resolves the account.
+                    val api = resolveSubsonicApiNow()
+                    val plan = ResumptionPolicy.resolve(
+                        lastPlayed = lastPlayed,
+                        channels = accountManager.channels.value,
+                        hasSubsonicApi = api != null,
+                    )
+                    val items = when (plan) {
+                        is ResumptionPolicy.Plan.ResumeChannel -> {
+                            DebugLogger.log("onPlaybackResumption() - resuming channel: ${plan.channel.name}", AUTO)
+                            vlcPlayerWrapper.setChannelList(channelListForContext(plan.channel))
+                            vlcPlayerWrapper.play(plan.channel)
+                            listOf(buildPlayableItem(plan.channel))
+                        }
+                        is ResumptionPolicy.Plan.ResumeLibraryTrack -> {
+                            val track = plan.queue[plan.index]
+                            DebugLogger.log("onPlaybackResumption() - resuming library track: ${track.title} at ${plan.positionMs}ms", AUTO)
+                            musicPlaybackCoordinator.playAlbum(
+                                tracks = plan.queue,
+                                startIndex = plan.index,
+                                api = api!!, // hasSubsonicApi=true guarantees this in the policy
+                                albumTitle = plan.albumTitle,
+                                startPositionMs = plan.positionMs,
+                            )
+                            listOf(buildLibraryPlayableItem(track, plan.albumTitle))
+                        }
+                        ResumptionPolicy.Plan.NothingToResume -> {
+                            DebugLogger.log("onPlaybackResumption() - nothing to resume", AUTO)
+                            emptyList()
+                        }
                     }
-                    is ResumptionPolicy.Plan.ResumeLibraryTrack -> {
-                        val track = plan.queue[plan.index]
-                        DebugLogger.log("onPlaybackResumption() - resuming library track: ${track.title} at ${plan.positionMs}ms", AUTO)
-                        musicPlaybackCoordinator.playAlbum(
-                            tracks = plan.queue,
-                            startIndex = plan.index,
-                            api = api!!, // hasSubsonicApi=true guarantees this in the policy
-                            albumTitle = plan.albumTitle,
-                            startPositionMs = plan.positionMs,
-                        )
-                        listOf(buildLibraryPlayableItem(track, plan.albumTitle))
-                    }
-                    ResumptionPolicy.Plan.NothingToResume -> {
-                        DebugLogger.log("onPlaybackResumption() - nothing to resume", AUTO)
-                        emptyList()
-                    }
+                    val startPositionMs = (plan as? ResumptionPolicy.Plan.ResumeLibraryTrack)?.positionMs ?: 0L
+                    future.set(MediaSession.MediaItemsWithStartPosition(items, 0, startPositionMs))
+                } catch (e: Exception) {
+                    DebugLogger.log("onPlaybackResumption() - FAILED: ${e.message}", AUTO)
+                    future.set(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
                 }
-                val startPositionMs = (plan as? ResumptionPolicy.Plan.ResumeLibraryTrack)?.positionMs ?: 0L
-                future.set(MediaSession.MediaItemsWithStartPosition(items, 0, startPositionMs))
             }
             return future
         }

@@ -546,9 +546,12 @@ class VLCPlayerWrapper(
      *
      * [startPositionMs] (baw.10 resume-at-position) is applied via a VLC
      * `:start-time=` media option BEFORE `mediaPlayer.play()` — the demuxer
-     * seeks during Opening, so no audio ever renders from position 0. This is
-     * why baw.11's iOS-style mute-during-seek workaround isn't needed here:
-     * there is no seek-after-play window to hide.
+     * seeks during Opening, so no audio ever renders from position 0 and
+     * baw.11's iOS-style mute-during-seek workaround has no window to hide.
+     * This assumes the stream is seekable at open (local file or
+     * byte-range-servable HTTP — the same assumption [seekToPositionMs] makes
+     * for the scrubber); behavior against a forced-transcode Subsonic stream
+     * is unverified (tracked as baw.15).
      */
     override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library, startPositionMs: Long) {
         DebugLogger.log(
