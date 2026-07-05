@@ -37,6 +37,7 @@ import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.service.navidrome.NavidromePlaylist
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.service.persistence.LastPlayed
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
@@ -52,6 +53,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -193,10 +195,50 @@ class AudioPlaybackService : MediaLibraryService() {
         serviceScope.launch {
             vlcPlayerWrapper.currentChannel.collect { channel ->
                 if (channel != null) {
-                    persistenceService.saveLastPlayed(channel.id)
+                    persistenceService.saveLastPlayed(LastPlayed.Channel(channel.id))
                     accountManager.startTrackMetadataPolling(channel)
                 } else {
                     accountManager.stopTrackMetadataPolling()
+                }
+            }
+        }
+
+        // Persist last played library track + position (baw.10): mirrors the
+        // channel save above so onPlaybackResumption can rebuild library
+        // playback (queue + track + position), not just channels.
+        //
+        // Write strategy (baw.14 review): the full queue is serialized ONCE per
+        // queue (identity change — MusicQueueManager keeps the same List across
+        // track advances); every other trigger (track advance, pause, the 10s
+        // tick) only rewrites the tiny position sidecar. Emissions are deduped
+        // on source identity + state class — never full Track-list equality —
+        // and the writes themselves run on Dispatchers.IO inside
+        // PersistenceService, off this Main-dispatcher scope.
+        serviceScope.launch {
+            var fullySavedQueue: List<Track>? = null
+            combine(
+                vlcPlayerWrapper.playbackSource,
+                vlcPlayerWrapper.playbackState,
+            ) { source, state -> source to state }
+                .distinctUntilChanged { (oldSource, oldState), (newSource, newState) ->
+                    oldSource === newSource && oldState::class == newState::class
+                }
+                .collect { (source, _) ->
+                    if (source !is PlaybackSource.Library) return@collect
+                    if (source.queue !== fullySavedQueue) {
+                        fullySavedQueue = source.queue
+                        saveLibraryLastPlayed(source)
+                    } else {
+                        persistenceService.saveLastPlayedPosition(source.index, vlcPlayerWrapper.currentPositionMs())
+                    }
+                }
+        }
+        serviceScope.launch {
+            while (true) {
+                delay(10_000L)
+                val source = vlcPlayerWrapper.playbackSource.value
+                if (source is PlaybackSource.Library && vlcPlayerWrapper.playbackState.value is PlaybackState.Playing) {
+                    persistenceService.saveLastPlayedPosition(source.index, vlcPlayerWrapper.currentPositionMs())
                 }
             }
         }
@@ -689,20 +731,53 @@ class AudioPlaybackService : MediaLibraryService() {
             DebugLogger.log("onPlaybackResumption() - from ${controller.packageName}", AUTO)
             val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
             serviceScope.launch {
-                val lastPlayedId = persistenceService.loadLastPlayed()
-                DebugLogger.log("onPlaybackResumption() - lastPlayedId=$lastPlayedId", AUTO)
-                val channel = lastPlayedId?.let { id ->
-                    accountManager.channels.value.find { it.id == id }
+                // baw.14: an unset SettableFuture hangs the requesting controller
+                // (lock screen / BT / Auto) forever — ANY throw in here must
+                // still resolve the future, degrading to "nothing to resume".
+                try {
+                    val lastPlayed = persistenceService.loadLastPlayed()
+                    DebugLogger.log("onPlaybackResumption() - lastPlayed=$lastPlayed", AUTO)
+                    // baw.10: route on WHAT was last playing, not channels only — a
+                    // paused library track must resume itself, not the last radio
+                    // station. resolveSubsonicApiNow() (not the reactive `subsonicApi`
+                    // field) so a cold process resuming before that flow's first
+                    // emission still resolves the account.
+                    val api = resolveSubsonicApiNow()
+                    val plan = ResumptionPolicy.resolve(
+                        lastPlayed = lastPlayed,
+                        channels = accountManager.channels.value,
+                        hasSubsonicApi = api != null,
+                    )
+                    val items = when (plan) {
+                        is ResumptionPolicy.Plan.ResumeChannel -> {
+                            DebugLogger.log("onPlaybackResumption() - resuming channel: ${plan.channel.name}", AUTO)
+                            vlcPlayerWrapper.setChannelList(channelListForContext(plan.channel))
+                            vlcPlayerWrapper.play(plan.channel)
+                            listOf(buildPlayableItem(plan.channel))
+                        }
+                        is ResumptionPolicy.Plan.ResumeLibraryTrack -> {
+                            val track = plan.queue[plan.index]
+                            DebugLogger.log("onPlaybackResumption() - resuming library track: ${track.title} at ${plan.positionMs}ms", AUTO)
+                            musicPlaybackCoordinator.playAlbum(
+                                tracks = plan.queue,
+                                startIndex = plan.index,
+                                api = api!!, // hasSubsonicApi=true guarantees this in the policy
+                                albumTitle = plan.albumTitle,
+                                startPositionMs = plan.positionMs,
+                            )
+                            listOf(buildLibraryPlayableItem(track, plan.albumTitle))
+                        }
+                        ResumptionPolicy.Plan.NothingToResume -> {
+                            DebugLogger.log("onPlaybackResumption() - nothing to resume", AUTO)
+                            emptyList()
+                        }
+                    }
+                    val startPositionMs = (plan as? ResumptionPolicy.Plan.ResumeLibraryTrack)?.positionMs ?: 0L
+                    future.set(MediaSession.MediaItemsWithStartPosition(items, 0, startPositionMs))
+                } catch (e: Exception) {
+                    DebugLogger.log("onPlaybackResumption() - FAILED: ${e.message}", AUTO)
+                    future.set(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
                 }
-                if (channel != null) {
-                    DebugLogger.log("onPlaybackResumption() - resuming: ${channel.name}", AUTO)
-                    vlcPlayerWrapper.setChannelList(channelListForContext(channel))
-                    vlcPlayerWrapper.play(channel)
-                } else {
-                    DebugLogger.log("onPlaybackResumption() - no channel found to resume", AUTO)
-                }
-                val items = if (channel != null) listOf(buildPlayableItem(channel)) else emptyList()
-                future.set(MediaSession.MediaItemsWithStartPosition(items, 0, 0L))
             }
             return future
         }
@@ -1102,6 +1177,22 @@ class AudioPlaybackService : MediaLibraryService() {
     }
 
     /**
+     * Persists [source]'s queue/index/current position as the last-played
+     * library entry (baw.10), so [LibraryCallback.onPlaybackResumption] can
+     * rebuild this exact track after process death.
+     */
+    private suspend fun saveLibraryLastPlayed(source: PlaybackSource.Library) {
+        persistenceService.saveLastPlayed(
+            LastPlayed.LibraryTrack(
+                queue = source.queue,
+                index = source.index,
+                positionMs = vlcPlayerWrapper.currentPositionMs(),
+                albumTitle = musicPlaybackCoordinator.nowPlayingAlbumTitle.value,
+            )
+        )
+    }
+
+    /**
      * Resolves a Subsonic cover-art ID to an authenticated artwork [Uri] for the
      * currently-configured account, or null when no Subsonic account is active
      * (baw.7.1 — cover art thumbnails on browse items). The Subsonic auth token
@@ -1183,6 +1274,31 @@ class AudioPlaybackService : MediaLibraryService() {
         return MediaItem.Builder()
             .setMediaId(channel.id)
             .setUri(channel.streamURL)
+            .setMediaMetadata(metadataBuilder.build())
+            .build()
+    }
+
+    /**
+     * Builds the resumed [MediaItem] for a library track (baw.10), mirroring
+     * [buildPlayableItem]'s channel shape and [handleMusicTrackTap]'s metadata
+     * fields for a music item.
+     */
+    private fun buildLibraryPlayableItem(track: Track, albumTitle: String?): MediaItem {
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist)
+            .setAlbumTitle(albumTitle)
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+
+        track.coverArt?.let { coverArtId ->
+            coverArtUri(coverArtId)?.let { metadataBuilder.setArtworkUri(it) }
+        }
+
+        return MediaItem.Builder()
+            .setMediaId(track.id)
+            .setUri(subsonicApi?.streamUrl(track.id)?.toString())
             .setMediaMetadata(metadataBuilder.build())
             .build()
     }

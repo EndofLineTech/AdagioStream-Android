@@ -47,7 +47,7 @@ class NavidromeSearchViewModelTest {
 
     private val playedSources = mutableListOf<PlaybackSource.Library>()
     private val fakeTrackPlayer = object : LibraryTrackPlayer {
-        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library) {
+        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library, startPositionMs: Long) {
             playedSources += source
         }
         override fun stop() {}

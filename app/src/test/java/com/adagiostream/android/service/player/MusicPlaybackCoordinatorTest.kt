@@ -40,11 +40,11 @@ class MusicPlaybackCoordinatorTest {
 
     /** Records the source of each playLibraryTrack call + whether stop() was hit. */
     private class FakeLibraryTrackPlayer : LibraryTrackPlayer {
-        val played = mutableListOf<Pair<String, PlaybackSource.Library>>()
+        val played = mutableListOf<Triple<String, PlaybackSource.Library, Long>>()
         var stopCount = 0
 
-        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library) {
-            played += streamUrl to source
+        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library, startPositionMs: Long) {
+            played += Triple(streamUrl, source, startPositionMs)
         }
 
         override fun stop() {
@@ -54,6 +54,7 @@ class MusicPlaybackCoordinatorTest {
         val lastSource: PlaybackSource.Library? get() = played.lastOrNull()?.second
         val lastTrackId: String? get() = lastSource?.currentTrack?.id
         val lastStreamUrl: String? get() = played.lastOrNull()?.first
+        val lastStartPositionMs: Long? get() = played.lastOrNull()?.third
     }
 
     private lateinit var queue: MusicQueueManager
@@ -124,6 +125,34 @@ class MusicPlaybackCoordinatorTest {
         assertEquals("track-0", url.queryParameter("id"))
         assertEquals("alice", url.queryParameter("u"))
         assertTrue("stream url must carry an auth token", url.queryParameter("t") != null)
+    }
+
+    @Test
+    fun `playAlbum with no startPositionMs plays from the beginning`() {
+        coordinator.playAlbum(tracks(3), startIndex = 0, api = api)
+
+        assertEquals(0L, fakePlayer.lastStartPositionMs)
+    }
+
+    @Test
+    fun `playAlbum forwards startPositionMs to the player for resume-at-position`() {
+        // baw.10: onPlaybackResumption rebuilds a paused library track via
+        // playAlbum with a saved position — verify it reaches the player so
+        // VLCPlayerWrapper can apply it as a start-time media option.
+        coordinator.playAlbum(tracks(3), startIndex = 1, api = api, startPositionMs = 45_000L)
+
+        assertEquals("track-1", fakePlayer.lastTrackId)
+        assertEquals(45_000L, fakePlayer.lastStartPositionMs)
+    }
+
+    @Test
+    fun `onTrackEnded auto-advance never carries over a stale startPositionMs`() {
+        coordinator.playAlbum(tracks(3), startIndex = 0, api = api, startPositionMs = 45_000L)
+
+        coordinator.onTrackEnded()
+
+        // The NEXT track (auto-advance) must start at 0, not repeat the resumed offset.
+        assertEquals(0L, fakePlayer.lastStartPositionMs)
     }
 
     @Test

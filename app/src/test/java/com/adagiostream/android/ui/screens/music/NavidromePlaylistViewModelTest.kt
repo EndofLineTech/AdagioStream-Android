@@ -10,9 +10,11 @@ import com.adagiostream.android.service.player.LibraryTrackPlayer
 import com.adagiostream.android.service.player.MusicPlaybackCoordinator
 import com.adagiostream.android.service.player.MusicQueueManager
 import com.adagiostream.android.service.player.PlaybackSource
+import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.testutil.MainDispatcherRule
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.job
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -48,7 +50,7 @@ class NavidromePlaylistViewModelTest {
 
     private val playedSources = mutableListOf<PlaybackSource.Library>()
     private val fakeTrackPlayer = object : LibraryTrackPlayer {
-        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library) {
+        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library, startPositionMs: Long) {
             playedSources += source
         }
         override fun stop() {}
@@ -383,11 +385,21 @@ class NavidromePlaylistViewModelTest {
         val original = viewModel.playlists.value.first()
         server.enqueue(statusOk()) // updatePlaylist response
 
+        // Snapshot long-lived children (the init accounts collector never
+        // completes) so we can drain ONLY the coroutine renamePlaylist spawns.
+        val preexisting = viewModel.viewModelScope.coroutineContext.job.children.toSet()
+
         viewModel.renamePlaylist(original, "Renamed Mix")
 
         // Optimistic update is immediate
         val renamed = viewModel.playlists.value.firstOrNull { it.id == original.id }
         assertEquals("Renamed Mix", renamed?.name)
+
+        // Drain the fire-and-forget updatePlaylist coroutine before the test
+        // ends — otherwise it's still on Dispatchers.IO when Main is reset and
+        // its resumption poisons a later test (UncaughtExceptionsBeforeTest).
+        (viewModel.viewModelScope.coroutineContext.job.children.toSet() - preexisting)
+            .forEach { it.join() }
     }
 
     @Test
@@ -450,11 +462,18 @@ class NavidromePlaylistViewModelTest {
         val toDelete = viewModel.playlists.value.first()
         server.enqueue(statusOk())
 
+        val preexisting = viewModel.viewModelScope.coroutineContext.job.children.toSet()
+
         viewModel.deletePlaylist(toDelete)
 
         // Optimistic removal
         assertEquals(1, viewModel.playlists.value.size)
         assertTrue(viewModel.playlists.value.none { it.id == toDelete.id })
+
+        // Drain the fire-and-forget deletePlaylist coroutine (see the rename
+        // optimistic test) so it can't poison a later test after resetMain.
+        (viewModel.viewModelScope.coroutineContext.job.children.toSet() - preexisting)
+            .forEach { it.join() }
     }
 
     @Test

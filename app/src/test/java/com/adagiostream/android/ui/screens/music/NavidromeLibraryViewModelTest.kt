@@ -48,7 +48,7 @@ class NavidromeLibraryViewModelTest {
     // Records what the browse→play bridge would start (baw.3.8).
     private val playedSources = mutableListOf<PlaybackSource.Library>()
     private val fakeTrackPlayer = object : LibraryTrackPlayer {
-        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library) {
+        override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library, startPositionMs: Long) {
             playedSources += source
         }
         override fun stop() {}
@@ -253,7 +253,13 @@ class NavidromeLibraryViewModelTest {
 
             // Second call should be a no-op
             viewModel.loadArtists()
-            expectNoEvents() // no new Loading emitted
+
+            // Let the first request finish before the test ends — otherwise its
+            // coroutine, still blocked on Dispatchers.IO, resumes onto a reset
+            // Main dispatcher and poisons a later test (same pattern as
+            // NavidromePlaylistViewModelTest). Exactly ONE Loaded also proves
+            // the second call was a no-op (only one response is enqueued).
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -536,7 +542,11 @@ class NavidromeLibraryViewModelTest {
             viewModel.loadGenres()
             awaitItem() // Loading
             viewModel.loadGenres() // second call — no-op
-            expectNoEvents()
+
+            // Drain the in-flight IO request before the test ends (see
+            // `loadArtists is no-op while already Loading`) — exactly ONE
+            // Loaded proves the second call was a no-op.
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

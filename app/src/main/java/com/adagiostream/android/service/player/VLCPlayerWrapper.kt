@@ -543,10 +543,19 @@ class VLCPlayerWrapper(
      * [PlaybackContract] routes EndReached to auto-advance and reports the track as
      * seekable with a real duration. The canonical queue/index live in
      * [MusicQueueManager]; this only renders the audio for the active track.
+     *
+     * [startPositionMs] (baw.10 resume-at-position) is applied via a VLC
+     * `:start-time=` media option BEFORE `mediaPlayer.play()` — the demuxer
+     * seeks during Opening, so no audio ever renders from position 0 and
+     * baw.11's iOS-style mute-during-seek workaround has no window to hide.
+     * This assumes the stream is seekable at open (local file or
+     * byte-range-servable HTTP — the same assumption [seekToPositionMs] makes
+     * for the scrubber); behavior against a forced-transcode Subsonic stream
+     * is unverified (tracked as baw.15).
      */
-    override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library) {
+    override fun playLibraryTrack(streamUrl: String, source: PlaybackSource.Library, startPositionMs: Long) {
         DebugLogger.log(
-            "playLibraryTrack(): track=${source.currentTrack.title}, index=${source.index}/${source.queue.size}",
+            "playLibraryTrack(): track=${source.currentTrack.title}, index=${source.index}/${source.queue.size}, startPositionMs=$startPositionMs",
             DebugLogger.Category.PLAYER,
         )
         pendingPlayJob?.cancel()
@@ -586,6 +595,9 @@ class VLCPlayerWrapper(
         val media = Media(libVLC, Uri.parse(streamUrl))
         media.setHWDecoderEnabled(true, false)
         media.addOption(":no-video")
+        if (startPositionMs > 0) {
+            media.addOption(":start-time=${startPositionMs / 1000.0}")
+        }
         mediaPlayer.media = media
         media.release()
         mediaPlayer.play()

@@ -97,12 +97,22 @@ class MusicPlaybackCoordinator @Inject constructor(
      * Replaces the queue with [tracks], starts playback from [startIndex], and
      * remembers [api] for the rest of this library session (PO decision: tapping a
      * track enqueues the WHOLE album and starts from the tapped index — baw.3.8).
+     *
+     * [startPositionMs] (baw.10) seeks the started track to a saved position —
+     * used when resuming a paused library track from lock screen / Bluetooth /
+     * Android Auto instead of restarting it from 0.
      */
-    fun playAlbum(tracks: List<Track>, startIndex: Int, api: NavidromeApi, albumTitle: String? = null) {
+    fun playAlbum(
+        tracks: List<Track>,
+        startIndex: Int,
+        api: NavidromeApi,
+        albumTitle: String? = null,
+        startPositionMs: Long = 0L,
+    ) {
         this.api = api
         _nowPlayingAlbumTitle.value = albumTitle
         queue.setQueue(tracks, startIndex)
-        playCurrent()
+        playCurrent(startPositionMs)
     }
 
     /**
@@ -193,7 +203,7 @@ class MusicPlaybackCoordinator @Inject constructor(
         }
     }
 
-    private fun playCurrent() {
+    private fun playCurrent(startPositionMs: Long = 0L) {
         val track = queue.current() ?: return
         val api = api ?: return
         // Local-first (baw.6.3): a downloaded track plays from disk; otherwise stream.
@@ -211,6 +221,7 @@ class MusicPlaybackCoordinator @Inject constructor(
         player.playLibraryTrack(
             streamUrl = streamUrl,
             source = PlaybackSource.Library(queue.queue, queue.currentIndex),
+            startPositionMs = startPositionMs,
         )
     }
 }
