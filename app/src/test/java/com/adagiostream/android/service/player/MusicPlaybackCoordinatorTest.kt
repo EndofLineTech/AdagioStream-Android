@@ -558,4 +558,51 @@ class MusicPlaybackCoordinatorTest {
         assertTrue("expected a file:// uri but was $url", url.startsWith("file:"))
         assertNull(local.nowPlayingArtworkUrl.value)
     }
+
+    // ---- baw.19: offline mode does NOT gate the stream-URL fallback -------
+    //
+    // Ported from iOS's AudioPlayerService.resolvePlaybackURL(trackID:api:),
+    // which never reads AppSettings.offlineMode — it only checks DownloadManager
+    // for a local file and otherwise always builds the network stream URL.
+    // offlineMode on iOS is a browse-only restriction (MusicLibraryView), not a
+    // playback kill-switch, so an account-backed session must keep streaming an
+    // undownloaded track even while offline mode is on (mid-queue or toggled on
+    // mid-stream — the coordinator can't tell the difference, and iOS doesn't
+    // either).
+
+    @Test
+    fun `offline mode does not stop an undownloaded track from streaming when an account is configured`() {
+        val ps = fakePersistence(AppSettings(offlineMode = true))
+        val locator = DownloadLocator { null } // nothing downloaded
+        val offline = MusicPlaybackCoordinator(queue, fakePlayer, locator, persistenceService = ps)
+        offline.scope = testScope
+        val mockApi = makeMockApi()
+
+        offline.playAlbum(tracks(1), startIndex = 0, api = mockApi)
+
+        // Matches iOS: no gating on the stream URL itself. (Artwork/scrobbles
+        // remain suppressed — that's Android's pre-existing baw.12 behaviour,
+        // untouched by this bead.)
+        val url = fakePlayer.lastStreamUrl!!
+        assertTrue("expected a network stream url but was $url", url.contains("/rest/stream.view"))
+        assertEquals(0, fakePlayer.stopCount)
+    }
+
+    @Test
+    fun `unresolvable track clears now-playing state and stops instead of lingering`() {
+        // baw.19 step 3: no local file AND no api (e.g. a fully-downloaded/no-account
+        // session hitting a track it never downloaded) must fall through to the
+        // same cleanup as queue exhaustion — not a silent no-op that leaves stale
+        // artwork/album metadata on the media notification.
+        val locator = DownloadLocator { null }
+        val local = MusicPlaybackCoordinator(queue, fakePlayer, locator)
+        local.scope = testScope
+
+        local.playAlbum(tracks(1), startIndex = 0, api = null, albumTitle = "Some Album")
+
+        assertNull(local.nowPlayingArtworkUrl.value)
+        assertNull(local.nowPlayingAlbumTitle.value)
+        assertEquals(1, fakePlayer.stopCount)
+        assertTrue("no track should have started playing", fakePlayer.played.isEmpty())
+    }
 }

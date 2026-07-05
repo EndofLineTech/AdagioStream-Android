@@ -271,10 +271,20 @@ class MusicPlaybackCoordinator @Inject constructor(
         if (next != null) {
             playCurrent()
         } else {
-            _nowPlayingArtworkUrl.value = null
-            _nowPlayingAlbumTitle.value = null
-            player.stop()
+            clearNowPlayingAndStop()
         }
+    }
+
+    /**
+     * Clears the now-playing artwork/album state and stops the player. Shared by
+     * [advanceOrStop]'s queue-exhaustion path and [playCurrent]'s unresolvable-track
+     * path (baw.19) so the media notification never lingers on a track that never
+     * started.
+     */
+    private fun clearNowPlayingAndStop() {
+        _nowPlayingArtworkUrl.value = null
+        _nowPlayingAlbumTitle.value = null
+        player.stop()
     }
 
     private fun playCurrent(startPositionMs: Long = 0L) {
@@ -284,11 +294,35 @@ class MusicPlaybackCoordinator @Inject constructor(
         // stream. A null api (baw.17: fully-downloaded offline session with no
         // account) can only play downloaded tracks — undownloaded ones resolve
         // to null and playback stops.
+        //
+        // baw.19: offline mode does NOT gate this stream-URL fallback, matching
+        // iOS exactly. iOS's AudioPlayerService.resolvePlaybackURL(trackID:api:)
+        // (AdagioStream-iOS/AdagioStream/Services/AudioPlayerService.swift:1852-1864)
+        // checks DownloadManager for a local file and otherwise ALWAYS falls back
+        // to api.streamURL(trackID:) — it never reads AppSettings.offlineMode.
+        // offlineMode on iOS is a browse-only restriction (MusicLibraryView.swift:66,
+        // 95, 109 — swaps in a downloaded-tracks list and suppresses network
+        // browse/search) with zero effect on AudioPlayerService, Scrobbler, or the
+        // stream URL once a track is already queued. So: an already-streaming
+        // queue keeps streaming if offline is toggled mid-track, auto-advance into
+        // an undownloaded track still streams, and toggling offline never hard-stops
+        // playback. Android's pre-existing artwork/scrobble suppression below
+        // (baw.12) is intentionally kept — iOS doesn't do that either, but it's out
+        // of this bead's scope and not the "won't make any network requests"
+        // guarantee (that copy refers to the Music tab's browse behavior).
         val localPath = downloadLocator.localPathFor(track.id)
         val streamUrl = LocalFirstResolver.resolve(
             localPath = localPath,
             streamUrl = api?.streamUrl(track.id)?.toString(),
-        ) ?: return
+        )
+        if (streamUrl == null) {
+            // Unresolvable track (baw.19): no local file and no stream URL (e.g. a
+            // fully-downloaded/no-account session hitting an undownloaded track).
+            // Fall through to the same cleanup as queue exhaustion so the media
+            // notification doesn't linger on a track that never started.
+            clearNowPlayingAndStop()
+            return
+        }
         // Cover art is a network fetch — suppressed in offline mode (baw.17).
         // NowPlayingSheet and the media notification degrade to placeholder art.
         _nowPlayingArtworkUrl.value = if (api == null || offlineMode()) {
