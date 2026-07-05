@@ -171,6 +171,7 @@ fun MainScreen(
                 composable(Screen.Channels.route) {
                     ChannelsScreen(
                         onOpenGuide = { navController.navigate(Screen.Guide.route) },
+                        onManageFavorites = { navController.navigate(Screen.Favorites.route) },
                     )
                 }
                 composable(Screen.Guide.route) {
@@ -180,17 +181,12 @@ fun MainScreen(
                     )
                 }
                 composable(Screen.Favorites.route) {
-                    FavoritesScreen(
-                        onNavigateToLoved = {
-                            navController.navigate(Screen.Loved.route)
-                        },
-                    )
+                    FavoritesScreen()
                 }
                 composable(Screen.Loved.route) {
                     LovedTracksScreen()
                 }
-                // Music tab routes (baw.2.5) — always registered so deep-links work
-                // even when the tab is hidden by the alpha gate.
+                // Library tab routes (baw.2.5) — always visible (beads_adagio-15x.3).
                 composable(Screen.Music.route) {
                     MusicLibraryScreen(
                         onArtistClick = { artistId ->

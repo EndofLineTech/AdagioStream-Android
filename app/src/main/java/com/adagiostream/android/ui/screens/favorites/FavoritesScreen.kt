@@ -11,8 +11,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Icon
@@ -33,16 +31,17 @@ import com.adagiostream.android.ui.components.ChannelListItem
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
+/**
+ * Favorites management screen (beads_adagio-15x.1).
+ *
+ * No longer a bottom-nav destination — favorites are pinned atop the Live
+ * (Channels) list instead. This screen is now reached via "Manage" on that
+ * pinned section, and exists purely to host the drag-to-reorder UX that the
+ * pinned section doesn't reimplement.
+ */
 @Composable
 fun FavoritesScreen(
     viewModel: FavoritesViewModel = hiltViewModel(),
-    /**
-     * Called when the user taps the "Loved" button to navigate to [LovedTracksScreen].
-     *
-     * The Loved tab was folded into Favorites (baw.2.5) to keep the bottom nav at
-     * 5 items after the Music tab was added.  Passing `null` hides the button.
-     */
-    onNavigateToLoved: (() -> Unit)? = null,
 ) {
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val feedMetadata by viewModel.feedMetadata.collectAsStateWithLifecycle()
@@ -70,17 +69,6 @@ fun FavoritesScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.weight(1f),
             )
-            // Loved tracks entry point — folded in from the former Loved bottom-nav tab (baw.2.5)
-            if (onNavigateToLoved != null) {
-                OutlinedButton(onClick = onNavigateToLoved) {
-                    Icon(
-                        imageVector = Icons.Default.Favorite,
-                        contentDescription = null,
-                        modifier = Modifier.padding(end = 4.dp),
-                    )
-                    Text("Loved")
-                }
-            }
         }
 
         if (favorites.isEmpty()) {
