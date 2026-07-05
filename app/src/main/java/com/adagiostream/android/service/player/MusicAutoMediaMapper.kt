@@ -65,6 +65,21 @@ object MusicAutoMediaMapper {
     /** Extracts the raw playlist ID from a `music_playlist_<playlistId>` media ID. */
     fun playlistIdFrom(mediaId: String): String = mediaId.removePrefix(MUSIC_PLAYLIST_PREFIX)
 
+    /**
+     * Index of [trackId] within [contextTracks], or null when it isn't a member
+     * (baw.13 MAJOR-1). `null` signals that [contextTracks] must NOT be trusted:
+     * Android Auto pre-fetches sibling browse nodes in parallel, so the browse
+     * context remembered between "user opened this list" and "user taps a track"
+     * can be overwritten by an unrelated node before the tap resolves. Blindly
+     * defaulting to index 0 in that case would silently start playback from the
+     * wrong album/playlist; the caller must fall through to a single-track queue
+     * instead (mirrors the membership guard in
+     * [com.adagiostream.android.service.player.AudioPlaybackService.channelListForContext]
+     * for the IPTV path).
+     */
+    fun trackIndexInContext(contextTracks: List<Track>, trackId: String): Int? =
+        contextTracks.indexOfFirst { it.id == trackId }.takeIf { it >= 0 }
+
     // -------------------------------------------------------------------------
     // Music root child node — the "Music" entry in the Root browse list
     // -------------------------------------------------------------------------

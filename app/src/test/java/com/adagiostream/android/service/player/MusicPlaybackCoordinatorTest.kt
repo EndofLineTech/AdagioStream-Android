@@ -279,6 +279,43 @@ class MusicPlaybackCoordinatorTest {
         assertEquals(RepeatMode.All, queue.repeatMode)
     }
 
+    /**
+     * baw.13 MINOR-3: shuffle/repeat are exposed as StateFlows so observers
+     * (the custom-button layout combine) see every toggle, not just the ones
+     * that happen to coincide with a channel/track/source change on the
+     * tapping controller.
+     */
+    @Test
+    fun `shuffleEnabledFlow emits on every setShuffle call`() {
+        assertEquals(false, coordinator.shuffleEnabledFlow.value)
+
+        coordinator.setShuffle(true)
+        assertEquals(true, coordinator.shuffleEnabledFlow.value)
+
+        coordinator.setShuffle(false)
+        assertEquals(false, coordinator.shuffleEnabledFlow.value)
+    }
+
+    @Test
+    fun `repeatModeFlow emits on every setRepeatMode call`() {
+        assertEquals(RepeatMode.Off, coordinator.repeatModeFlow.value)
+
+        coordinator.setRepeatMode(RepeatMode.All)
+        assertEquals(RepeatMode.All, coordinator.repeatModeFlow.value)
+
+        coordinator.setRepeatMode(RepeatMode.One)
+        assertEquals(RepeatMode.One, coordinator.repeatModeFlow.value)
+    }
+
+    @Test
+    fun `shuffleEnabled and repeatMode plain properties delegate to the flows`() {
+        coordinator.setShuffle(true)
+        coordinator.setRepeatMode(RepeatMode.All)
+
+        assertEquals(coordinator.shuffleEnabledFlow.value, coordinator.shuffleEnabled)
+        assertEquals(coordinator.repeatModeFlow.value, coordinator.repeatMode)
+    }
+
     // ---- scrobble (baw.5.1) ----------------------------------------------
 
     @Test

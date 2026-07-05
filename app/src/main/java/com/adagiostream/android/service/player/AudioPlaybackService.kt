@@ -151,7 +151,7 @@ class AudioPlaybackService : MediaLibraryService() {
                 .debounce(500L)
                 .distinctUntilChanged()
                 .collect { (totalGroups, channelCount, favCount) ->
-                    val rootChildCount = totalGroups + 1  // +1 for Favorites (always shown)
+                    val rootChildCount = currentRootChildCount()
                     val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
                     DebugLogger.log("Browse tree data changed: $totalGroups groups, $channelCount channels, $favCount favorites, notifying ${controllers.size} controller(s)", AUTO)
                     controllers.forEach { controller ->
@@ -215,8 +215,9 @@ class AudioPlaybackService : MediaLibraryService() {
                 if (apiChanged) {
                     // Notify Root children so the Music node appears/disappears
                     val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
+                    val rootChildCount = currentRootChildCount()
                     controllers.forEach { controller ->
-                        mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, 0, null)
+                        mediaLibrarySession?.notifyChildrenChanged(controller, ROOT_ID, rootChildCount, null)
                     }
                 }
                 // Background-fetch playlists/albums/songs for the in-memory caches
@@ -300,10 +301,20 @@ class AudioPlaybackService : MediaLibraryService() {
                 val isLoved = track != null && lovedTracks.any { it.artist == track.artist && it.title == track.title }
                 Triple(source is PlaybackSource.Library, isFav, isLoved)
             }
+                // Fold in shuffle/repeat so the layout also refreshes when either
+                // changes on its own — e.g. toggled from a controller other than
+                // the one the layout is being drawn for (baw.13 MINOR-3: the
+                // layout previously only updated on channel/track/source changes,
+                // so non-tapping controllers could show a stale shuffle/repeat icon).
+                .combine(
+                    combine(musicPlaybackCoordinator.shuffleEnabledFlow, musicPlaybackCoordinator.repeatModeFlow) { shuffle, repeat -> shuffle to repeat }
+                ) { libraryState, shuffleState -> libraryState to shuffleState }
                 .distinctUntilChanged()
-                .collect { (isLibrary, isFav, isLoved) ->
+                .collect { (libraryState, shuffleState) ->
+                    val (isLibrary, isFav, isLoved) = libraryState
+                    val (shuffleEnabled, repeatMode) = shuffleState
                     val buttons = if (isLibrary) {
-                        buildLibraryCustomButtons(musicPlaybackCoordinator.shuffleEnabled, musicPlaybackCoordinator.repeatMode)
+                        buildLibraryCustomButtons(shuffleEnabled, repeatMode)
                     } else {
                         buildCustomButtons(isFav, isLoved)
                     }
@@ -409,6 +420,21 @@ class AudioPlaybackService : MediaLibraryService() {
         }
         mediaLibrarySession = null
         super.onDestroy()
+    }
+
+    /**
+     * Root browse child count, computed the same way [onGetChildren]'s ROOT_ID
+     * branch builds the list: Favorites (always shown) + non-empty custom
+     * playlists + IPTV groups + the Music node when a Subsonic account is
+     * configured (baw.13 MINOR-5). Shared by every `notifyChildrenChanged(ROOT_ID, ...)`
+     * call site so the reported count is never a stale/placeholder guess.
+     */
+    private fun currentRootChildCount(): Int {
+        val hasSubsonic = accountManager.accounts.value.any { it.isEnabled && it.type is AccountType.Subsonic }
+        val nonEmptyPlaylistCount = customPlaylistManager.playlists.value
+            .count { playlist -> playlist.groups.sumOf { it.entries.size } > 0 }
+        val groupCount = accountManager.groups.value.size
+        return 1 + nonEmptyPlaylistCount + groupCount + (if (hasSubsonic) 1 else 0)
     }
 
     private fun channelListForContext(channel: Channel): List<Channel> {
@@ -1011,17 +1037,25 @@ class AudioPlaybackService : MediaLibraryService() {
             else -> emptyList<Track>() to null
         }
 
-        // Fallback: context lost or cache empty — queue just the tapped track.
-        val queueTracks = contextTracks.ifEmpty {
-            musicLibraryRepository.cachedTrack(trackId)?.let { listOf(it) } ?: emptyList()
+        // Only trust contextTracks when the tapped track is actually a member of
+        // it — Auto pre-fetches browse nodes in parallel, so lastBrowsedParentId
+        // (and the context resolved from it above) can be stale/racy by the time
+        // the tap resolves (baw.13 MAJOR-1). Falling back to index 0 of the wrong
+        // context would silently play the wrong track; fall through to a
+        // single-track queue instead, same as when the context is empty.
+        val contextIndex = MusicAutoMediaMapper.trackIndexInContext(contextTracks, trackId)
+        val (queueTracks, startIndex, resolvedAlbumTitle) = if (contextIndex != null) {
+            Triple(contextTracks, contextIndex, albumTitle)
+        } else {
+            val fallback = musicLibraryRepository.cachedTrack(trackId)?.let { listOf(it) } ?: emptyList()
+            Triple(fallback, 0, null as String?)
         }
         val api = resolveSubsonicApiNow()
         if (api == null || queueTracks.isEmpty()) {
             DebugLogger.log("handleMusicTrackTap() WARN: no Subsonic api or empty queue for trackId=$trackId", AUTO)
             return item
         }
-        val startIndex = queueTracks.indexOfFirst { it.id == trackId }.coerceAtLeast(0)
-        musicPlaybackCoordinator.playAlbum(queueTracks, startIndex, api, albumTitle)
+        musicPlaybackCoordinator.playAlbum(queueTracks, startIndex, api, resolvedAlbumTitle)
 
         val track = queueTracks.getOrNull(startIndex)
         return item.buildUpon()
@@ -1030,7 +1064,7 @@ class AudioPlaybackService : MediaLibraryService() {
                 MediaMetadata.Builder()
                     .setTitle(track?.title)
                     .setArtist(track?.artist)
-                    .setAlbumTitle(albumTitle)
+                    .setAlbumTitle(resolvedAlbumTitle)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                     .setIsPlayable(true)
                     .apply { track?.coverArt?.let { covId -> coverArtUri(covId)?.let { setArtworkUri(it) } } }

@@ -292,6 +292,43 @@ class MusicAutoMediaMapperTest {
     }
 
     // =========================================================================
+    // trackIndexInContext — tap-to-play context membership guard (baw.13 MAJOR-1)
+    // =========================================================================
+
+    @Test
+    fun `trackIndexInContext returns the matching index when the track is a member`() {
+        val tracks = TestFixtures.makeTracks(3)
+
+        val index = MusicAutoMediaMapper.trackIndexInContext(tracks, tracks[1].id)
+
+        assertEquals(1, index)
+    }
+
+    /**
+     * Simulates the Android Auto race: the user browses Album A, but Auto's
+     * parallel pre-fetch of sibling nodes overwrites `lastBrowsedParentId` with
+     * Playlist B before the tap resolves, so the "context" tracks resolved for
+     * the tap are actually Playlist B's — which don't contain the tapped
+     * Album-A track. Must return null (NOT index 0) so the caller falls
+     * through to the single-track fallback instead of silently playing the
+     * wrong track from Playlist B.
+     */
+    @Test
+    fun `trackIndexInContext returns null when the tapped track is not a member (stale browse race)`() {
+        val albumATrack = TestFixtures.makeTrack(id = "album-a-track-1")
+        val playlistBTracks = TestFixtures.makeTracks(3) // unrelated track IDs
+
+        val index = MusicAutoMediaMapper.trackIndexInContext(playlistBTracks, albumATrack.id)
+
+        assertNull(index)
+    }
+
+    @Test
+    fun `trackIndexInContext returns null for an empty context`() {
+        assertNull(MusicAutoMediaMapper.trackIndexInContext(emptyList(), "any-track-id"))
+    }
+
+    // =========================================================================
     // Namespace collision guard — music IDs must not clash with IPTV IDs
     // =========================================================================
 

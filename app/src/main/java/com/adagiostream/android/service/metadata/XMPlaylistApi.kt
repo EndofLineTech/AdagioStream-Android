@@ -221,7 +221,11 @@ class XMPlaylistApi(
 
     // Timestamped track history per deeplink, newest-first — mirrors iOS
     // SXMMetadataService's 10-minute trackHistory used by showTrack(at:).
-    private val trackHistory = mutableMapOf<String, List<TrackMetadata>>()
+    // ConcurrentHashMap (baw.13 MAJOR-2): mergeIntoHistory() writes on
+    // Dispatchers.IO (poll loop) while trackAt() reads from Main; values are
+    // always replaced wholesale with a fresh immutable List, so a thread-safe
+    // map (no per-key locking) is sufficient — no partial-list mutation to race on.
+    private val trackHistory = java.util.concurrent.ConcurrentHashMap<String, List<TrackMetadata>>()
     private val historyWindowMs = 10 * 60 * 1000L // 10 minutes
 
     private fun mergeIntoHistory(deeplink: String, tracks: List<TrackMetadata>) {
@@ -240,9 +244,16 @@ class XMPlaylistApi(
      * catch-up so the display track matches the buffered audio, not live.
      * Null when history is empty or [atEpochMillis] predates everything kept
      * (history only spans [historyWindowMs]).
+     *
+     * The freshness bound is relative to [atEpochMillis] (the query time), not
+     * just [mergeIntoHistory]'s poll-time pruning (baw.13 MINOR-4): if polling
+     * has stopped, stale entries older than [historyWindowMs] would otherwise
+     * never get pruned and could still be returned as a "hit".
      */
-    fun trackAt(deeplink: String, atEpochMillis: Long): TrackMetadata? =
-        trackHistory[deeplink]?.firstOrNull { it.timestamp in 1..atEpochMillis }
+    fun trackAt(deeplink: String, atEpochMillis: Long): TrackMetadata? {
+        val minTimestamp = maxOf(1L, atEpochMillis - historyWindowMs)
+        return trackHistory[deeplink]?.firstOrNull { it.timestamp in minTimestamp..atEpochMillis }
+    }
 
     // --- API Response Models ---
 

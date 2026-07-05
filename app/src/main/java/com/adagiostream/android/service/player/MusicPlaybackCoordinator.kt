@@ -63,11 +63,25 @@ class MusicPlaybackCoordinator @Inject constructor(
     /** Album title for the current library session, surfaced as MediaSession album metadata (baw.3.4). */
     val nowPlayingAlbumTitle: StateFlow<String?> = _nowPlayingAlbumTitle.asStateFlow()
 
+    private val _shuffleEnabledFlow = MutableStateFlow(queue.shuffleEnabled)
+
+    /**
+     * Whether the underlying queue is shuffling, as a [StateFlow] (baw.13 MINOR-3):
+     * lets observers (e.g. the custom-button layout refresh) react to toggles from
+     * *any* controller, not just the one that tapped the button.
+     */
+    val shuffleEnabledFlow: StateFlow<Boolean> = _shuffleEnabledFlow.asStateFlow()
+
     /** Whether the underlying queue is shuffling — exposed through the session (baw.3.5). */
-    val shuffleEnabled: Boolean get() = queue.shuffleEnabled
+    val shuffleEnabled: Boolean get() = shuffleEnabledFlow.value
+
+    private val _repeatModeFlow = MutableStateFlow(queue.repeatMode)
+
+    /** The underlying queue's repeat mode, as a [StateFlow] (baw.13 MINOR-3) — see [shuffleEnabledFlow]. */
+    val repeatModeFlow: StateFlow<RepeatMode> = _repeatModeFlow.asStateFlow()
 
     /** The underlying queue's repeat mode — exposed through the session (baw.3.5). */
-    val repeatMode: RepeatMode get() = queue.repeatMode
+    val repeatMode: RepeatMode get() = repeatModeFlow.value
 
     /**
      * Authenticated cover-art URL for the currently-playing library track, or null
@@ -129,11 +143,15 @@ class MusicPlaybackCoordinator @Inject constructor(
     }
 
     /** Enables/disables shuffle on the underlying queue (baw.3.5). */
-    fun setShuffle(enabled: Boolean) = queue.setShuffle(enabled)
+    fun setShuffle(enabled: Boolean) {
+        queue.setShuffle(enabled)
+        _shuffleEnabledFlow.value = queue.shuffleEnabled
+    }
 
     /** Sets the repeat mode on the underlying queue (baw.3.5). */
     fun setRepeatMode(mode: RepeatMode) {
         queue.repeatMode = mode
+        _repeatModeFlow.value = mode
     }
 
     /** The currently-active library track, or null when nothing is queued. */

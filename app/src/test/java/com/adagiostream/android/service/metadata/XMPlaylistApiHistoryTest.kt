@@ -94,4 +94,26 @@ class XMPlaylistApiHistoryTest {
         val track = api.trackAt("station-c", delayedAt)
         assertEquals("Played Earlier", track?.title)
     }
+
+    /**
+     * baw.13 MINOR-4: [XMPlaylistApi.trackAt] must reject entries older than
+     * [historyWindowMs][XMPlaylistApi] *relative to the query time*, not rely
+     * solely on [XMPlaylistApi.mergeIntoHistory]'s poll-time pruning. Simulates
+     * polling having stopped: the entry is fresh enough to survive the
+     * wall-clock cutoff at merge time, but the query point is 20 minutes after
+     * the entry's own timestamp — well outside the 10-minute window relative to
+     * the query. The old bound (`timestamp in 1..atEpochMillis`) would return
+     * this as a stale hit.
+     */
+    @Test
+    fun `entry stale relative to query time is rejected even though poll-time pruning kept it`() = runTest {
+        val trackTime = Instant.now().minusSeconds(30)
+        server.enqueue(MockResponse.Builder().code(200).body(
+            stationResponse(trackTime to "Stale Relative To Query")
+        ).build())
+        api.getRecentTrack("station-d")
+
+        val queryTime = trackTime.plusSeconds(20 * 60).toEpochMilli() // 20 min after the track
+        assertNull(api.trackAt("station-d", queryTime))
+    }
 }
