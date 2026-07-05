@@ -126,6 +126,21 @@ class SettingsViewModelTest {
         coVerify { persistenceService.saveSettings(match { !it.offlineMode }) }
     }
 
+    // --- Tab reorg tip (beads_adagio-15x.4) ---
+
+    @Test
+    fun `markTabReorgTipSeen flips the flag and persists`() = runTest {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        assertEquals(false, vm.settings.value.hasSeenTabReorgTip)
+
+        vm.markTabReorgTipSeen()
+        advanceUntilIdle()
+
+        assertEquals(true, vm.settings.value.hasSeenTabReorgTip)
+        coVerify { persistenceService.saveSettings(match { it.hasSeenTabReorgTip }) }
+    }
+
     // --- Text Size ---
 
     @Test

@@ -97,4 +97,35 @@ class AppSettingsTest {
         assertEquals(false, defaults.shuffleEnabled)
         assertEquals(RepeatMode.Off, defaults.repeatMode)
     }
+
+    // ---- tab reorg (beads_adagio-15x) ---------------------------------------
+
+    @Test
+    fun `hasSeenTabReorgTip defaults false and survives a JSON round-trip`() {
+        val json = Json { ignoreUnknownKeys = true }
+        assertEquals(false, AppSettings().hasSeenTabReorgTip)
+
+        val decoded = json.decodeFromString<AppSettings>(
+            json.encodeToString(AppSettings.serializer(), AppSettings(hasSeenTabReorgTip = true)),
+        )
+        assertEquals(true, decoded.hasSeenTabReorgTip)
+
+        // No key at all (pre-15x.4 blob) must decode to false, not throw.
+        assertEquals(false, json.decodeFromString<AppSettings>("{}").hasSeenTabReorgTip)
+    }
+
+    @Test
+    fun `a settings blob with the removed musicTabEnabled key still decodes`() {
+        // beads_adagio-15x.3 removed AppSettings.musicTabEnabled. Pre-upgrade
+        // users have this key sitting in their on-disk settings.json;
+        // ignoreUnknownKeys must let it decode instead of falling back to
+        // all-defaults (which would silently reset every other setting too).
+        val json = Json { ignoreUnknownKeys = true }
+        val legacyBlob = """{"musicTabEnabled":true,"debugLoggingEnabled":true}"""
+
+        val decoded = json.decodeFromString<AppSettings>(legacyBlob)
+
+        assertEquals(true, decoded.debugLoggingEnabled)
+        assertEquals(false, decoded.hasSeenTabReorgTip)
+    }
 }

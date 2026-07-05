@@ -4,11 +4,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -379,6 +381,28 @@ fun MainScreen(
             NowPlayingSheet(
                 onDismiss = { showNowPlaying = false },
                 artworkDisplayMode = settings.artworkDisplayMode,
+            )
+        }
+
+        // One-time "We Reorganized" tip (beads_adagio-15x.4) — explains the tab
+        // moves once setup is complete. Can't cheaply tell an upgrading user
+        // from a fresh install, so this shows once to everyone (see AppSettings
+        // .hasSeenTabReorgTip kdoc).
+        if (!isOnSetup && settings.setupCompleted && !settings.hasSeenTabReorgTip) {
+            AlertDialog(
+                onDismissRequest = { settingsViewModel.markTabReorgTipSeen() },
+                title = { Text("We Reorganized") },
+                text = {
+                    Text(
+                        "Favorites now pin to the top of Live. Loved has its own tab. " +
+                            "And there's a new Library tab for your music.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { settingsViewModel.markTabReorgTipSeen() }) {
+                        Text("Got it")
+                    }
+                },
             )
         }
 
