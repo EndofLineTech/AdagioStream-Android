@@ -403,6 +403,16 @@ class NavidromePlaylistViewModelTest {
         val updateRequest = server.takeRequest()
         assertTrue(updateRequest.url.encodedPath.contains("updatePlaylist"))
         assertEquals("2", updateRequest.url.queryParameter("songIndexToRemove"))
+
+        // Drain the in-flight removeTrackAt coroutine (updatePlaylist + refresh
+        // getPlaylist) before the test ends — otherwise it's still suspended on
+        // Dispatchers.IO when Main is reset and its resumption poisons a later
+        // test (UncaughtExceptionsBeforeTest), same as the in-flight-guard test.
+        viewModel.isRemovingTrack.test {
+            var value = awaitItem()
+            while (value) value = awaitItem()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
