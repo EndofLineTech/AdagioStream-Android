@@ -101,6 +101,14 @@ class AudiobookPlaybackCoordinator(
             sessionTime: Double?,
             cached: Double?,
         ): Double = override ?: pendingQueue ?: sessionTime ?: cached ?: 0.0
+
+        /**
+         * Auto-delete gate (bead .2.3, iOS parity `shouldAutoDeleteEpisode`):
+         * true only when the episode finished NATURALLY and the setting is on —
+         * a user stop never reaches the file-ended path that calls this.
+         */
+        internal fun shouldAutoDeleteEpisode(finished: Boolean, settingOn: Boolean): Boolean =
+            finished && settingOn
     }
 
     // ---- Active-session state ------------------------------------------------
@@ -274,10 +282,10 @@ class AudiobookPlaybackCoordinator(
 
         // Offline gate (mirrors the LocalFirstResolver/offlineMode pattern):
         // the local copy is used when the app's offline mode is on, or when the
-        // session open fails AND a complete download exists.
-        // ponytail: books only — episode downloads land in .2.3, so an episode
-        // session always requires the server.
-        val session = if (offlineMode() && episodeId == null) {
+        // session open fails AND a complete download exists. Books look up by
+        // libraryItemId; episodes by the composite (show, episode) download key
+        // (bead .2.3).
+        val session = if (offlineMode()) {
             null
         } else {
             try {
@@ -288,12 +296,16 @@ class AudiobookPlaybackCoordinator(
             }
         }
         if (session == null) {
-            val offline = if (episodeId == null) offlineBooks?.completeBook(libraryItemId) else null
+            val offline = if (episodeId != null) {
+                offlineBooks?.completeEpisode(libraryItemId, episodeId)
+            } else {
+                offlineBooks?.completeBook(libraryItemId)
+            }
             if (offline == null || offline.timeline.files.isEmpty()) {
                 DebugLogger.log("ABS startPlayback: no session and no complete download", DebugLogger.Category.PLAYER)
                 return
             }
-            startOffline(api, offline, resumeOverride, pendingPosition)
+            startOffline(api, offline, resumeOverride, pendingPosition, ctx, episodeId)
             return
         }
         // A podcast episode is a single-file, no-chapter session by contract.
@@ -354,10 +366,14 @@ class AudiobookPlaybackCoordinator(
         offline: OfflineAudiobook,
         resumeOverride: Double?,
         pendingPosition: Double?,
+        ctx: PodcastPlaybackContext?,
+        episodeId: String?,
     ) {
         this.api = api
         this.timeline = offline.timeline
         this.libraryItemId = offline.libraryItemId
+        this.episodeId = episodeId
+        this.podcastContext = if (episodeId != null) ctx else null
         this.sessionId = null // syncs go to the queue only
         this.bookTitle = offline.title
         this.author = offline.author
@@ -368,7 +384,7 @@ class AudiobookPlaybackCoordinator(
             override = resumeOverride,
             pendingQueue = pendingPosition,
             sessionTime = null,
-            cached = lastKnownPositions[offline.libraryItemId]
+            cached = lastKnownPositions[progressKey(offline.libraryItemId, episodeId)]
                 ?: offline.currentTime.takeIf { it > 0.0 },
         ).coerceIn(0.0, offline.timeline.totalDuration)
 
@@ -497,7 +513,14 @@ class AudiobookPlaybackCoordinator(
             return
         }
         scope.launch {
-            val behavior = persistenceService?.loadSettings()?.podcastEpisodeEndBehavior
+            val settings = persistenceService?.loadSettings()
+            // Auto-delete (bead .2.3): episode finished NATURALLY (this is the
+            // file-ended path — user stop never reaches here). Delete before
+            // auto-advance, matching iOS `audiobookFileEnded` ordering.
+            if (shouldAutoDeleteEpisode(finished = true, settingOn = settings?.autoDeleteEpisodeAfterPlayed == true)) {
+                runCatching { offlineBooks?.deleteEpisode(ctx.libraryItemId, epId) }
+            }
+            val behavior = settings?.podcastEpisodeEndBehavior
                 ?: PodcastEpisodeEndBehavior.NEXT_UNPLAYED
             // ponytail: capture-at-start of ctx.order is deliberate iOS parity —
             // CONTINUE_IN_SORT_ORDER freezes the display order for the show
@@ -596,8 +619,8 @@ class AudiobookPlaybackCoordinator(
         // Review B1: cache UNCONDITIONALLY — online listening must keep the
         // download manifest's resume position fresh, or reboot + airplane mode
         // resumes at the stale download-time position. A WHERE-id no-op for
-        // books that aren't downloaded (and for episodes, which aren't).
-        cachePositionToManifest(itemId, global)
+        // books that aren't downloaded (and for episodes not downloaded).
+        cachePositionToManifest(itemId, epId, global)
         val sid = sessionId
         if (sid == null) {
             enqueueProgress(itemId, epId, global)
@@ -642,9 +665,9 @@ class AudiobookPlaybackCoordinator(
      * Mirrors the synced position into the download manifest so offline resume
      * survives process death after the queue drains (bead .1.6, review B1).
      */
-    private fun cachePositionToManifest(itemId: String, global: Double) {
+    private fun cachePositionToManifest(itemId: String, epId: String?, global: Double) {
         val offline = offlineBooks ?: return
-        scope.launch { runCatching { offline.savePosition(itemId, global) } }
+        scope.launch { runCatching { offline.savePosition(itemId, epId, global) } }
     }
 
     // ---- Internals -----------------------------------------------------------
@@ -785,7 +808,7 @@ class AudiobookPlaybackCoordinator(
 
     private suspend fun runFinalSync(f: FinalState) {
         lastKnownPositions[progressKey(f.libraryItemId, f.episodeId)] = f.global
-        cachePositionToManifest(f.libraryItemId, f.global) // B1: also on clean finalize
+        cachePositionToManifest(f.libraryItemId, f.episodeId, f.global) // B1: also on clean finalize
         try {
             val sid = f.sessionId
             if (sid != null) {
