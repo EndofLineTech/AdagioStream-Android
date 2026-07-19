@@ -50,9 +50,9 @@ enum class EndReachedPolicy {
  */
 object PlaybackContract {
 
-    /** True only for on-demand library tracks; live streams are never seekable. */
+    /** True for on-demand content (library tracks, audiobooks); live streams are never seekable. */
     fun isSeekable(source: PlaybackSource?): Boolean = when (source) {
-        is PlaybackSource.Library -> true
+        is PlaybackSource.Library, is PlaybackSource.Audiobook -> true
         is PlaybackSource.Radio, null -> false
     }
 
@@ -67,6 +67,12 @@ object PlaybackContract {
                 ?.takeIf { it > 0 }
                 ?.let { it.toLong() * MICROS_PER_SECOND }
                 ?: C.TIME_UNSET
+        // Audiobooks report the WHOLE BOOK's global duration, not the loaded file's.
+        is PlaybackSource.Audiobook ->
+            source.totalDurationSeconds
+                .takeIf { it > 0 }
+                ?.let { (it * MICROS_PER_SECOND).toLong() }
+                ?: C.TIME_UNSET
         is PlaybackSource.Radio, null -> C.TIME_UNSET
     }
 
@@ -76,13 +82,15 @@ object PlaybackContract {
      * window is not.
      */
     fun isDynamic(source: PlaybackSource?): Boolean = when (source) {
-        is PlaybackSource.Library -> false
+        is PlaybackSource.Library, is PlaybackSource.Audiobook -> false
         is PlaybackSource.Radio, null -> true
     }
 
     /** How to handle libVLC's `EndReached` for the active source. */
     fun endReachedPolicy(source: PlaybackSource?): EndReachedPolicy = when (source) {
-        is PlaybackSource.Library -> EndReachedPolicy.AutoAdvance
+        // Audiobook EndReached = the current FILE finished — the coordinator
+        // chains the next file (or finishes the book), never a retry.
+        is PlaybackSource.Library, is PlaybackSource.Audiobook -> EndReachedPolicy.AutoAdvance
         is PlaybackSource.Radio, null -> EndReachedPolicy.RetryAsError
     }
 

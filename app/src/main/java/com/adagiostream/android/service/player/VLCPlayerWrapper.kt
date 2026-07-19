@@ -31,7 +31,7 @@ class VLCPlayerWrapper(
     private val context: Context,
     initialBufferSeconds: Int = 10,
     val castManager: CastManager,
-) : LibraryTrackPlayer {
+) : LibraryTrackPlayer, AudiobookFilePlayer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val _playbackState = kotlinx.coroutines.flow.MutableStateFlow<PlaybackState>(PlaybackState.Idle)
@@ -53,6 +53,13 @@ class VLCPlayerWrapper(
      * Null / unused while only live radio plays.
      */
     var onLibraryTrackEnded: (() -> Unit)? = null
+
+    /**
+     * Invoked when a [PlaybackSource.Audiobook] FILE ends naturally
+     * (beads_adagio-59p.1.5). The AudiobookPlaybackCoordinator chains the next
+     * file on the book's timeline (or finishes the book).
+     */
+    var onAudiobookFileEnded: (() -> Unit)? = null
 
     private val _bitrateKbps = kotlinx.coroutines.flow.MutableStateFlow(0f)
     val bitrateKbps: kotlinx.coroutines.flow.StateFlow<Float> = _bitrateKbps
@@ -283,11 +290,16 @@ class VLCPlayerWrapper(
                 accumulateListeningSegment()
             }
             MediaPlayer.Event.EndReached -> when (PlaybackContract.endReachedPolicy(_playbackSource.value)) {
-                // Library track finished — auto-advance the queue (baw.3.2 wires the callback).
+                // On-demand content finished — library tracks auto-advance the
+                // queue (baw.3.2); audiobook files chain the book's next file
+                // via the coordinator (beads_adagio-59p.1.5).
                 EndReachedPolicy.AutoAdvance -> {
                     if (!isSwitchingChannels) {
-                        DebugLogger.log("EndReached — library track ended, auto-advancing", DebugLogger.Category.VLC)
-                        onLibraryTrackEnded?.invoke()
+                        DebugLogger.log("EndReached — on-demand item ended, auto-advancing", DebugLogger.Category.VLC)
+                        when (_playbackSource.value) {
+                            is PlaybackSource.Audiobook -> onAudiobookFileEnded?.invoke()
+                            else -> onLibraryTrackEnded?.invoke()
+                        }
                     }
                 }
                 // Live radio (or no source): unchanged behaviour — a live stream
@@ -614,15 +626,92 @@ class VLCPlayerWrapper(
         _playbackSource.value = source
     }
 
+    /**
+     * Plays ONE audiobook file (beads_adagio-59p.1.5) — mirrors
+     * [playLibraryTrack]: clears radio state, sets the source to [source] (so
+     * [PlaybackContract] reports seekable/whole-book duration and routes
+     * EndReached to [onAudiobookFileEnded]), and opens the file at
+     * [startPositionMs] via `:start-time`. [rate] is re-applied after play —
+     * libVLC resets the playback rate on every media change.
+     */
+    override fun playAudiobookFile(
+        streamUrl: String,
+        source: PlaybackSource.Audiobook,
+        startPositionMs: Long,
+        rate: Float,
+    ) {
+        DebugLogger.log(
+            "playAudiobookFile(): book=${source.bookTitle}, startPositionMs=$startPositionMs, rate=$rate",
+            DebugLogger.Category.PLAYER,
+        )
+        pendingPlayJob?.cancel()
+        retryJob?.cancel()
+        retryCount = 0
+        hasReceivedPlayingEvent = false
+
+        // Guard against stale VLC events FIRST, before updating state.
+        isSwitchingChannels = true
+        mediaPlayer.stop()
+        stopBitratePolling()
+
+        // On-demand, not radio: clear the channel so live-only logic stays dormant.
+        _currentChannel.value = null
+        _playbackSource.value = source
+        _playbackState.value = PlaybackState.Buffering
+        _bitrateKbps.value = 0f
+        peakBitrateKbps = 0f
+        _streamStartedAt.value = System.currentTimeMillis()
+        _timeShiftMs.value = 0L
+        pausedAtSystemTime = 0L
+        _listeningTimeMs.value = 0L
+        listeningSegmentStartTime = 0L
+
+        ContextCompat.startForegroundService(
+            context, Intent(context, AudioPlaybackService::class.java)
+        )
+
+        val focusResult = audioManager.requestAudioFocus(audioFocusRequest)
+        if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            DebugLogger.log("Audiobook play blocked — audio focus denied", DebugLogger.Category.AUDIO)
+            _playbackState.value = PlaybackState.Idle
+            return
+        }
+
+        val media = Media(libVLC, Uri.parse(streamUrl))
+        media.setHWDecoderEnabled(true, false)
+        media.addOption(":no-video")
+        if (startPositionMs > 0) {
+            media.addOption(":start-time=${startPositionMs / 1000.0}")
+        }
+        mediaPlayer.media = media
+        media.release()
+        mediaPlayer.play()
+        if (rate != 1.0f) {
+            mediaPlayer.rate = rate
+        }
+    }
+
+    /** Refreshes audiobook metadata (chapter change) without restarting playback. */
+    override fun updateAudiobookSource(source: PlaybackSource.Audiobook) {
+        if (_playbackSource.value !is PlaybackSource.Audiobook) return
+        _playbackSource.value = source
+    }
+
+    /** Applies a playback rate to the active media (audiobook variable speed). */
+    override fun setRate(rate: Float) {
+        DebugLogger.log("setRate($rate)", DebugLogger.Category.PLAYER)
+        mediaPlayer.rate = rate
+    }
+
     /** Current playback position in milliseconds (library scrubber; baw.3.6). */
-    fun currentPositionMs(): Long = mediaPlayer.time.coerceAtLeast(0L)
+    override fun currentPositionMs(): Long = mediaPlayer.time.coerceAtLeast(0L)
 
     /**
      * Seeks the active library track to [positionMs], clamped into the track's
      * known duration (baw.3.6). Live radio never calls this — it is non-seekable
      * per [PlaybackContract].
      */
-    fun seekToPositionMs(positionMs: Long) {
+    override fun seekToPositionMs(positionMs: Long) {
         val durationMs = mediaPlayer.length // -1 when unknown
         val target = clampSeekMs(positionMs, durationMs)
         DebugLogger.log("seekToPositionMs(): requested=$positionMs, clamped=$target, len=$durationMs", DebugLogger.Category.PLAYER)

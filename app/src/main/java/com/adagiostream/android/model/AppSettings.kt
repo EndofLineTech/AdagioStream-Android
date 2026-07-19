@@ -90,6 +90,13 @@ data class AppSettings(
      * sports channels show scores out of the box.
      */
     val preferLiveScoresOverMetadata: Boolean = true,
+    /**
+     * Audiobook playback speed (beads_adagio-59p.1.5) — persisted so a book
+     * resumes at the listener's chosen rate. Clamped to 0.5–3.0 by
+     * [com.adagiostream.android.service.audiobookshelf.AudiobookPlaybackCoordinator];
+     * the UI offers the iOS-parity steps 0.75/1.0/1.25/1.5/1.75/2.0/3.0.
+     */
+    val audiobookSpeed: Float = 1.0f,
 ) {
     companion object {
         /** Poll interval choices surfaced in Settings (beads_adagio-59p.3.2). */

@@ -8,8 +8,10 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.PlaybackParameters
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.audiobookshelf.AudiobookPlaybackCoordinator
 import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.DebugLogger.Category.AUTO
@@ -33,6 +35,7 @@ class VLCSessionPlayer(
     private val coordinator: MusicPlaybackCoordinator? = null,
     private val accountManager: AccountManager? = null,
     private val espnScoreService: ESPNScoreService? = null,
+    private val audiobookCoordinator: AudiobookPlaybackCoordinator? = null,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -191,6 +194,7 @@ class VLCSessionPlayer(
 
         when (source) {
             is PlaybackSource.Library -> buildLibraryState(builder, source)
+            is PlaybackSource.Audiobook -> buildAudiobookState(builder, source)
             else -> buildRadioState(builder)
         }
         return builder.build()
@@ -226,7 +230,58 @@ class VLCSessionPlayer(
                 COMMAND_SET_REPEAT_MODE,
             )
         }
+        // Audiobooks (beads_adagio-59p.1.5): whole-book positional seek +
+        // variable speed. Next/prev stay in the base set — they route to
+        // chapter skip in handleSeek. No shuffle/repeat for books.
+        if (source is PlaybackSource.Audiobook) {
+            commands.addAll(
+                COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+                COMMAND_GET_TIMELINE,
+                COMMAND_SET_SPEED_AND_PITCH,
+            )
+        }
         return commands.build()
+    }
+
+    /**
+     * Session state for audiobook playback (beads_adagio-59p.1.5): one media
+     * item — title = book title, artist/subtitle = current chapter (falling
+     * back to the author) — with the WHOLE BOOK's duration and the global
+     * timeline position from the coordinator, plus the active playback speed.
+     */
+    private fun buildAudiobookState(builder: State.Builder, source: PlaybackSource.Audiobook) {
+        val artworkUri = source.coverUrl?.let { android.net.Uri.parse(it) }
+        val metadata = MediaMetadata.Builder()
+            .setTitle(source.bookTitle)
+            .setArtist(source.chapterTitle ?: source.author)
+            .setSubtitle(source.chapterTitle)
+            .setAlbumTitle(source.bookTitle)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_AUDIO_BOOK_CHAPTER)
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
+            .apply { artworkUri?.let { setArtworkUri(it) } }
+            .build()
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(source.libraryItemId)
+            .setMediaMetadata(metadata)
+            .build()
+        builder.setPlaylist(
+            listOf(
+                SimpleBasePlayer.MediaItemData.Builder(source.libraryItemId.hashCode().toLong())
+                    .setMediaItem(mediaItem)
+                    .setMediaMetadata(metadata)
+                    .setIsPlaceholder(false)
+                    .setDefaultPositionUs(0)
+                    .setDurationUs(PlaybackContract.durationUs(source))
+                    .setIsSeekable(PlaybackContract.isSeekable(source))
+                    .setIsDynamic(PlaybackContract.isDynamic(source))
+                    .build()
+            )
+        )
+        builder.setCurrentMediaItemIndex(0)
+        builder.setContentPositionMs(audiobookCoordinator?.globalPositionMs() ?: 0L)
+        builder.setPlaybackParameters(PlaybackParameters(audiobookCoordinator?.speed ?: 1.0f))
+        builder.setIsLoading(currentPlaybackState == STATE_BUFFERING)
     }
 
     /**
@@ -410,6 +465,21 @@ class VLCSessionPlayer(
     ): ListenableFuture<*> {
         DebugLogger.log("handleSeek() - index=$mediaItemIndex, pos=$positionMs, command=$seekCommand, source=${vlcWrapper.playbackSource.value}", AUTO)
 
+        // Audiobook (beads_adagio-59p.1.5): next/prev = chapter skip (with the
+        // >3s restart rule in the coordinator's timeline); positional seek is
+        // BOOK-GLOBAL and crosses file boundaries via the coordinator.
+        if (vlcWrapper.playbackSource.value is PlaybackSource.Audiobook) {
+            when (seekCommand) {
+                COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> audiobookCoordinator?.nextChapter()
+                COMMAND_SEEK_TO_PREVIOUS, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> audiobookCoordinator?.previousChapter()
+                else -> {
+                    DebugLogger.log("handleSeek() - audiobook global seek to ${positionMs}ms", AUTO)
+                    audiobookCoordinator?.seekTo(positionMs / 1000.0)
+                }
+            }
+            return Futures.immediateVoidFuture()
+        }
+
         // Library: next/prev drive the queue; positional seek scrubs the track (baw.3.6).
         // Radio path is unchanged — channel next/prev only, never positional.
         if (vlcWrapper.playbackSource.value is PlaybackSource.Library) {
@@ -445,6 +515,16 @@ class VLCSessionPlayer(
                     vlcWrapper.play(channels[mediaItemIndex])
                 }
             }
+        }
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleSetPlaybackParameters(playbackParameters: PlaybackParameters): ListenableFuture<*> {
+        DebugLogger.log("handleSetPlaybackParameters(speed=${playbackParameters.speed})", AUTO)
+        // Variable speed is an audiobook-only feature (beads_adagio-59p.1.5).
+        if (vlcWrapper.playbackSource.value is PlaybackSource.Audiobook) {
+            audiobookCoordinator?.setSpeed(playbackParameters.speed)
+            invalidateState()
         }
         return Futures.immediateVoidFuture()
     }
