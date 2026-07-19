@@ -111,9 +111,6 @@ class ChannelsViewModel @Inject constructor(
     }
 
     fun toggleGroupExpanded(key: String) {
-        // While searching, every section renders expanded regardless of stored
-        // state, so toggling would silently corrupt it — headers are a no-op.
-        if (_searchQuery.value.isNotBlank()) return
         setExpandedGroups(toggleExpandKey(_expandedGroups.value, key))
     }
 
@@ -126,6 +123,13 @@ class ChannelsViewModel @Inject constructor(
     }
 
     private fun setExpandedGroups(keys: Set<String>) {
+        // While searching, every section renders expanded regardless of stored
+        // state, so any expand-state mutation would silently corrupt it: a
+        // header toggle or Collapse All changes nothing visibly yet rewrites
+        // the persisted set, and Expand All would persist only the
+        // search-filtered subset of groups. Guarded here so every mutation
+        // path is a no-op mid-search.
+        if (_searchQuery.value.isNotBlank()) return
         _expandedGroups.value = keys
         viewModelScope.launch {
             val settings = persistenceService.loadSettings()
