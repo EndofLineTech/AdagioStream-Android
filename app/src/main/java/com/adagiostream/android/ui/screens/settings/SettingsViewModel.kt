@@ -307,6 +307,12 @@ class SettingsViewModel @Inject constructor(
                                         put("username", JsonPrimitive(type.username))
                                         // Password intentionally omitted from diagnostic export
                                     }
+                                    is AccountType.Audiobookshelf -> {
+                                        put("type", JsonPrimitive("audiobookshelf"))
+                                        put("host", JsonPrimitive(type.host))
+                                        type.username?.let { put("username", JsonPrimitive(it)) }
+                                        // Tokens intentionally omitted from diagnostic export
+                                    }
                                 }
                             })
                         }

@@ -4,6 +4,11 @@ import androidx.lifecycle.SavedStateHandle
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.audiobookshelf.AbsServerStatus
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
@@ -37,11 +42,17 @@ class AddAccountViewModelTest {
     private val navidromeApi = mockk<NavidromeApi>(relaxed = true)
     private val navidromeApiFactory = NavidromeApiFactory { _, _, _ -> navidromeApi }
 
+    private val absAuth = mockk<AudiobookshelfAuth>(relaxed = true)
+    private val absApi = mockk<AudiobookshelfApi>(relaxed = true) {
+        every { auth } returns absAuth
+    }
+    private val absApiFactory = AudiobookshelfApiFactory { _, _, _, _, _ -> absApi }
+
     private fun createViewModel(
         savedState: Map<String, Any?> = emptyMap(),
     ): AddAccountViewModel {
         val handle = SavedStateHandle(savedState)
-        return AddAccountViewModel(accountManager, navidromeApiFactory, handle)
+        return AddAccountViewModel(accountManager, navidromeApiFactory, absApiFactory, handle)
     }
 
     /** Builds a Subsonic VM pre-populated with valid host/username/password. */
@@ -478,6 +489,210 @@ class AddAccountViewModelTest {
         assertEquals("https://nav.example.com", vm.host.value)
         assertEquals("bob", vm.username.value)
         assertEquals("hunter2", vm.password.value)
+        // Must re-validate before saving an edit.
+        assertEquals(ConnectionTestState.Idle, vm.connectionTestState.value)
+    }
+
+    // --- Audiobookshelf: type selection + discovery ---
+
+    /** Builds an ABS VM pre-populated with valid host/username/password. */
+    private fun absViewModel(): AddAccountViewModel {
+        val vm = createViewModel()
+        vm.setIsAudiobookshelf(true)
+        vm.setHost("https://abs.example.com")
+        vm.setUsername("alice")
+        vm.setPassword("sesame")
+        return vm
+    }
+
+    private fun stubAbsLogin(
+        tokens: AudiobookshelfAuth.Tokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"),
+    ) {
+        coEvery { absAuth.login() } returns AudiobookshelfAuth.Session(
+            tokens = tokens,
+            canDownload = true,
+            mediaProgress = emptyList(),
+        )
+    }
+
+    @Test
+    fun `setIsAudiobookshelf clears the other selections`() {
+        val vm = createViewModel()
+        vm.setIsSubsonic(true)
+        vm.setIsAudiobookshelf(true)
+        assertTrue(vm.isAudiobookshelf.value)
+        assertFalse(vm.isSubsonic.value)
+        assertFalse(vm.isXtream.value)
+    }
+
+    @Test
+    fun `discoverAbsServer surfaces local and openid support`() = runTest {
+        coEvery { absApi.getStatus() } returns AbsServerStatus(
+            isInit = true,
+            authMethods = listOf("local", "openid"),
+        )
+        val vm = absViewModel()
+
+        vm.discoverAbsServer()
+        advanceUntilIdle()
+
+        val state = vm.absDiscoveryState.value
+        assertTrue(state is AbsDiscoveryState.Discovered)
+        assertTrue((state as AbsDiscoveryState.Discovered).supportsLocal)
+        assertTrue(state.supportsOpenId)
+    }
+
+    @Test
+    fun `discoverAbsServer maps unreachable server to user message`() = runTest {
+        coEvery { absApi.getStatus() } throws
+            AudiobookshelfApiException.Unreachable(RuntimeException("no route"))
+        val vm = absViewModel()
+
+        vm.discoverAbsServer()
+        advanceUntilIdle()
+
+        val state = vm.absDiscoveryState.value
+        assertTrue(state is AbsDiscoveryState.Error)
+        assertEquals("Can't reach server — check the URL", (state as AbsDiscoveryState.Error).message)
+    }
+
+    @Test
+    fun `changing the host resets ABS discovery to Idle`() = runTest {
+        coEvery { absApi.getStatus() } returns AbsServerStatus(authMethods = listOf("local"))
+        val vm = absViewModel()
+        vm.discoverAbsServer()
+        advanceUntilIdle()
+        assertTrue(vm.absDiscoveryState.value is AbsDiscoveryState.Discovered)
+
+        vm.setHost("https://other.example.com")
+
+        assertEquals(AbsDiscoveryState.Idle, vm.absDiscoveryState.value)
+    }
+
+    // --- Audiobookshelf: Test Connection (login) + save gating ---
+
+    @Test
+    fun `testConnection logs in to ABS and transitions to Success`() = runTest {
+        stubAbsLogin()
+        val vm = absViewModel()
+
+        vm.testConnection()
+        advanceUntilIdle()
+
+        assertEquals(ConnectionTestState.Success, vm.connectionTestState.value)
+        coVerify(exactly = 1) { absAuth.login() }
+    }
+
+    @Test
+    fun `testConnection maps ABS LoginFailed to incorrect credentials message`() = runTest {
+        coEvery { absAuth.login() } throws AudiobookshelfApiException.LoginFailed(401)
+        val vm = absViewModel()
+
+        vm.testConnection()
+        advanceUntilIdle()
+
+        val state = vm.connectionTestState.value
+        assertTrue(state is ConnectionTestState.Error)
+        assertEquals("Incorrect username or password", (state as ConnectionTestState.Error).message)
+    }
+
+    @Test
+    fun `save ABS is rejected when connection not verified`() = runTest {
+        val vm = absViewModel()
+
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { accountManager.addAccount(any(), any()) }
+        assertEquals("Test the connection before saving", vm.errorMessage.value)
+    }
+
+    @Test
+    fun `save ABS persists host username and the login token pair`() = runTest {
+        stubAbsLogin(AudiobookshelfAuth.Tokens("acc-7", "ref-7"))
+        val vm = absViewModel()
+        vm.setName("Home ABS")
+        vm.testConnection()
+        advanceUntilIdle()
+
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify {
+            accountManager.addAccount(
+                match {
+                    val type = it.type
+                    it.name == "Home ABS" &&
+                        type is AccountType.Audiobookshelf &&
+                        type.host == "https://abs.example.com" &&
+                        type.username == "alice" &&
+                        type.accessToken == "acc-7" &&
+                        type.refreshToken == "ref-7"
+                },
+                any(),
+            )
+        }
+    }
+
+    @Test
+    fun `save ABS defaults blank name to host`() = runTest {
+        stubAbsLogin()
+        val vm = absViewModel()
+        // Name left blank.
+        vm.testConnection()
+        advanceUntilIdle()
+
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify {
+            accountManager.addAccount(
+                match { it.name == "abs.example.com" && it.type is AccountType.Audiobookshelf },
+                any(),
+            )
+        }
+    }
+
+    @Test
+    fun `changing password after ABS success resets test and discards tokens`() = runTest {
+        stubAbsLogin()
+        val vm = absViewModel()
+        vm.testConnection()
+        advanceUntilIdle()
+        assertEquals(ConnectionTestState.Success, vm.connectionTestState.value)
+
+        vm.setPassword("different")
+        vm.save()
+        advanceUntilIdle()
+
+        // Stale tokens must not be saved after inputs changed.
+        assertEquals(ConnectionTestState.Idle, vm.connectionTestState.value)
+        coVerify(exactly = 0) { accountManager.addAccount(any(), any()) }
+    }
+
+    // --- Audiobookshelf: edit mode ---
+
+    @Test
+    fun `edit mode pre-fills ABS fields keeps type and requires re-test`() {
+        val account = Account(
+            id = "a1",
+            name = "My ABS",
+            type = AccountType.Audiobookshelf(
+                host = "https://abs.example.com",
+                username = "bob",
+                accessToken = "acc-1",
+                refreshToken = "ref-1",
+            ),
+        )
+        every { accountManager.accounts } returns MutableStateFlow(listOf(account))
+        val vm = createViewModel(mapOf("accountId" to "a1"))
+
+        assertEquals("My ABS", vm.name.value)
+        assertTrue(vm.isAudiobookshelf.value)
+        assertEquals("https://abs.example.com", vm.host.value)
+        assertEquals("bob", vm.username.value)
+        // Password is never stored for ABS — re-entered on edit.
+        assertEquals("", vm.password.value)
         // Must re-validate before saving an edit.
         assertEquals(ConnectionTestState.Idle, vm.connectionTestState.value)
     }
