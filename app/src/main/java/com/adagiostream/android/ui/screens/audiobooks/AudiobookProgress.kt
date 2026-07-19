@@ -97,4 +97,11 @@ internal val AudiobookshelfApiException.userMessage: String
             "Unexpected server response. The server may need updating."
         is AudiobookshelfApiException.SessionNotFound ->
             "Playback session expired. Try again."
+        // OIDC cases are login-time only — can't occur while browsing, but the
+        // when must stay exhaustive. Same remedy as an expired session.
+        is AudiobookshelfApiException.OidcFailed,
+        is AudiobookshelfApiException.OidcStateMismatch,
+        is AudiobookshelfApiException.OidcAuthUrlMissing,
+        ->
+            "Sign-in failed. Try again in Settings → Accounts."
     }

@@ -103,12 +103,16 @@ object AudiobookshelfModule {
     }
 
     /**
-     * ponytail: no-op until the playback branch (59p.1.5) lands — it replaces
-     * this binding with the real audiobook player wiring; the browsing UI
-     * (beads_adagio-59p.1.4) only ever talks to the interface.
+     * Bridges the browsing UI's Resume/Play affordance (beads_adagio-59p.1.4)
+     * to the playback engine (59p.1.5). Pure delegation — the coordinator
+     * owns session open/close, resume position, and token rotation.
      */
     @Provides
     @Singleton
-    fun provideAudiobookPlaybackLauncher(): AudiobookPlaybackLauncher =
-        AudiobookPlaybackLauncher { _, _, _ -> }
+    fun provideAudiobookPlaybackLauncher(
+        coordinator: AudiobookPlaybackCoordinator,
+    ): AudiobookPlaybackLauncher =
+        AudiobookPlaybackLauncher { account, libraryItemId, resumeOverride ->
+            coordinator.playAudiobook(account, libraryItemId, resumeOverride)
+        }
 }

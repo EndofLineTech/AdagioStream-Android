@@ -1,21 +1,19 @@
 package com.adagiostream.android.service.player
 
-import com.adagiostream.android.service.audiobookshelf.AbsLibraryItem
-import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
+import com.adagiostream.android.model.Account
 
 /**
- * Starts (or resumes) playback of an audiobook — the single integration point
- * between the browsing UI (beads_adagio-59p.1.4) and the playback engine.
+ * Starts (or resumes) playback of an audiobook — the seam between the
+ * browsing UI (beads_adagio-59p.1.4) and the playback engine (59p.1.5).
+ * Bound in [com.adagiostream.android.di.AudiobookshelfModule] to a delegate
+ * of AudiobookPlaybackCoordinator.playAudiobook; the UI layer never touches
+ * the coordinator directly.
  *
- * ponytail: bound to a no-op in [com.adagiostream.android.di.AudiobookshelfModule]
- * until the playback branch (59p.1.5) lands a real implementation — that branch
- * replaces the binding, nothing else changes.
- *
- * @param item the book to play; carries [AbsLibraryItem.userMediaProgress] so
- *   the implementation can resume from the server position.
- * @param startTimeSeconds optional book-global start override (e.g. a chapter
- *   tap); null means resume from the server's `/play` position.
+ * @param account the Audiobookshelf account to play through.
+ * @param libraryItemId the book to play.
+ * @param resumeOverride optional book-global start override in seconds (e.g.
+ *   a chapter tap); null resumes from the server's `/play` position.
  */
 fun interface AudiobookPlaybackLauncher {
-    fun play(item: AbsLibraryItem, api: AudiobookshelfApi, startTimeSeconds: Double?)
+    suspend fun play(account: Account, libraryItemId: String, resumeOverride: Double?)
 }
