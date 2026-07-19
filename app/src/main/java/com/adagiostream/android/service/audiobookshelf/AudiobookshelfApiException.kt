@@ -49,4 +49,27 @@ sealed class AudiobookshelfApiException(message: String, cause: Throwable? = nul
     /** HTTP 2xx but the body did not decode as the expected shape. */
     class DecodingError(cause: Throwable) :
         AudiobookshelfApiException("Data error: ${cause.message}", cause)
+
+    /**
+     * An OIDC/SSO request failed. [step] names which request ("sign-in start",
+     * "token exchange"); [detail] is a trimmed, single-lined response-body
+     * snippet capped at 200 chars — never the code/verifier/tokens/cookies.
+     */
+    class OidcFailed(val step: String, val statusCode: Int, detail: String?) :
+        AudiobookshelfApiException(
+            "SSO sign-in failed at the $step step (HTTP $statusCode)." +
+                if (detail.isNullOrEmpty()) "" else " $detail",
+        )
+
+    /**
+     * The browser callback's `state` did not match the one sent (or the
+     * code/state param was missing) — possible CSRF. The code is NEVER
+     * exchanged in this case.
+     */
+    object OidcStateMismatch :
+        AudiobookshelfApiException("SSO sign-in failed a security check. Please try again.")
+
+    /** `/auth/openid` returned success but no authorization URL. */
+    object OidcAuthUrlMissing :
+        AudiobookshelfApiException("The server did not return an SSO sign-in URL.")
 }

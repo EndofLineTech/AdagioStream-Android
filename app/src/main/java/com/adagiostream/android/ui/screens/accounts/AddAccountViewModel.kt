@@ -9,6 +9,8 @@ import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfOidc
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfOidcCallbackBus
 import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.util.UrlSanitizer
@@ -25,6 +27,8 @@ class AddAccountViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val navidromeApiFactory: NavidromeApiFactory,
     private val audiobookshelfApiFactory: AudiobookshelfApiFactory,
+    private val oidc: AudiobookshelfOidc,
+    private val oidcCallbacks: AudiobookshelfOidcCallbackBus,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -49,10 +53,36 @@ class AddAccountViewModel @Inject constructor(
     val absDiscoveryState: StateFlow<AbsDiscoveryState> = _absDiscoveryState.asStateFlow()
 
     /**
-     * Token pair from a successful Audiobookshelf test login — saved into the
-     * account on save. Kept out of any StateFlow the UI could log.
+     * Token pair from a successful Audiobookshelf test login OR SSO exchange
+     * — saved into the account on save. Kept out of any StateFlow the UI
+     * could log.
      */
     private var absTokens: AudiobookshelfAuth.Tokens? = null
+
+    /**
+     * In-flight SSO flow secrets (CSRF state, PKCE verifier, session cookies).
+     * Never log any field.
+     */
+    private data class PendingSso(
+        val host: String,
+        val state: String,
+        val verifier: String,
+        val cookieHeader: String,
+    ) {
+        override fun toString(): String = "PendingSso(****)"
+    }
+
+    // ponytail: SSO flow state lives in the ViewModel — it survives the Custom
+    // Tab round-trip (singleTask activity) but not process death in the
+    // browser; SavedStateHandle restoration if that ever shows up in the field.
+    private var pendingSso: PendingSso? = null
+
+    /**
+     * IdP authorization URL for the UI to open in a Chrome Custom Tab. The
+     * screen launches it and calls [ssoLaunchHandled].
+     */
+    private val _ssoAuthorizeUrl = MutableStateFlow<String?>(null)
+    val ssoAuthorizeUrl: StateFlow<String?> = _ssoAuthorizeUrl.asStateFlow()
 
     private val _name = MutableStateFlow("")
     val name: StateFlow<String> = _name.asStateFlow()
@@ -88,6 +118,18 @@ class AddAccountViewModel @Inject constructor(
     val addAccountResult: StateFlow<AccountManager.AddAccountResult?> = _addAccountResult.asStateFlow()
 
     init {
+        // Route OIDC browser redirects into the in-progress SSO flow. The bus
+        // holds the URL until consumed, so a callback that lands during the
+        // activity round-trip is not lost.
+        viewModelScope.launch {
+            oidcCallbacks.callbackUrl.collect { url ->
+                if (url != null) {
+                    oidcCallbacks.consume()
+                    completeSso(url)
+                }
+            }
+        }
+
         if (editAccountId != null) {
             val account = accountManager.accounts.value.find { it.id == editAccountId }
             if (account != null) {
@@ -179,8 +221,9 @@ class AddAccountViewModel @Inject constructor(
             _connectionTestState.value = ConnectionTestState.Idle
         }
         // Tokens from a previous successful ABS login are stale once any
-        // credential input changes.
+        // credential input changes — as is any half-finished SSO flow.
         absTokens = null
+        pendingSso = null
     }
 
     /** True when the entered Subsonic host uses cleartext http (drives the in-UI warning). */
@@ -190,8 +233,12 @@ class AddAccountViewModel @Inject constructor(
     fun isValid(): Boolean {
         return when {
             _isAudiobookshelf.value ->
-                // Display name is optional; local login credentials are required.
-                _host.value.isNotBlank() && _username.value.isNotBlank() && _password.value.isNotBlank()
+                // Display name is optional. Either local credentials or a
+                // completed SSO sign-in (tokens present, no username) is fine.
+                _host.value.isNotBlank() && (
+                    absTokens != null ||
+                        (_username.value.isNotBlank() && _password.value.isNotBlank())
+                    )
             _isSubsonic.value ->
                 // Display name is optional for Subsonic; credentials are required.
                 _host.value.isNotBlank() && _username.value.isNotBlank() && _password.value.isNotBlank()
@@ -276,6 +323,82 @@ class AddAccountViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Starts the Audiobookshelf OIDC/SSO flow: generates PKCE + CSRF state,
+     * asks the server for the IdP authorization URL (capturing the session
+     * cookies), and hands the URL to the UI via [ssoAuthorizeUrl] to open in
+     * a Custom Tab. The flow completes when the browser redirect arrives via
+     * the callback bus ([completeSso]); if the user cancels in the browser,
+     * nothing arrives and the button simply remains available.
+     */
+    fun startSso() {
+        val host = _host.value.trim()
+        if (host.isBlank()) {
+            _connectionTestState.value = ConnectionTestState.Error("Enter the server URL first")
+            return
+        }
+
+        _connectionTestState.value = ConnectionTestState.Testing
+        viewModelScope.launch {
+            try {
+                UrlSanitizer.requireHttpUrl(host)
+                val pkce = AudiobookshelfOidc.makePkce()
+                val state = AudiobookshelfOidc.makeState()
+                val authorization = oidc.startAuthorization(host, pkce.challenge, state)
+                pendingSso = PendingSso(
+                    host = host,
+                    state = state,
+                    verifier = pkce.verifier,
+                    cookieHeader = authorization.cookieHeader,
+                )
+                // Back to Idle while the user is in the browser — a cancelled
+                // sign-in must leave the form usable, not stuck on a spinner.
+                _connectionTestState.value = ConnectionTestState.Idle
+                _ssoAuthorizeUrl.value = authorization.authorizeUrl
+            } catch (e: AudiobookshelfApiException) {
+                _connectionTestState.value = ConnectionTestState.Error(messageFor(e))
+            } catch (e: IllegalArgumentException) {
+                _connectionTestState.value = ConnectionTestState.Error("Enter a valid http or https URL")
+            } catch (e: Exception) {
+                _connectionTestState.value = ConnectionTestState.Error("SSO sign-in failed. Please try again.")
+            }
+        }
+    }
+
+    /** The UI has launched the Custom Tab for the current [ssoAuthorizeUrl]. */
+    fun ssoLaunchHandled() {
+        _ssoAuthorizeUrl.value = null
+    }
+
+    /**
+     * Completes the SSO flow from the `adagiostream://oauth` browser redirect:
+     * validates state and exchanges the code (with cookie replay) for the
+     * token pair, then marks the connection verified so Save follows the same
+     * path as password login. Never log [callbackUrl] — it carries the code.
+     */
+    private suspend fun completeSso(callbackUrl: String) {
+        // A callback with no in-progress flow (e.g. the process was restarted
+        // while the browser was open) has nothing to complete — ignore it.
+        val pending = pendingSso ?: return
+        _connectionTestState.value = ConnectionTestState.Testing
+        _connectionTestState.value = try {
+            val tokens = oidc.exchange(
+                host = pending.host,
+                callbackUrl = callbackUrl,
+                expectedState = pending.state,
+                verifier = pending.verifier,
+                cookieHeader = pending.cookieHeader,
+            )
+            absTokens = tokens
+            pendingSso = null
+            ConnectionTestState.Success
+        } catch (e: AudiobookshelfApiException) {
+            ConnectionTestState.Error(messageFor(e))
+        } catch (e: Exception) {
+            ConnectionTestState.Error("SSO sign-in failed. Please try again.")
+        }
+    }
+
     /** Maps a [NavidromeApiException] to a distinct, user-facing message. */
     private fun messageFor(e: NavidromeApiException): String = when (e) {
         is NavidromeApiException.AuthFailed ->
@@ -311,6 +434,12 @@ class AddAccountViewModel @Inject constructor(
         is AudiobookshelfApiException.SessionNotFound,
         is AudiobookshelfApiException.DecodingError ->
             "That doesn't look like an Audiobookshelf server"
+        // OIDC exception messages are already user-facing (and detail is
+        // pre-redacted/capped by AudiobookshelfOidc.safeErrorDetail).
+        is AudiobookshelfApiException.OidcFailed,
+        is AudiobookshelfApiException.OidcStateMismatch,
+        is AudiobookshelfApiException.OidcAuthUrlMissing ->
+            e.message ?: "SSO sign-in failed. Please try again."
     }
 
     fun save() {

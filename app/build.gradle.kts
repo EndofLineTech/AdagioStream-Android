@@ -104,6 +104,8 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.appcompat)
     implementation(libs.activity.compose)
+    // Chrome Custom Tabs for the Audiobookshelf OIDC/SSO browser step (59p.1.2)
+    implementation(libs.browser)
     implementation(libs.navigation.compose)
 
     // Media3

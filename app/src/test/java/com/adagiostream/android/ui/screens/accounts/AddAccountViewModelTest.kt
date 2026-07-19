@@ -9,6 +9,8 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfOidc
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfOidcCallbackBus
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
@@ -48,11 +50,16 @@ class AddAccountViewModelTest {
     }
     private val absApiFactory = AudiobookshelfApiFactory { _, _, _, _, _ -> absApi }
 
+    private val oidc = mockk<AudiobookshelfOidc>()
+    private val oidcCallbacks = AudiobookshelfOidcCallbackBus()
+
     private fun createViewModel(
         savedState: Map<String, Any?> = emptyMap(),
     ): AddAccountViewModel {
         val handle = SavedStateHandle(savedState)
-        return AddAccountViewModel(accountManager, navidromeApiFactory, absApiFactory, handle)
+        return AddAccountViewModel(
+            accountManager, navidromeApiFactory, absApiFactory, oidc, oidcCallbacks, handle,
+        )
     }
 
     /** Builds a Subsonic VM pre-populated with valid host/username/password. */
@@ -668,6 +675,141 @@ class AddAccountViewModelTest {
         // Stale tokens must not be saved after inputs changed.
         assertEquals(ConnectionTestState.Idle, vm.connectionTestState.value)
         coVerify(exactly = 0) { accountManager.addAccount(any(), any()) }
+    }
+
+    // --- Audiobookshelf: OIDC/SSO flow (59p.1.2) ---
+
+    /** Builds an ABS VM with only a host — the SSO path needs no credentials. */
+    private fun absSsoViewModel(): AddAccountViewModel {
+        val vm = createViewModel()
+        vm.setIsAudiobookshelf(true)
+        vm.setHost("https://abs.example.com")
+        return vm
+    }
+
+    @Test
+    fun `startSso publishes the authorize URL and returns to Idle for the browser trip`() = runTest {
+        coEvery { oidc.startAuthorization(any(), any(), any()) } returns
+            AudiobookshelfOidc.Authorization("https://idp.example.com/auth", "auth_method=openid")
+        val vm = absSsoViewModel()
+
+        vm.startSso()
+        advanceUntilIdle()
+
+        assertEquals("https://idp.example.com/auth", vm.ssoAuthorizeUrl.value)
+        // Idle (not Testing) while the user is in the browser — a cancelled
+        // sign-in leaves the form usable and the flow restartable.
+        assertEquals(ConnectionTestState.Idle, vm.connectionTestState.value)
+        coVerify { oidc.startAuthorization(eq("https://abs.example.com"), any(), any()) }
+
+        vm.ssoLaunchHandled()
+        assertNull(vm.ssoAuthorizeUrl.value)
+    }
+
+    @Test
+    fun `startSso requires a host first`() {
+        val vm = createViewModel()
+        vm.setIsAudiobookshelf(true)
+
+        vm.startSso()
+
+        val state = vm.connectionTestState.value
+        assertTrue(state is ConnectionTestState.Error)
+        assertEquals("Enter the server URL first", (state as ConnectionTestState.Error).message)
+    }
+
+    @Test
+    fun `SSO callback exchanges the code and saves the account without a username`() = runTest {
+        coEvery { oidc.startAuthorization(any(), any(), any()) } returns
+            AudiobookshelfOidc.Authorization("https://idp.example.com/auth", "a=1")
+        coEvery { oidc.exchange(any(), any(), any(), any(), any()) } returns
+            AudiobookshelfAuth.Tokens("acc-9", "ref-9")
+        val vm = absSsoViewModel()
+        vm.startSso()
+        advanceUntilIdle()
+
+        oidcCallbacks.publish("adagiostream://oauth?code=c1&state=s1")
+        advanceUntilIdle()
+
+        assertEquals(ConnectionTestState.Success, vm.connectionTestState.value)
+        // The bus entry was consumed.
+        assertNull(oidcCallbacks.callbackUrl.value)
+        // No credentials, but the SSO tokens make the form valid and savable.
+        assertTrue(vm.isValid())
+        coVerify {
+            oidc.exchange(
+                host = eq("https://abs.example.com"),
+                callbackUrl = eq("adagiostream://oauth?code=c1&state=s1"),
+                expectedState = any(),
+                verifier = any(),
+                cookieHeader = eq("a=1"),
+            )
+        }
+
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify {
+            accountManager.addAccount(
+                match {
+                    val type = it.type
+                    type is AccountType.Audiobookshelf &&
+                        type.username == null &&
+                        type.accessToken == "acc-9" &&
+                        type.refreshToken == "ref-9"
+                },
+                any(),
+            )
+        }
+    }
+
+    @Test
+    fun `SSO callback with no pending flow is ignored`() = runTest {
+        val vm = absSsoViewModel()
+
+        oidcCallbacks.publish("adagiostream://oauth?code=c&state=s")
+        advanceUntilIdle()
+
+        assertEquals(ConnectionTestState.Idle, vm.connectionTestState.value)
+        coVerify(exactly = 0) { oidc.exchange(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `SSO exchange failure surfaces the security-check message`() = runTest {
+        coEvery { oidc.startAuthorization(any(), any(), any()) } returns
+            AudiobookshelfOidc.Authorization("https://idp.example.com/auth", "")
+        coEvery { oidc.exchange(any(), any(), any(), any(), any()) } throws
+            AudiobookshelfApiException.OidcStateMismatch
+        val vm = absSsoViewModel()
+        vm.startSso()
+        advanceUntilIdle()
+        vm.ssoLaunchHandled()
+
+        oidcCallbacks.publish("adagiostream://oauth?code=c&state=tampered")
+        advanceUntilIdle()
+
+        val state = vm.connectionTestState.value
+        assertTrue(state is ConnectionTestState.Error)
+        assertEquals(
+            "SSO sign-in failed a security check. Please try again.",
+            (state as ConnectionTestState.Error).message,
+        )
+        // The flow is resettable — a new attempt can start.
+        assertTrue(vm.ssoAuthorizeUrl.value == null)
+    }
+
+    @Test
+    fun `startSso failure maps to a user-facing error`() = runTest {
+        coEvery { oidc.startAuthorization(any(), any(), any()) } throws
+            AudiobookshelfApiException.OidcFailed("sign-in start", 500, "IdP down")
+        val vm = absSsoViewModel()
+
+        vm.startSso()
+        advanceUntilIdle()
+
+        val state = vm.connectionTestState.value
+        assertTrue(state is ConnectionTestState.Error)
+        assertTrue((state as ConnectionTestState.Error).message.contains("HTTP 500"))
     }
 
     // --- Audiobookshelf: edit mode ---
