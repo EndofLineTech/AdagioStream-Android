@@ -28,6 +28,23 @@ interface OfflineAudiobookSource {
     /** The book, if a COMPLETE local copy exists (all files on disk); else null. */
     suspend fun completeBook(libraryItemId: String): OfflineAudiobook?
 
-    /** Persists the last playback position into the manifest for offline resume. */
-    suspend fun savePosition(libraryItemId: String, seconds: Double)
+    /**
+     * The episode, if a COMPLETE local copy exists — keyed by the composite
+     * (show, episode) download id so it never collides with the show's book id
+     * or sibling episodes (bead .2.3).
+     */
+    suspend fun completeEpisode(showLibraryItemId: String, episodeId: String): OfflineAudiobook?
+
+    /**
+     * Persists the last playback position into the manifest for offline resume.
+     * [episodeId] null = book (keyed by libraryItemId); non-null = episode
+     * (keyed by the composite (show, episode) id).
+     */
+    suspend fun savePosition(libraryItemId: String, episodeId: String?, seconds: Double)
+
+    /**
+     * Deletes an episode's downloaded copy (files + manifest row). Backs the
+     * auto-delete-after-played path (bead .2.3); no-op when nothing is stored.
+     */
+    suspend fun deleteEpisode(showLibraryItemId: String, episodeId: String)
 }

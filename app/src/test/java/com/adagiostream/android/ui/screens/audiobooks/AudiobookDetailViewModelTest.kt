@@ -69,6 +69,16 @@ class AudiobookDetailViewModelTest {
         override suspend fun delete(libraryItemId: String) {
             deleteCalls += libraryItemId
         }
+        override fun observeEpisode(showLibraryItemId: String, episodeId: String): StateFlow<AudiobookDownloadEntity?> =
+            MutableStateFlow(null)
+        override suspend fun downloadEpisode(
+            account: Account,
+            showLibraryItemId: String,
+            episodeId: String,
+            title: String?,
+            author: String?,
+        ) = Unit
+        override suspend fun deleteEpisode(showLibraryItemId: String, episodeId: String) = Unit
     }
 
     @Before

@@ -70,20 +70,28 @@ class AudiobookDownloadWorker(
         val dao = deps.audiobookDownloadDao()
 
         val itemId = inputData.getString(AudiobookDownloadManager.KEY_ITEM_ID) ?: return Result.failure()
+        // Present = podcast episode: itemId is the SHOW's library-item id (the
+        // /play + /file URLs use it), the manifest row is keyed by the composite.
+        val episodeId = inputData.getString(AudiobookDownloadManager.KEY_EPISODE_ID)
+        val recordId = if (episodeId != null) {
+            AudiobookDownloadManager.episodeRecordId(itemId, episodeId)
+        } else {
+            itemId
+        }
         val accountId = inputData.getString(AudiobookDownloadManager.KEY_ACCOUNT_ID)
-            ?: return failRow(dao, itemId, "missing account id")
+            ?: return failRow(dao, recordId, "missing account id")
 
         // Resolve accounts from disk (survives process death). The account must
         // be the ACTIVE ABS account — the shared provider serves exactly that one.
         val accounts = deps.persistenceService().loadAccounts()
         val active = accounts.firstOrNull { it.isEnabled && it.type is AccountType.Audiobookshelf }
         if (active?.id != accountId) {
-            return failRow(dao, itemId, "Audiobookshelf account not available")
+            return failRow(dao, recordId, "Audiobookshelf account not available")
         }
         // B2: the SAME shared API instance the UI/coordinator use, so concurrent
         // 401s coalesce through one refresh mutex (no rotation race).
         val api = deps.audiobookshelfApiProvider().apiFrom(accounts)
-            ?: return failRow(dao, itemId, "Audiobookshelf account not available")
+            ?: return failRow(dao, recordId, "Audiobookshelf account not available")
 
         try {
             setForeground(foregroundInfo("Starting…"))
@@ -97,8 +105,13 @@ class AudiobookDownloadWorker(
         val downloader = AudiobookDownloader(
             dao = deps.audiobookDownloadDao(),
             files = files,
-            fetchPlan = { id ->
-                fetchPlan(api, id, deps.persistenceService().deviceId()).also { fileCount = it.files.size }
+            fetchPlan = {
+                val plan = if (episodeId != null) {
+                    fetchEpisodePlan(api, itemId, episodeId, deps.persistenceService().deviceId())
+                } else {
+                    fetchPlan(api, itemId, deps.persistenceService().deviceId())
+                }
+                plan.also { fileCount = it.files.size }
             },
             fetchFile = { file, dest ->
                 fileDone++
@@ -112,7 +125,7 @@ class AudiobookDownloadWorker(
             },
         )
 
-        return when (downloader.download(itemId, accountId)) {
+        return when (downloader.download(recordId, accountId)) {
             is AudiobookDownloader.Outcome.Complete -> Result.success()
             is AudiobookDownloader.Outcome.Failed ->
                 if (runAttemptCount + 1 < MAX_ATTEMPTS) Result.retry() else Result.failure()
@@ -150,6 +163,45 @@ class AudiobookDownloadWorker(
             duration = session.duration,
             files = files,
             chapters = session.chapters.orEmpty(),
+        )
+    }
+
+    /**
+     * Episode plan (bead .2.3): a podcast episode is a single file. Open the
+     * episode's play session for the file's global offset/duration, then read
+     * the episode's `audioFile.ino` off the expanded show for the download URL.
+     */
+    private suspend fun fetchEpisodePlan(
+        api: AudiobookshelfApi,
+        showId: String,
+        episodeId: String,
+        deviceId: String,
+    ): AudiobookDownloader.Plan {
+        val session = api.openPlaybackSession(showId, episodeId = episodeId, deviceId = deviceId)
+        session.id.takeIf { it.isNotEmpty() }?.let { api.closeSession(it) }
+        val item = api.getItem(showId)
+        val episode = item.media?.episodes?.firstOrNull { it.id == episodeId }
+        val ino = episode?.audioFile?.ino?.takeIf { it.isNotEmpty() }
+        val track = session.audioTracks.orEmpty().firstOrNull()
+        val files = if (ino != null) {
+            listOf(
+                AudiobookDownloadFile(
+                    index = track?.index ?: 0,
+                    ino = ino,
+                    startOffset = track?.startOffset ?: 0.0,
+                    duration = track?.duration ?: episode.duration ?: 0.0,
+                    ext = track?.contentUrl?.substringAfterLast('.', "")?.takeIf { it.length in 1..5 },
+                ),
+            )
+        } else {
+            emptyList()
+        }
+        return AudiobookDownloader.Plan(
+            title = episode?.title ?: session.displayTitle ?: "Episode",
+            author = item.media?.metadata?.title ?: session.mediaMetadata?.title,
+            duration = episode?.duration ?: session.duration,
+            files = files,
+            chapters = emptyList(), // podcast episode: single file, no chapters
         )
     }
 

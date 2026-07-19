@@ -47,6 +47,7 @@ fun PodcastEpisodeListScreen(
     val episodes by viewModel.episodes.collectAsStateWithLifecycle()
     val showTitle by viewModel.showTitle.collectAsStateWithLifecycle()
     val episodeProgress by viewModel.episodeProgress.collectAsStateWithLifecycle()
+    val downloadStates by viewModel.downloadStates.collectAsStateWithLifecycle()
 
     LaunchedEffect(api) {
         if (api != null && state == AbsLoadState.Idle) {
@@ -127,6 +128,15 @@ fun PodcastEpisodeListScreen(
                             episodeProgressState(episodeProgress[key])
                         } else {
                             null
+                        },
+                        downloadState = downloadStates[episode.id]
+                            ?: com.adagiostream.android.ui.screens.music.DownloadUiState.NOT_DOWNLOADED,
+                        onDownloadTap = {
+                            viewModel.onDownloadTap(
+                                episode.id,
+                                downloadStates[episode.id]
+                                    ?: com.adagiostream.android.ui.screens.music.DownloadUiState.NOT_DOWNLOADED,
+                            )
                         },
                         onClick = { viewModel.playEpisode(episode.id) },
                     )

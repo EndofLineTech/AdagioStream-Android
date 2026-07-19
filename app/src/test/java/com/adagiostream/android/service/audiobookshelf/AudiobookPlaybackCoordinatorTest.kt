@@ -2,7 +2,9 @@ package com.adagiostream.android.service.audiobookshelf
 
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
+import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.AudiobookFilePlayer
 import com.adagiostream.android.service.player.PlaybackSource
 import com.adagiostream.android.testutil.TestFixtures
@@ -139,17 +141,30 @@ class AudiobookPlaybackCoordinatorTest {
         every { api.coverUrl(any(), any(), any()) } returns "https://abs.example/cover".toHttpUrl()
     }
 
-    private fun coordinator(offlineBooks: OfflineAudiobookSource? = null) = AudiobookPlaybackCoordinator(
+    private fun coordinator(
+        offlineBooks: OfflineAudiobookSource? = null,
+        persistenceService: PersistenceService? = null,
+    ) = AudiobookPlaybackCoordinator(
         player = player,
         queue = queue,
         apiFactory = { _, _, _, _, _ -> api },
-        persistenceService = null,
+        persistenceService = persistenceService,
         playerState = playerState,
         playbackSource = sourceFlow,
         offlineBooks = offlineBooks,
         scope = testScope,
         clock = { nowMs },
     )
+
+    /** A persistence stub returning fixed [settings] — for the auto-delete gate. */
+    private fun fakePersistence(settings: AppSettings): PersistenceService {
+        val ps = mockk<PersistenceService>()
+        coEvery { ps.loadSettings() } returns settings
+        every { ps.loadSettingsSync() } returns settings
+        every { ps.settings } returns MutableStateFlow(settings)
+        every { ps.deviceId() } returns "test-device"
+        return ps
+    }
 
     // ---- resume precedence (pure) -----------------------------------------
 
@@ -407,11 +422,21 @@ class AudiobookPlaybackCoordinatorTest {
     // ---- offline playback from a downloaded book (bead .1.6) ---------------
 
     /** Serves one downloaded book; records manifest position writes. */
-    private class FakeOfflineSource(private val book: OfflineAudiobook?) : OfflineAudiobookSource {
+    private class FakeOfflineSource(
+        private val book: OfflineAudiobook? = null,
+        private val episode: OfflineAudiobook? = null,
+    ) : OfflineAudiobookSource {
         val savedPositions = mutableListOf<Pair<String, Double>>()
+        val savedEpisodePositions = mutableListOf<Triple<String, String, Double>>()
+        val deletedEpisodes = mutableListOf<Pair<String, String>>()
         override suspend fun completeBook(libraryItemId: String): OfflineAudiobook? = book
-        override suspend fun savePosition(libraryItemId: String, seconds: Double) {
-            savedPositions += libraryItemId to seconds
+        override suspend fun completeEpisode(showLibraryItemId: String, episodeId: String): OfflineAudiobook? = episode
+        override suspend fun savePosition(libraryItemId: String, episodeId: String?, seconds: Double) {
+            if (episodeId == null) savedPositions += libraryItemId to seconds
+            else savedEpisodePositions += Triple(libraryItemId, episodeId, seconds)
+        }
+        override suspend fun deleteEpisode(showLibraryItemId: String, episodeId: String) {
+            deletedEpisodes += showLibraryItemId to episodeId
         }
     }
 
@@ -716,6 +741,118 @@ class AudiobookPlaybackCoordinatorTest {
         coVerify(exactly = 0) { api.openPlaybackSession("show1", "ep1", any(), any()) }
         assertTrue(player.stopCount > 0)
         coVerify(exactly = 1) { api.closeSession("esess2") }
+    }
+
+    // ---- offline episode download + auto-delete (bead .2.3) ----------------
+
+    /** One 1800s single-file episode with a file:// URL (no chapters). */
+    private fun offlineEpisode(currentTime: Double = 0.0) = OfflineAudiobook(
+        libraryItemId = "show1", // plays under the SHOW id, not the composite record id
+        title = "Episode One",
+        author = "The Show",
+        coverPath = "/dl/episode_show1_ep1_cover.webp",
+        currentTime = currentTime,
+        timeline = AudiobookTimeline(
+            listOf(AbsAudioTrack(0, 0.0, 1800.0, null, "file:///dl/ep1.m4b")),
+            emptyList(),
+        ),
+    )
+
+    @Test
+    fun `shouldAutoDeleteEpisode fires only on natural finish AND setting on`() {
+        val gate = AudiobookPlaybackCoordinator.Companion::shouldAutoDeleteEpisode
+        assertTrue(gate(true, true))
+        assertEquals(false, gate(true, false)) // setting off
+        assertEquals(false, gate(false, true)) // not a natural finish
+        assertEquals(false, gate(false, false))
+    }
+
+    @Test
+    fun `session open failure falls back to the complete local episode keyed by episode`() = runTest {
+        stubEpisodeSessions()
+        coEvery { api.openPlaybackSession("show1", "ep1", any(), any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+        coEvery { api.batchUpdateProgress(any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+
+        val offline = FakeOfflineSource(episode = offlineEpisode(currentTime = 300.0))
+        val c = coordinator(offline)
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+
+        val play = player.lastPlay!!
+        assertEquals("file:///dl/ep1.m4b", play.url)
+        assertEquals(300_000L, play.startPositionMs) // manifest-cached resume
+        assertEquals("Episode One", play.source.bookTitle)
+        assertEquals("show1", play.source.libraryItemId)
+
+        // Offline progress is keyed to (show, episode), never the bare show key.
+        player.positionMs = 30_000
+        c.seekTo(30.0)
+        val queued = queue.snapshot().single()
+        assertEquals("show1", queued.libraryItemId)
+        assertEquals("ep1", queued.episodeId)
+        assertTrue(offline.savedEpisodePositions.any { it.first == "show1" && it.second == "ep1" })
+    }
+
+    @Test
+    fun `no session and no downloaded episode does not start playback`() = runTest {
+        stubEpisodeSessions()
+        coEvery { api.openPlaybackSession("show1", "ep1", any(), any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+
+        coordinator(FakeOfflineSource(episode = null)).playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        assertNull(player.lastPlay)
+    }
+
+    @Test
+    fun `natural episode finish deletes the download when auto-delete is on`() = runTest {
+        stubEpisodeSessions()
+        val offline = FakeOfflineSource()
+        val ps = fakePersistence(
+            AppSettings(
+                autoDeleteEpisodeAfterPlayed = true,
+                podcastEpisodeEndBehavior = PodcastEpisodeEndBehavior.STOP,
+            ),
+        )
+        val c = coordinator(offline, ps)
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        player.positionMs = 1_800_000
+
+        c.onFileEnded() // natural finish
+
+        assertEquals(listOf("show1" to "ep1"), offline.deletedEpisodes)
+    }
+
+    @Test
+    fun `natural episode finish does not delete when auto-delete is off`() = runTest {
+        stubEpisodeSessions()
+        val offline = FakeOfflineSource()
+        val ps = fakePersistence(
+            AppSettings(
+                autoDeleteEpisodeAfterPlayed = false,
+                podcastEpisodeEndBehavior = PodcastEpisodeEndBehavior.STOP,
+            ),
+        )
+        val c = coordinator(offline, ps)
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        player.positionMs = 1_800_000
+
+        c.onFileEnded()
+
+        assertTrue(offline.deletedEpisodes.isEmpty())
+    }
+
+    @Test
+    fun `stopping an episode never auto-deletes even with the setting on`() = runTest {
+        stubEpisodeSessions()
+        val offline = FakeOfflineSource()
+        val ps = fakePersistence(AppSettings(autoDeleteEpisodeAfterPlayed = true))
+        val c = coordinator(offline, ps)
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+
+        c.stop() // user stop — not the file-ended path
+
+        assertTrue(offline.deletedEpisodes.isEmpty())
     }
 
     @Test

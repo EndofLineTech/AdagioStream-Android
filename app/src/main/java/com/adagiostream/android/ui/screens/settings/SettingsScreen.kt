@@ -592,6 +592,25 @@ fun SettingsScreen(
                 }
             }
             FooterText("What plays when a podcast episode finishes: stop, the closest newer unplayed episode, or the next unfinished episode in your sort order.")
+
+            // ---- Auto-delete episode after played (beads_adagio-59p.2.3) ----
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Delete Episode After Played",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = settings.autoDeleteEpisodeAfterPlayed,
+                    onCheckedChange = { viewModel.updateAutoDeleteEpisodeAfterPlayed(it) },
+                )
+            }
+            FooterText("Automatically remove a downloaded episode's local copy once it finishes playing.")
         }
 
         Spacer(modifier = Modifier.height(16.dp))

@@ -115,6 +115,13 @@ data class AppSettings(
      * [com.adagiostream.android.service.audiobookshelf.PodcastEpisodeEndBehaviorSerializer]).
      */
     val podcastEpisodeEndBehavior: PodcastEpisodeEndBehavior = PodcastEpisodeEndBehavior.NEXT_UNPLAYED,
+    /**
+     * Delete a downloaded episode's local copy when it finishes playing
+     * naturally (beads_adagio-59p.2.3, iOS parity: `autoDeleteEpisodeAfterPlayed`).
+     * Default OFF; only fires on a natural file-ended finish (never on user
+     * stop), and only for episodes — books are untouched.
+     */
+    val autoDeleteEpisodeAfterPlayed: Boolean = false,
 ) {
     companion object {
         /** Poll interval choices surfaced in Settings (beads_adagio-59p.3.2). */
