@@ -54,6 +54,14 @@ data class AppSettings(
      * is shown once to everyone — PO-accepted per beads_adagio-15x.4.
      */
     val hasSeenTabReorgTip: Boolean = false,
+    /**
+     * Expand-keys of channel-list groups the user has opened (beads_adagio-59p.4.1,
+     * iOS parity: `ProviderManager.expandedGroups` — persisted here so it survives
+     * restart). Empty = everything collapsed, which is the fresh-install default.
+     * The Favorites section uses the NUL-prefixed sentinel key
+     * (`"\u0000favorites"`) so a real M3U group named "Favorites" can't collide.
+     */
+    val expandedGroups: Set<String> = emptySet(),
 )
 
 @Serializable
