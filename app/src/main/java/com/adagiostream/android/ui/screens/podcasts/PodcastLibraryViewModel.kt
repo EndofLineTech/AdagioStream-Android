@@ -93,10 +93,9 @@ class PodcastLibraryViewModel @Inject constructor(
      *  first) — the episode half of [partitionItemsInProgress]. */
     val continueListening: StateFlow<List<PodcastEpisodeEntry>> = _continueListening.asStateFlow()
 
+    // The persisted episode-order setting, refreshed per load. Internal — the
+    // UI reads order via the already-sorted episode lists, not this flow.
     private val _episodeOrder = MutableStateFlow(PodcastEpisodeOrder.NEWEST_FIRST)
-
-    /** The persisted episode-order setting, loaded per screen entry. */
-    val episodeOrder: StateFlow<PodcastEpisodeOrder> = _episodeOrder.asStateFlow()
 
     private val hydrator = PodcastProgressHydrator(
         fetch = { itemId, episodeId ->

@@ -56,8 +56,11 @@ fun isFinishedProgress(progress: AbsMediaProgress?): Boolean =
 fun parsePubDate(raw: String?): Long? {
     if (raw.isNullOrBlank()) return null
     // SimpleDateFormat is not thread-safe — a fresh instance per call is the
-    // cheap correct option at list-sort scale.
+    // cheap correct option at list-sort scale. isLenient=false matches iOS's
+    // strict DateFormatter: a rolled-over day (45 Jan) or two-digit year
+    // returns null instead of a confidently-wrong parsed date.
     val format = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
+    format.isLenient = false
     return format.parse(raw, ParsePosition(0))?.time
 }
 

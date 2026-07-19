@@ -52,6 +52,15 @@ class PodcastEpisodesTest {
     }
 
     @Test
+    fun `strict parsing rejects rolled-over and two-digit fields`() {
+        // lenient=false: a rolled-over day (45 Jan → Feb 14) or a two-digit
+        // year (0026, which would sort to the top of oldest-first) is null,
+        // not a confidently-wrong date.
+        assertNull(parsePubDate("Mon, 45 Jan 2026 10:30:00 GMT"))
+        assertNull(parsePubDate("Mon, 05 Jan 26 10:30:00 GMT"))
+    }
+
+    @Test
     fun `formatPubDate returns null for unparseable input`() {
         assertNull(formatPubDate("garbage"))
         assertNull(formatPubDate(null))
