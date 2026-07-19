@@ -174,7 +174,17 @@ class AudiobookshelfAuthTest {
     }
 
     @Test
-    fun `refresh failure clears tokens and throws ReauthRequired`() = runTest {
+    fun `refresh decodes top-level token pair with no user object`() = runTest {
+        server.enqueue(mockJson(200, """{"accessToken":"acc-2","refreshToken":"ref-2"}"""))
+        val a = auth(initialTokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"))
+
+        a.refresh()
+
+        assertEquals(listOf(AudiobookshelfAuth.Tokens("acc-2", "ref-2")), tokenChanges)
+    }
+
+    @Test
+    fun `401 from refresh clears tokens and throws ReauthRequired`() = runTest {
         server.enqueue(mockJson(401, """{"error":"Invalid refresh token"}"""))
         val a = auth(initialTokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"))
 
@@ -189,8 +199,8 @@ class AudiobookshelfAuthTest {
     }
 
     @Test
-    fun `refresh with malformed body clears tokens and throws ReauthRequired`() = runTest {
-        server.enqueue(mockJson(200, """{"unexpected":"shape"}"""))
+    fun `403 from refresh clears tokens and throws ReauthRequired`() = runTest {
+        server.enqueue(mockJson(403, """{"error":"Forbidden"}"""))
         val a = auth(initialTokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"))
 
         try {
@@ -200,6 +210,69 @@ class AudiobookshelfAuthTest {
             // expected
         }
         assertNull(a.currentAccessToken())
+        assertEquals(listOf<AudiobookshelfAuth.Tokens?>(null), tokenChanges)
+    }
+
+    @Test
+    fun `503 during refresh preserves tokens and throws ServerError`() = runTest {
+        server.enqueue(mockJson(503, """{"error":"maintenance"}"""))
+        val a = auth(initialTokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"))
+
+        try {
+            a.refresh()
+            fail("Expected ServerError")
+        } catch (e: AudiobookshelfApiException.ServerError) {
+            assertEquals(503, e.statusCode)
+        }
+        // A transient outage must not force re-login: pair kept, never cleared.
+        assertEquals("acc-1", a.currentAccessToken())
+        assertTrue(tokenChanges.isEmpty())
+    }
+
+    @Test
+    fun `timeout during refresh preserves tokens and throws TimedOut`() = runTest {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .headersDelay(3, TimeUnit.SECONDS)
+                .body("{}")
+                .build(),
+        )
+        val shortTimeoutAuth = AudiobookshelfAuth(
+            client = OkHttpClient.Builder()
+                .connectTimeout(2, TimeUnit.SECONDS)
+                .readTimeout(300, TimeUnit.MILLISECONDS)
+                .build(),
+            host = server.url("/").toString().trimEnd('/'),
+            username = "alice",
+            password = "sesame",
+            initialTokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"),
+            onTokensChanged = { tokenChanges.add(it) },
+        )
+
+        try {
+            shortTimeoutAuth.refresh()
+            fail("Expected TimedOut")
+        } catch (_: AudiobookshelfApiException.TimedOut) {
+            // expected
+        }
+        assertEquals("acc-1", shortTimeoutAuth.currentAccessToken())
+        assertTrue(tokenChanges.isEmpty())
+    }
+
+    @Test
+    fun `refresh with malformed body preserves tokens and throws DecodingError`() = runTest {
+        server.enqueue(mockJson(200, """{"unexpected":"shape"}"""))
+        val a = auth(initialTokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"))
+
+        try {
+            a.refresh()
+            fail("Expected DecodingError")
+        } catch (_: AudiobookshelfApiException.DecodingError) {
+            // expected — a garbled response is not proof the pair is dead
+        }
+        assertEquals("acc-1", a.currentAccessToken())
+        assertTrue(tokenChanges.isEmpty())
     }
 
     // -------------------------------------------------------------------------
@@ -296,5 +369,76 @@ class AudiobookshelfAuthTest {
         val apiCall = server.takeRequest()
         assertEquals("/api/probe", apiCall.url.encodedPath)
         assertEquals("Bearer acc-1", apiCall.headers["Authorization"])
+    }
+
+    @Test
+    fun `a second 401 after refresh does not trigger a second refresh`() = runTest {
+        // Probe endpoint 401s EVERY request; refresh itself succeeds. execute()
+        // must refresh exactly once and return the retried 401, not loop.
+        val refreshCalls = AtomicInteger(0)
+        val probeCalls = AtomicInteger(0)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.url.encodedPath == "/auth/refresh") {
+                    refreshCalls.incrementAndGet()
+                    mockJson(200, """{"accessToken":"acc-2","refreshToken":"ref-2"}""")
+                } else {
+                    probeCalls.incrementAndGet()
+                    mockJson(401, """{"error":"nope"}""")
+                }
+        }
+        val a = auth(initialTokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"))
+
+        val response = a.execute(probeRequest())
+
+        response.use { assertEquals(401, it.code) }
+        assertEquals(1, refreshCalls.get())
+        assertEquals(2, probeCalls.get()) // original + single retry, no loop
+    }
+
+    @Test
+    fun `concurrent tokenless callers coalesce into a single login`() = runTest {
+        val loginCalls = AtomicInteger(0)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.url.encodedPath == "/login") {
+                    loginCalls.incrementAndGet()
+                    mockJson(200, """{"user":{"accessToken":"acc-1"},"refreshToken":"ref-1"}""")
+                } else if (request.headers["Authorization"] == "Bearer acc-1") {
+                    mockJson(200, """{"ok":true}""")
+                } else {
+                    mockJson(401, """{"error":"expired"}""")
+                }
+        }
+        val a = auth() // no stored tokens
+
+        val codes = coroutineScope {
+            (1..5).map {
+                async { a.execute(probeRequest()).use { resp -> resp.code } }
+            }.awaitAll()
+        }
+
+        assertEquals(listOf(200, 200, 200, 200, 200), codes)
+        assertEquals(1, loginCalls.get())
+    }
+
+    @Test
+    fun `throwing persistence callback does not fail the request`() = runTest {
+        server.enqueue(mockJson(200, """{"accessToken":"acc-2","refreshToken":"ref-2"}"""))
+        server.enqueue(mockJson(200, """{"ok":true}"""))
+        val a = AudiobookshelfAuth(
+            client = OkHttpClient(),
+            host = server.url("/").toString().trimEnd('/'),
+            username = "alice",
+            password = "sesame",
+            initialTokens = AudiobookshelfAuth.Tokens("acc-1", "ref-1"),
+            onTokensChanged = { throw RuntimeException("disk full") },
+        )
+
+        a.refresh() // rotation persists in memory even though the callback threw
+        val response = a.execute(probeRequest())
+
+        response.use { assertEquals(200, it.code) }
+        assertEquals("acc-2", a.currentAccessToken())
     }
 }

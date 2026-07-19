@@ -1,5 +1,6 @@
 package com.adagiostream.android.service.audiobookshelf
 
+import com.adagiostream.android.util.DebugLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -134,7 +135,13 @@ class AudiobookshelfAuth(
      * The caller owns closing the returned [Response].
      */
     suspend fun execute(request: Request): Response = withContext(Dispatchers.IO) {
-        if (tokens == null) login()
+        if (tokens == null) {
+            // Coalesce concurrent first-time logins the same way 401-driven
+            // refreshes are — N tokenless callers must produce ONE POST /login.
+            refreshMutex.withLock {
+                if (tokens == null) login()
+            }
+        }
         val access = tokens?.accessToken ?: throw AudiobookshelfApiException.ReauthRequired
 
         val response = perform(withBearer(request, access))
@@ -165,9 +172,14 @@ class AudiobookshelfAuth(
 
     /**
      * `POST /auth/refresh` with `x-refresh-token`. Persists the ROTATED pair on
-     * success. On ANY failure (network, non-2xx, malformed body) the tokens are
-     * cleared and [AudiobookshelfApiException.ReauthRequired] is thrown —
-     * silently retrying with a dead token is never correct.
+     * success.
+     *
+     * Failure policy: tokens are cleared (→ [AudiobookshelfApiException.ReauthRequired])
+     * ONLY on a definitive 4xx rejection from the server. Transport errors
+     * (timeout/unreachable), 5xx, and malformed 2xx bodies KEEP the stored pair
+     * and surface the matching typed error — a network blip must not force a
+     * re-login. If the server really rotated and this response was lost, the
+     * next refresh 401s and clears cleanly.
      */
     suspend fun refresh(): Unit = withContext(Dispatchers.IO) {
         val current = tokens?.refreshToken ?: run {
@@ -183,28 +195,29 @@ class AudiobookshelfAuth(
             .post(ByteArray(0).toRequestBody(null))
             .build()
 
-        val response = try {
-            perform(request)
-        } catch (_: AudiobookshelfApiException) {
-            forgetTokens()
-            throw AudiobookshelfApiException.ReauthRequired
-        }
+        // TimedOut/Unreachable from perform() propagate WITHOUT clearing tokens.
+        val response = perform(request)
         response.use { resp ->
-            if (resp.code !in 200..299) {
-                forgetTokens()
-                throw AudiobookshelfApiException.ReauthRequired
+            when {
+                resp.code in 400..499 -> {
+                    // Definitive rejection — the pair is dead.
+                    forgetTokens()
+                    throw AudiobookshelfApiException.ReauthRequired
+                }
+                resp.code !in 200..299 ->
+                    throw AudiobookshelfApiException.ServerError(resp.code)
             }
             val payload = try {
                 json.decodeFromString<AbsRefreshResponse>(resp.body.string())
-            } catch (_: Exception) {
-                forgetTokens()
-                throw AudiobookshelfApiException.ReauthRequired
+            } catch (e: Exception) {
+                throw AudiobookshelfApiException.DecodingError(e)
             }
             val access = payload.user?.accessToken ?: payload.accessToken
             val newRefresh = payload.refreshToken ?: payload.user?.refreshToken
             if (access == null || newRefresh == null) {
-                forgetTokens()
-                throw AudiobookshelfApiException.ReauthRequired
+                throw AudiobookshelfApiException.DecodingError(
+                    IllegalStateException("Refresh response missing token pair"),
+                )
             }
             persist(Tokens(accessToken = access, refreshToken = newRefresh))
         }
@@ -216,12 +229,32 @@ class AudiobookshelfAuth(
 
     private fun persist(pair: Tokens) {
         tokens = pair
-        onTokensChanged(pair)
+        notifyTokensChanged(pair)
     }
 
     private fun forgetTokens() {
         tokens = null
-        onTokensChanged(null)
+        notifyTokensChanged(null)
+    }
+
+    /**
+     * A failing persistence callback must not fail the request that triggered
+     * the rotation — the in-memory tokens stay valid and the session keeps
+     * working.
+     */
+    private fun notifyTokensChanged(pair: Tokens?) {
+        try {
+            onTokensChanged(pair)
+        } catch (e: Exception) {
+            // ponytail: swallow + log — the next rotation re-attempts the write;
+            // worst case a stale stored refresh token forces one re-login on the
+            // next launch. Add a write retry only if that shows up in the field.
+            // Never log token contents.
+            DebugLogger.log(
+                "Audiobookshelf token persistence failed: ${e.javaClass.simpleName}: ${e.message}",
+                DebugLogger.Category.GENERAL,
+            )
+        }
     }
 
     // -------------------------------------------------------------------------
