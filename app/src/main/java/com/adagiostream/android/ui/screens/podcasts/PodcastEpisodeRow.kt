@@ -27,6 +27,8 @@ import com.adagiostream.android.service.audiobookshelf.AbsEpisode
 import com.adagiostream.android.service.audiobookshelf.EpisodeProgressState
 import com.adagiostream.android.service.audiobookshelf.formatPubDate
 import com.adagiostream.android.ui.screens.audiobooks.formatBookDuration
+import com.adagiostream.android.ui.screens.music.DownloadUiState
+import com.adagiostream.android.ui.screens.music.TrackDownloadButton
 
 /**
  * One podcast episode list row (beads_adagio-59p.2.1) — port of iOS
@@ -43,6 +45,8 @@ fun PodcastEpisodeRow(
     episode: AbsEpisode,
     progressState: EpisodeProgressState?,
     showTitle: String? = null,
+    downloadState: DownloadUiState = DownloadUiState.NOT_DOWNLOADED,
+    onDownloadTap: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     Row(
@@ -124,5 +128,9 @@ fun PodcastEpisodeRow(
                 else -> Unit
             }
         }
+
+        // Trailing download affordance (bead .2.3) — reuses the music
+        // TrackDownloadButton state machine (download / spinner / delete).
+        TrackDownloadButton(state = downloadState, onTap = onDownloadTap)
     }
 }

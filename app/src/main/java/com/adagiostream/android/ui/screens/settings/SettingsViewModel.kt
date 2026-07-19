@@ -225,6 +225,12 @@ class SettingsViewModel @Inject constructor(
         save()
     }
 
+    /** Auto-delete a downloaded episode after it finishes (beads_adagio-59p.2.3), ABS-only. */
+    fun updateAutoDeleteEpisodeAfterPlayed(enabled: Boolean) {
+        _settings.value = _settings.value.copy(autoDeleteEpisodeAfterPlayed = enabled)
+        save()
+    }
+
     /**
      * Toggles Offline Mode (baw.12): the Music tab shows only downloaded
      * tracks and fires no network browse/search requests.

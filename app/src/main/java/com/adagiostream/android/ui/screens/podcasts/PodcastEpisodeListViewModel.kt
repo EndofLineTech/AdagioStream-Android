@@ -15,14 +15,21 @@ import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
 import com.adagiostream.android.service.audiobookshelf.PodcastPlaybackContext
 import com.adagiostream.android.service.audiobookshelf.PodcastProgressHydrator
 import com.adagiostream.android.service.audiobookshelf.sortedEpisodes
+import com.adagiostream.android.service.download.AudiobookDownloadActions
+import com.adagiostream.android.service.download.AudiobookDownloadManager
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.PodcastPlaybackLauncher
 import com.adagiostream.android.ui.screens.audiobooks.AbsLoadState
 import com.adagiostream.android.ui.screens.audiobooks.userMessage
+import com.adagiostream.android.ui.screens.music.DownloadUiState
+import com.adagiostream.android.ui.screens.music.toUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -42,11 +49,26 @@ class PodcastEpisodeListViewModel @Inject constructor(
     private val apiProvider: AudiobookshelfApiProvider,
     private val persistenceService: PersistenceService,
     private val playbackLauncher: PodcastPlaybackLauncher,
+    private val downloadActions: AudiobookDownloadActions,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     /** The show's library item id (nav arg). */
     val itemId: String = savedStateHandle["itemId"] ?: ""
+
+    /**
+     * episodeId → download button state (bead .2.3), kept live from the shared
+     * audiobook_downloads table. Filters the table to THIS show's episode
+     * records by the composite id prefix, then strips it back to episodeId.
+     */
+    val downloadStates: StateFlow<Map<String, DownloadUiState>> =
+        downloadActions.observeAll()
+            .map { rows ->
+                val prefix = AudiobookDownloadManager.episodeRecordId(itemId, "")
+                rows.filter { it.id.startsWith(prefix) }
+                    .associate { it.id.removePrefix(prefix) to it.status.toUiState() }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     private val _api = MutableStateFlow<AudiobookshelfApi?>(null)
     val api: StateFlow<AudiobookshelfApi?> = _api.asStateFlow()
@@ -141,6 +163,28 @@ class PodcastEpisodeListViewModel @Inject constructor(
         )
         viewModelScope.launch {
             playbackLauncher.play(account, itemId, episodeId, context)
+        }
+    }
+
+    /**
+     * Download-button tap (bead .2.3): download when absent/failed, cancel
+     * in-flight, delete when complete — mirrors the music [TrackDownloadButton]
+     * state machine, keyed by the composite (show, episode) record.
+     */
+    fun onDownloadTap(episodeId: String, state: DownloadUiState) {
+        val account = absAccount ?: return
+        val episode = _episodes.value.firstOrNull { it.id == episodeId }
+        viewModelScope.launch {
+            when (state) {
+                DownloadUiState.NOT_DOWNLOADED, DownloadUiState.FAILED ->
+                    downloadActions.downloadEpisode(
+                        account, itemId, episodeId,
+                        title = episode?.title,
+                        author = _showTitle.value,
+                    )
+                DownloadUiState.QUEUED, DownloadUiState.DOWNLOADING, DownloadUiState.COMPLETED ->
+                    downloadActions.deleteEpisode(itemId, episodeId)
+            }
         }
     }
 
