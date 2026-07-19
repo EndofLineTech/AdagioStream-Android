@@ -580,4 +580,189 @@ class AudiobookPlaybackCoordinatorTest {
         c.onTick()
         assertEquals("Chapter 1", player.lastSourceUpdate!!.chapterTitle)
     }
+
+    // ---- podcast episodes (beads_adagio-59p.2.2) ---------------------------
+
+    private val jan = "Thu, 01 Jan 2026 00:00:00 GMT"
+    private val feb = "Sun, 01 Feb 2026 00:00:00 GMT"
+
+    private val ep1 = AbsEpisode(id = "ep1", title = "Episode One", pubDate = jan)
+    private val ep2 = AbsEpisode(id = "ep2", title = "Episode Two", pubDate = feb)
+
+    private fun podcastContext() = PodcastPlaybackContext(
+        libraryItemId = "show1",
+        showTitle = "The Show",
+        episodes = listOf(ep1, ep2),
+        order = PodcastEpisodeOrder.NEWEST_FIRST,
+    )
+
+    /** One 1800s file; chapters deliberately non-empty to prove the episode
+     *  timeline discards them. */
+    private fun episodeSession(id: String, currentTime: Double? = 0.0) = AbsPlaybackSession(
+        id = id,
+        playMethod = 0,
+        currentTime = currentTime,
+        duration = 1800.0,
+        chapters = chapters,
+        audioTracks = listOf(track(0, 0.0, 1800.0)),
+        displayTitle = "Episode One",
+        mediaMetadata = AbsMetadata(title = "The Show", author = "Host"),
+    )
+
+    private fun stubEpisodeSessions() {
+        coEvery { api.openPlaybackSession("show1", "ep1", any(), any()) } returns episodeSession("esess1")
+        coEvery { api.openPlaybackSession("show1", "ep2", any(), any()) } returns episodeSession("esess2")
+        coEvery { api.getEpisodeProgress(any(), any()) } returns null
+    }
+
+    @Test
+    fun `playPodcastEpisode opens the episode session with episode metadata and no chapters`() = runTest {
+        stubEpisodeSessions()
+        coordinator().playPodcastEpisode(account, "show1", "ep1", podcastContext())
+
+        coVerify(exactly = 1) { api.openPlaybackSession("show1", "ep1", any(), any()) }
+        val source = player.lastPlay!!.source
+        assertEquals("Episode One", source.bookTitle) // Media3 title = episode title
+        assertEquals("The Show", source.author) // artist/subtitle = show title
+        assertEquals("show1", source.libraryItemId) // artwork = show cover
+        assertNull(source.chapterTitle) // episode sessions carry no chapters
+        assertEquals(1800.0, source.totalDurationSeconds, 1e-9)
+    }
+
+    @Test
+    fun `episode sync failure queues an update carrying the episodeId`() = runTest {
+        stubEpisodeSessions()
+        coEvery { api.syncSession(any(), any(), any(), any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+
+        val c = coordinator()
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        player.positionMs = 30_000
+        c.seekTo(30.0)
+
+        val queued = queue.snapshot().single()
+        assertEquals("show1", queued.libraryItemId)
+        assertEquals("ep1", queued.episodeId)
+        assertEquals(30.0, queued.currentTime, 1e-9)
+        // Strictly keyed (itemId, episodeId) — never collapsed onto the show key.
+        assertEquals(30.0, queue.pendingPosition("show1", "ep1")!!, 1e-9)
+        assertNull(queue.pendingPosition("show1"))
+
+        // The batch flush body carries the episodeId through to the server.
+        coEvery { api.syncSession(any(), any(), any(), any()) } returns Unit
+        queue.flush(api)
+        coVerify(exactly = 1) {
+            api.batchUpdateProgress(match { it.single().episodeId == "ep1" })
+        }
+    }
+
+    @Test
+    fun `episode resume uses the pending queue position keyed to that episode`() = runTest {
+        stubEpisodeSessions()
+        coEvery { api.batchUpdateProgress(any()) } throws AudiobookshelfApiException.ServerError(503)
+        queue.enqueue(
+            AbsProgressUpdate.of("show1", episodeId = "ep1", currentTime = 900.0, duration = 1800.0, lastUpdate = 1L),
+        )
+        coEvery { api.openPlaybackSession("show1", "ep1", any(), any()) } returns
+            episodeSession("esess1", currentTime = 50.0)
+
+        coordinator().playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        assertEquals(900_000L, player.lastPlay!!.startPositionMs)
+    }
+
+    @Test
+    fun `a pending position for a DIFFERENT episode of the show never applies`() = runTest {
+        stubEpisodeSessions()
+        coEvery { api.batchUpdateProgress(any()) } throws AudiobookshelfApiException.ServerError(503)
+        queue.enqueue(
+            AbsProgressUpdate.of("show1", episodeId = "ep2", currentTime = 900.0, duration = 1800.0, lastUpdate = 1L),
+        )
+        coEvery { api.openPlaybackSession("show1", "ep1", any(), any()) } returns
+            episodeSession("esess1", currentTime = 50.0)
+
+        coordinator().playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        assertEquals(50_000L, player.lastPlay!!.startPositionMs) // fell through to session time
+    }
+
+    @Test
+    fun `end of an episode auto-plays the next unplayed episode from the carried context`() = runTest {
+        stubEpisodeSessions()
+        val c = coordinator()
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        player.positionMs = 1_800_000
+
+        c.onFileEnded()
+
+        // Selector hydrated the candidate, then chained into ep2 — no show refetch.
+        coVerify(exactly = 1) { api.getEpisodeProgress("show1", "ep2") }
+        coVerify(exactly = 1) { api.openPlaybackSession("show1", "ep2", any(), any()) }
+        coVerify(exactly = 0) { api.getItem(any()) }
+        assertEquals(2, player.played.size)
+        assertEquals("Episode Two", player.played[1].source.bookTitle) // title from the carried context
+        // The finished episode's session was finalized before the next opened.
+        coVerify(exactly = 1) { api.closeSession("esess1") }
+    }
+
+    @Test
+    fun `end of the last unplayed episode stops instead of replaying older ones`() = runTest {
+        stubEpisodeSessions()
+        val c = coordinator()
+        c.playPodcastEpisode(account, "show1", "ep2", podcastContext())
+        player.positionMs = 1_800_000
+
+        c.onFileEnded() // ep2 is the newest — nextUnplayed can only stop
+
+        coVerify(exactly = 0) { api.openPlaybackSession("show1", "ep1", any(), any()) }
+        assertTrue(player.stopCount > 0)
+        coVerify(exactly = 1) { api.closeSession("esess2") }
+    }
+
+    @Test
+    fun `a finished next candidate is skipped during auto-play selection`() = runTest {
+        stubEpisodeSessions()
+        coEvery { api.getEpisodeProgress("show1", "ep2") } returns AbsMediaProgress(isFinished = true)
+        val c = coordinator()
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        player.positionMs = 1_800_000
+
+        c.onFileEnded() // only newer candidate is finished → stop
+
+        coVerify(exactly = 0) { api.openPlaybackSession("show1", "ep2", any(), any()) }
+        assertTrue(player.stopCount > 0)
+    }
+
+    @Test
+    fun `end of a book never consults the episode selector`() = runTest {
+        val c = coordinator()
+        c.playAudiobook(account, "book1", resumeOverride = 390.0)
+        player.positionMs = 150_000 // end of the last file
+
+        c.onFileEnded()
+
+        coVerify(exactly = 0) { api.getEpisodeProgress(any(), any()) }
+        coVerify(exactly = 1) { api.openPlaybackSession(any(), any(), any(), any()) } // no chained session
+        assertTrue(player.stopCount > 0)
+    }
+
+    @Test
+    fun `playPodcastEpisode without a context fetches the show once for auto-play`() = runTest {
+        stubEpisodeSessions()
+        coEvery { api.getItem("show1") } returns AbsLibraryItem(
+            id = "show1",
+            media = AbsMedia(
+                metadata = AbsMetadata(title = "The Show"),
+                episodes = listOf(ep1, ep2),
+            ),
+        )
+
+        val c = coordinator()
+        c.playPodcastEpisode(account, "show1", "ep1") // shelf/recent tap: no list in hand
+        coVerify(exactly = 1) { api.getItem("show1") }
+        assertEquals("The Show", player.lastPlay!!.source.author)
+
+        player.positionMs = 1_800_000
+        c.onFileEnded() // context was built from the fetch — auto-advance works
+        coVerify(exactly = 1) { api.openPlaybackSession("show1", "ep2", any(), any()) }
+        coVerify(exactly = 1) { api.getItem("show1") } // and never refetched
+    }
 }

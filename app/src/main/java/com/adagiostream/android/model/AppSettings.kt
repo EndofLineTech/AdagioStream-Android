@@ -1,5 +1,6 @@
 package com.adagiostream.android.model
 
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeEndBehavior
 import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
 import com.adagiostream.android.service.player.RepeatMode
 import kotlinx.serialization.KSerializer
@@ -107,6 +108,13 @@ data class AppSettings(
      * seam.
      */
     val podcastEpisodeSortOrder: PodcastEpisodeOrder = PodcastEpisodeOrder.NEWEST_FIRST,
+    /**
+     * What plays when a podcast episode ends (beads_adagio-59p.2.2, iOS
+     * parity: `podcastEpisodeEndBehavior`). Defaults to Next Unplayed — the
+     * iOS default; a garbage stored value also falls back there (see
+     * [com.adagiostream.android.service.audiobookshelf.PodcastEpisodeEndBehaviorSerializer]).
+     */
+    val podcastEpisodeEndBehavior: PodcastEpisodeEndBehavior = PodcastEpisodeEndBehavior.NEXT_UNPLAYED,
 ) {
     companion object {
         /** Poll interval choices surfaced in Settings (beads_adagio-59p.3.2). */

@@ -7,10 +7,14 @@ import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.account.AccountRepository
+import com.adagiostream.android.service.audiobookshelf.AbsEpisode
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeEntry
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
+import com.adagiostream.android.service.audiobookshelf.PodcastPlaybackContext
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.testutil.MainDispatcherRule
 import com.adagiostream.android.ui.screens.audiobooks.AbsLoadState
@@ -58,6 +62,15 @@ class PodcastLibraryViewModelTest {
 
     /** Counts expanded-item fetches per show id (Recent Episodes caching). */
     private val itemHits = ConcurrentHashMap<String, AtomicInteger>()
+
+    /** Records playbackLauncher invocations (beads_adagio-59p.2.2). */
+    data class LaunchedPlay(
+        val accountId: String,
+        val showId: String,
+        val episodeId: String,
+        val context: PodcastPlaybackContext?,
+    )
+    private val launchedPlays = mutableListOf<LaunchedPlay>()
 
     private val itemsBody = """{"results":[
         {"id":"showA","media":{"metadata":{"title":"Alpha Cast","author":"Ann"}}},
@@ -134,6 +147,9 @@ class PodcastLibraryViewModelTest {
                 factory = factory,
             ),
             persistenceService = persistenceService,
+            playbackLauncher = { account, showId, episodeId, context ->
+                launchedPlays += LaunchedPlay(account.id, showId, episodeId, context)
+            },
             savedStateHandle = SavedStateHandle(mapOf("libraryId" to "lib1")),
         )
     }
@@ -272,5 +288,69 @@ class PodcastLibraryViewModelTest {
 
         assertEquals(1, itemHits["showA"]?.get())
         assertEquals(1, itemHits["showB"]?.get())
+    }
+
+    // ---- playEpisode (beads_adagio-59p.2.2) --------------------------------
+
+    private fun entry(showId: String, episodeId: String, showTitle: String? = null) =
+        PodcastEpisodeEntry(
+            episode = AbsEpisode(id = episodeId, title = episodeId),
+            showLibraryItemId = showId,
+            showTitle = showTitle,
+        )
+
+    @Test
+    fun `shelf tap without cached episodes launches with a null context`() = runTest {
+        setAbsAccount()
+        viewModel.showsState.test {
+            assertEquals(AbsLoadState.Idle, awaitItem())
+            viewModel.load()
+            assertEquals(AbsLoadState.Loading, awaitItem())
+            assertEquals(AbsLoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        viewModel.playEpisode(entry("showA", "epA1", "Alpha Cast"))
+
+        val play = launchedPlays.single()
+        assertEquals("showA", play.showId)
+        assertEquals("epA1", play.episodeId)
+        // No episode list in hand — the coordinator fetches the show itself.
+        assertEquals(null, play.context)
+    }
+
+    @Test
+    fun `recent tap with cached episodes launches with the full context`() = runTest {
+        setAbsAccount()
+        viewModel.showsState.test {
+            assertEquals(AbsLoadState.Idle, awaitItem())
+            viewModel.load()
+            assertEquals(AbsLoadState.Loading, awaitItem())
+            assertEquals(AbsLoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.recentState.test {
+            assertEquals(AbsLoadState.Idle, awaitItem())
+            viewModel.setBrowseMode(PodcastLibraryViewModel.BrowseMode.RECENT)
+            assertEquals(AbsLoadState.Loading, awaitItem())
+            assertEquals(AbsLoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        viewModel.playEpisode(entry("showA", "epA-old", "Alpha Cast"))
+
+        val play = launchedPlays.single()
+        val context = play.context!!
+        assertEquals("showA", context.libraryItemId)
+        assertEquals("Alpha Cast", context.showTitle)
+        assertEquals(PodcastEpisodeOrder.NEWEST_FIRST, context.order)
+        // Wire-order episode list from the cached show detail.
+        assertEquals(listOf("epA-old", "epA-new"), context.episodes.map { it.id })
+    }
+
+    @Test
+    fun `playEpisode without an ABS account is a no-op`() = runTest {
+        viewModel.playEpisode(entry("showA", "epA1"))
+        assertEquals(emptyList<LaunchedPlay>(), launchedPlays)
     }
 }

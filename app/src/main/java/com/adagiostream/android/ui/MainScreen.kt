@@ -286,9 +286,7 @@ fun MainScreen(
                     ),
                 ) {
                     PodcastEpisodeListScreen(
-                        // Playback seam for 59p.2.2: replace this no-op with
-                        // open-session-and-play. Rows are inert until then.
-                        onEpisodeClick = { _, _ -> },
+                        // Episode taps play through the ViewModel (59p.2.2).
                         onBack = { navController.popBackStack() },
                     )
                 }

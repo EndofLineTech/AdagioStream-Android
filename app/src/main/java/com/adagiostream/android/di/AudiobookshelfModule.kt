@@ -11,6 +11,7 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
 import com.adagiostream.android.service.audiobookshelf.OfflineAudiobookSource
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.AudiobookPlaybackLauncher
+import com.adagiostream.android.service.player.PodcastPlaybackLauncher
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.Lazy
 import dagger.Module
@@ -117,5 +118,18 @@ object AudiobookshelfModule {
     ): AudiobookPlaybackLauncher =
         AudiobookPlaybackLauncher { account, libraryItemId, resumeOverride ->
             coordinator.playAudiobook(account, libraryItemId, resumeOverride)
+        }
+
+    /**
+     * Bridges episode taps (beads_adagio-59p.2.2) to the playback engine —
+     * pure delegation, same shape as [provideAudiobookPlaybackLauncher].
+     */
+    @Provides
+    @Singleton
+    fun providePodcastPlaybackLauncher(
+        coordinator: AudiobookPlaybackCoordinator,
+    ): PodcastPlaybackLauncher =
+        PodcastPlaybackLauncher { account, showLibraryItemId, episodeId, context ->
+            coordinator.playPodcastEpisode(account, showLibraryItemId, episodeId, context)
         }
 }

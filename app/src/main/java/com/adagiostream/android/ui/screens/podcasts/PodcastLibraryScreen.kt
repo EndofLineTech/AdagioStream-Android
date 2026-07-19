@@ -58,9 +58,8 @@ import com.adagiostream.android.ui.screens.podcasts.PodcastLibraryViewModel.Brow
  * show grid, and the flat recent-episodes list.
  *
  * Tapping a show opens its episode list. Tapping an episode ANYWHERE (recent
- * list, shelf) navigates to the show's episode list — the smaller consistent
- * option while playback is a later bead (59p.2.2 replaces this with
- * play/resume).
+ * list, shelf) plays/resumes it (beads_adagio-59p.2.2) via
+ * [PodcastLibraryViewModel.playEpisode].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,6 +123,7 @@ fun PodcastLibraryScreen(
                 episodeProgress = episodeProgress,
                 api = api,
                 onShowClick = onShowClick,
+                onEntryClick = viewModel::playEpisode,
                 onEpisodeVisible = viewModel::onEpisodeVisible,
                 onRetry = { viewModel.retry() },
             )
@@ -132,7 +132,7 @@ fun PodcastLibraryScreen(
                 state = recentState,
                 entries = recentEpisodes,
                 episodeProgress = episodeProgress,
-                onEntryClick = { onShowClick(it.showLibraryItemId) },
+                onEntryClick = viewModel::playEpisode,
                 onEpisodeVisible = viewModel::onEpisodeVisible,
                 onRetry = { viewModel.retryRecent() },
             )
@@ -148,6 +148,7 @@ private fun ShowGrid(
     episodeProgress: Map<String, AbsMediaProgress?>,
     api: AudiobookshelfApi?,
     onShowClick: (itemId: String) -> Unit,
+    onEntryClick: (PodcastEpisodeEntry) -> Unit,
     onEpisodeVisible: (showId: String, episodeId: String) -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -179,7 +180,7 @@ private fun ShowGrid(
                             entries = continueListening,
                             episodeProgress = episodeProgress,
                             api = api,
-                            onEntryClick = { onShowClick(it.showLibraryItemId) },
+                            onEntryClick = onEntryClick,
                             onEpisodeVisible = onEpisodeVisible,
                         )
                         HorizontalDivider(modifier = Modifier.padding(top = 12.dp))
@@ -196,8 +197,7 @@ private fun ShowGrid(
 
 /**
  * Horizontal shelf of in-progress podcast episodes, mirroring the audiobooks
- * shelf. Tap navigates to the show's episode list (playback lands in
- * 59p.2.2).
+ * shelf. Tap resumes the episode (beads_adagio-59p.2.2).
  */
 @Composable
 private fun ContinueListeningShelf(

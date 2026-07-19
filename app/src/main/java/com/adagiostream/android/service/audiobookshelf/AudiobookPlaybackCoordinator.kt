@@ -40,7 +40,10 @@ import kotlin.math.abs
  *    pause/seek/background/file-boundary; `SessionNotFound` reopens the
  *    session at the current position; close is best-effort on stop;
  *  - offline fallback: failed syncs land in [ABSProgressSyncQueue], flushed
- *    on app background and before opening a new session.
+ *    on app background and before opening a new session;
+ *  - podcast episodes (59p.2.2): single-file no-chapter sessions via
+ *    [playPodcastEpisode], progress keyed `(itemId, episodeId)`, and
+ *    end-of-episode auto-play-next per [PodcastEpisodeEndBehavior].
  *
  * Testability seams: [clock] (no wall-clock reads in logic), [onTick] (the
  * production ticker just calls it every second), [scope] (tests pass a
@@ -112,6 +115,16 @@ class AudiobookPlaybackCoordinator(
     private var coverUrl: String? = null
     private var totalDuration: Double = 0.0
     private var lastChapterTitle: String? = null
+
+    /** Non-null exactly when the active session is a podcast episode (59p.2.2). */
+    private var episodeId: String? = null
+
+    /** The show's episode list + order — lets end-of-episode pick the next
+     *  episode without refetching the show (iOS `PodcastPlaybackContext`). */
+    private var podcastContext: PodcastPlaybackContext? = null
+
+    /** The account the active session plays through — auto-play-next replays it. */
+    private var activeAccount: Account? = null
 
     /** Whether an audiobook session is active (drives every guard below). */
     @Volatile
@@ -202,9 +215,41 @@ class AudiobookPlaybackCoordinator(
      * This is the integration point the library-UI branch's
      * AudiobookPlaybackLauncher calls.
      */
-    suspend fun playAudiobook(account: Account, libraryItemId: String, resumeOverride: Double? = null) {
+    suspend fun playAudiobook(account: Account, libraryItemId: String, resumeOverride: Double? = null) =
+        startPlayback(account, libraryItemId, episodeId = null, context = null, resumeOverride = resumeOverride)
+
+    /**
+     * Plays one episode of a show as a single-file, no-chapter "book"
+     * (beads_adagio-59p.2.2, iOS parity: `playPodcastEpisode`): opens
+     * `POST /api/items/{show}/play/{episode}`, reuses the exact timeline/
+     * sync/queue machinery, and keys progress strictly by
+     * `(libraryItemId, episodeId)`. [context] carries the show's episode list
+     * + order so end-of-episode can auto-play the next one without refetching
+     * the show; pass null (shelf/recent-episode taps) and the coordinator
+     * fetches the show detail itself.
+     */
+    suspend fun playPodcastEpisode(
+        account: Account,
+        showLibraryItemId: String,
+        episodeId: String,
+        context: PodcastPlaybackContext? = null,
+        resumeOverride: Double? = null,
+    ) = startPlayback(account, showLibraryItemId, episodeId, context, resumeOverride)
+
+    /**
+     * Shared book/episode session bootstrap. [episodeId] null = book (chapters
+     * from the session); non-null = podcast episode (chapters forced empty,
+     * metadata = episode title / show title, progress keyed per-episode).
+     */
+    private suspend fun startPlayback(
+        account: Account,
+        libraryItemId: String,
+        episodeId: String?,
+        context: PodcastPlaybackContext?,
+        resumeOverride: Double?,
+    ) {
         val abs = account.type as? AccountType.Audiobookshelf ?: return
-        finalizeNow() // switching books: sync + close the previous session first
+        finalizeNow() // switching books/episodes: sync + close the previous session first
 
         val tokens = abs.accessToken?.let { at ->
             abs.refreshToken?.let { rt -> AudiobookshelfAuth.Tokens(at, rt) }
@@ -216,42 +261,68 @@ class AudiobookPlaybackCoordinator(
         // Offline-first (iOS ymf.6): push queued progress BEFORE asking the
         // server for a resume position, so reconnecting never rewinds.
         if (!offlineMode()) runCatching { queue.flush(api) }
-        val pendingPosition = queue.pendingPosition(libraryItemId)
+        val pendingPosition = queue.pendingPosition(libraryItemId, episodeId)
+
+        // Shelf/recent taps have no episode list in hand — fetch the show once
+        // here so auto-play-next works from every entry point. Best-effort: a
+        // failed fetch still plays the episode, it just can't auto-advance.
+        val ctx = if (episodeId != null && context == null) {
+            fetchPodcastContext(api, libraryItemId)
+        } else {
+            context
+        }
 
         // Offline gate (mirrors the LocalFirstResolver/offlineMode pattern):
         // the local copy is used when the app's offline mode is on, or when the
         // session open fails AND a complete download exists.
-        val session = if (offlineMode()) {
+        // ponytail: books only — episode downloads land in .2.3, so an episode
+        // session always requires the server.
+        val session = if (offlineMode() && episodeId == null) {
             null
         } else {
             try {
-                api.openPlaybackSession(libraryItemId, deviceId = deviceId())
+                api.openPlaybackSession(libraryItemId, episodeId = episodeId, deviceId = deviceId())
             } catch (e: Exception) {
-                DebugLogger.log("ABS playAudiobook: open session failed — ${e::class.simpleName}", DebugLogger.Category.PLAYER)
+                DebugLogger.log("ABS startPlayback: open session failed — ${e::class.simpleName}", DebugLogger.Category.PLAYER)
                 null
             }
         }
         if (session == null) {
-            val offline = offlineBooks?.completeBook(libraryItemId)
+            val offline = if (episodeId == null) offlineBooks?.completeBook(libraryItemId) else null
             if (offline == null || offline.timeline.files.isEmpty()) {
-                DebugLogger.log("ABS playAudiobook: no session and no complete download", DebugLogger.Category.PLAYER)
+                DebugLogger.log("ABS startPlayback: no session and no complete download", DebugLogger.Category.PLAYER)
                 return
             }
             startOffline(api, offline, resumeOverride, pendingPosition)
             return
         }
-        val timeline = AudiobookTimeline(session.audioTracks.orEmpty(), session.chapters.orEmpty())
+        // A podcast episode is a single-file, no-chapter session by contract.
+        val timeline = AudiobookTimeline(
+            session.audioTracks.orEmpty(),
+            if (episodeId == null) session.chapters.orEmpty() else emptyList(),
+        )
         if (timeline.files.isEmpty()) {
-            DebugLogger.log("ABS playAudiobook: session has no audio tracks", DebugLogger.Category.PLAYER)
+            DebugLogger.log("ABS startPlayback: session has no audio tracks", DebugLogger.Category.PLAYER)
             return
         }
 
         this.api = api
         this.timeline = timeline
         this.libraryItemId = libraryItemId
+        this.episodeId = episodeId
+        this.podcastContext = if (episodeId != null) ctx else null
+        this.activeAccount = account
         this.sessionId = session.id.takeIf { it.isNotEmpty() }
-        this.bookTitle = session.displayTitle ?: session.mediaMetadata?.title ?: "Audiobook"
-        this.author = session.mediaMetadata?.displayAuthor
+        if (episodeId != null) {
+            // Media3 metadata: title = episode title, artist = show title,
+            // artwork = show cover (all via the published PlaybackSource).
+            this.bookTitle = ctx?.episodes?.firstOrNull { it.id == episodeId }?.title
+                ?: session.displayTitle ?: "Episode"
+            this.author = ctx?.showTitle ?: session.mediaMetadata?.title
+        } else {
+            this.bookTitle = session.displayTitle ?: session.mediaMetadata?.title ?: "Audiobook"
+            this.author = session.mediaMetadata?.displayAuthor
+        }
         this.coverUrl = api.coverUrl(libraryItemId)?.toString()
         this.totalDuration = timeline.totalDuration
 
@@ -259,7 +330,7 @@ class AudiobookPlaybackCoordinator(
             override = resumeOverride,
             pendingQueue = pendingPosition,
             sessionTime = session.currentTime,
-            cached = lastKnownPositions[libraryItemId],
+            cached = lastKnownPositions[progressKey(libraryItemId, episodeId)],
         ).coerceIn(0.0, timeline.totalDuration)
 
         lastSyncedGlobal = resume
@@ -384,7 +455,9 @@ class AudiobookPlaybackCoordinator(
     /**
      * Natural end of the active file (libVLC EndReached routed here by the
      * wrapper): force-sync at the boundary, then chain the next file or finish
-     * the book.
+     * the book. A podcast episode is always a single file, so its end routes
+     * to the auto-play-next selector instead (59p.2.2) — books keep their
+     * exact chain-next-file-or-stop behavior (iOS `audiobookFileEnded`).
      */
     fun onFileEnded() {
         if (!active) return
@@ -393,11 +466,46 @@ class AudiobookPlaybackCoordinator(
         val endGlobal = (file.startOffset + file.duration).coerceAtMost(tl.totalDuration)
         lastObservedGlobal = endGlobal
         scope.launch { syncNow(endGlobal) }
+        val ctx = podcastContext
+        val epId = episodeId
+        if (epId != null) {
+            onEpisodeEnded(ctx, epId)
+            return
+        }
         val next = tl.fileAfter(file)
         if (next != null) {
             loadFileAt(next.startOffset)
         } else {
             stop() // book finished — finalize syncs at totalDuration
+        }
+    }
+
+    /**
+     * End-of-episode: apply the persisted [PodcastEpisodeEndBehavior] — select
+     * the next episode (hydrating candidate progress lazily via
+     * [selectNextEpisode]) and chain into it, or stop when nothing qualifies.
+     */
+    private fun onEpisodeEnded(ctx: PodcastPlaybackContext?, epId: String) {
+        val api = this.api
+        val account = activeAccount
+        if (ctx == null || api == null || account == null) {
+            stop()
+            return
+        }
+        scope.launch {
+            val behavior = persistenceService?.loadSettings()?.podcastEpisodeEndBehavior
+                ?: PodcastEpisodeEndBehavior.NEXT_UNPLAYED
+            val next = selectNextEpisode(ctx, epId, behavior) { candidateId ->
+                // A failed lookup reads as unplayed — same as the list badges.
+                runCatching { api.getEpisodeProgress(ctx.libraryItemId, candidateId) }.getOrNull()
+            }
+            if (next != null) {
+                DebugLogger.log("ABS podcast: episode $epId ended — auto-playing ${next.id}", DebugLogger.Category.PLAYER)
+                playPodcastEpisode(account, ctx.libraryItemId, next.id, ctx)
+            } else {
+                DebugLogger.log("ABS podcast: reached end of show ${ctx.libraryItemId}", DebugLogger.Category.PLAYER)
+                stop()
+            }
         }
     }
 
@@ -468,45 +576,47 @@ class AudiobookPlaybackCoordinator(
         if (!active) return
         val api = api ?: return
         val itemId = libraryItemId ?: return
+        val epId = episodeId
         lastSyncedGlobal = global
         lastSyncAtMs = clock()
-        lastKnownPositions[itemId] = global
+        lastKnownPositions[progressKey(itemId, epId)] = global
         // Review B1: cache UNCONDITIONALLY — online listening must keep the
         // download manifest's resume position fresh, or reboot + airplane mode
         // resumes at the stale download-time position. A WHERE-id no-op for
-        // books that aren't downloaded.
+        // books that aren't downloaded (and for episodes, which aren't).
         cachePositionToManifest(itemId, global)
         val sid = sessionId
         if (sid == null) {
-            enqueueProgress(itemId, global)
+            enqueueProgress(itemId, epId, global)
             return
         }
         try {
             api.syncSession(sid, currentTime = global, timeListened = timeListened, duration = totalDuration)
         } catch (e: AudiobookshelfApiException.SessionNotFound) {
-            reopenSession(api, itemId, global, timeListened)
+            reopenSession(api, itemId, epId, global, timeListened)
         } catch (e: Exception) {
-            enqueueProgress(itemId, global)
+            enqueueProgress(itemId, epId, global)
         }
     }
 
-    private suspend fun reopenSession(api: AudiobookshelfApi, itemId: String, global: Double, timeListened: Double) {
+    private suspend fun reopenSession(api: AudiobookshelfApi, itemId: String, epId: String?, global: Double, timeListened: Double) {
         try {
-            val session = api.openPlaybackSession(itemId, deviceId = deviceId())
+            val session = api.openPlaybackSession(itemId, episodeId = epId, deviceId = deviceId())
             sessionId = session.id.takeIf { it.isNotEmpty() }
             sessionId?.let {
                 api.syncSession(it, currentTime = global, timeListened = timeListened, duration = totalDuration)
             }
             DebugLogger.log("ABS sync: session reopened at ${global}s", DebugLogger.Category.PLAYER)
         } catch (_: Exception) {
-            enqueueProgress(itemId, global)
+            enqueueProgress(itemId, epId, global)
         }
     }
 
-    private fun enqueueProgress(itemId: String, global: Double) {
+    private fun enqueueProgress(itemId: String, epId: String?, global: Double) {
         queue.enqueue(
             AbsProgressUpdate.of(
                 libraryItemId = itemId,
+                episodeId = epId,
                 currentTime = global,
                 duration = totalDuration,
                 isFinished = totalDuration > 0 && global / totalDuration >= 1.0 - FINISHED_EPSILON,
@@ -581,6 +691,33 @@ class AudiobookPlaybackCoordinator(
     private fun offlineMode(): Boolean =
         persistenceService?.settings?.value?.offlineMode == true
 
+    /** In-memory last-known-position key — per-episode for podcasts, never
+     *  collapsed onto the show's book key (bead 59p.2.2 contract). */
+    private fun progressKey(itemId: String, episodeId: String?): String =
+        if (episodeId != null) "$itemId/$episodeId" else itemId
+
+    /**
+     * Builds the auto-play context for a context-less episode tap (shelf /
+     * recent list): one expanded show fetch + the persisted display order.
+     * Best-effort — on failure the episode still plays, with an empty list the
+     * selector can never advance from.
+     */
+    private suspend fun fetchPodcastContext(api: AudiobookshelfApi, showId: String): PodcastPlaybackContext {
+        val order = persistenceService?.loadSettings()?.podcastEpisodeSortOrder
+            ?: PodcastEpisodeOrder.NEWEST_FIRST
+        return runCatching {
+            val item = api.getItem(showId)
+            PodcastPlaybackContext(
+                libraryItemId = showId,
+                showTitle = item.media?.metadata?.title,
+                episodes = item.media?.episodes.orEmpty(),
+                order = order,
+            )
+        }.getOrElse {
+            PodcastPlaybackContext(showId, showTitle = null, episodes = emptyList(), order = order)
+        }
+    }
+
     private fun persistSpeed(value: Float) {
         val ps = persistenceService ?: return
         scope.launch {
@@ -594,6 +731,7 @@ class AudiobookPlaybackCoordinator(
         val api: AudiobookshelfApi,
         val sessionId: String?,
         val libraryItemId: String,
+        val episodeId: String?,
         val global: Double,
         val timeListened: Double,
         val duration: Double,
@@ -605,11 +743,13 @@ class AudiobookPlaybackCoordinator(
         tickerJob?.cancel()
         val api = this.api
         val itemId = libraryItemId
+        val epId = episodeId
         val final = if (api != null && itemId != null) {
             FinalState(
                 api = api,
                 sessionId = sessionId,
                 libraryItemId = itemId,
+                episodeId = epId,
                 global = lastObservedGlobal,
                 timeListened = (lastObservedGlobal - lastSyncedGlobal).coerceAtLeast(0.0),
                 duration = totalDuration,
@@ -617,18 +757,21 @@ class AudiobookPlaybackCoordinator(
         } else {
             null
         }
-        itemId?.let { lastKnownPositions[it] = lastObservedGlobal }
+        itemId?.let { lastKnownPositions[progressKey(it, epId)] = lastObservedGlobal }
         sessionId = null
         timeline = null
         currentFile = null
         libraryItemId = null
+        episodeId = null
+        podcastContext = null
+        activeAccount = null
         _nowPlaying.value = null
         this.api = null
         return final
     }
 
     private suspend fun runFinalSync(f: FinalState) {
-        lastKnownPositions[f.libraryItemId] = f.global
+        lastKnownPositions[progressKey(f.libraryItemId, f.episodeId)] = f.global
         cachePositionToManifest(f.libraryItemId, f.global) // B1: also on clean finalize
         try {
             val sid = f.sessionId
@@ -647,6 +790,7 @@ class AudiobookPlaybackCoordinator(
         queue.enqueue(
             AbsProgressUpdate.of(
                 libraryItemId = f.libraryItemId,
+                episodeId = f.episodeId,
                 currentTime = f.global,
                 duration = f.duration,
                 isFinished = f.duration > 0 && f.global / f.duration >= 1.0 - FINISHED_EPSILON,
