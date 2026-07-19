@@ -1,5 +1,6 @@
 package com.adagiostream.android.model
 
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
 import com.adagiostream.android.service.player.RepeatMode
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -97,6 +98,15 @@ data class AppSettings(
      * the UI offers the iOS-parity steps 0.75/1.0/1.25/1.5/1.75/2.0/3.0.
      */
     val audiobookSpeed: Float = 1.0f,
+    /**
+     * Podcast episode list order (beads_adagio-59p.2.1, iOS parity:
+     * `podcastEpisodeSortOrder`). Drives every episode list (By Show, Recent
+     * Episodes) and, in 59p.2.2, the auto-play-next walk direction — all via
+     * the one shared
+     * [sortedEpisodes][com.adagiostream.android.service.audiobookshelf.sortedEpisodes]
+     * seam.
+     */
+    val podcastEpisodeSortOrder: PodcastEpisodeOrder = PodcastEpisodeOrder.NEWEST_FIRST,
 ) {
     companion object {
         /** Poll interval choices surfaced in Settings (beads_adagio-59p.3.2). */

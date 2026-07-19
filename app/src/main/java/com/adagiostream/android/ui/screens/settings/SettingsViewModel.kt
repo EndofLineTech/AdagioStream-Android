@@ -15,6 +15,7 @@ import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
 import com.adagiostream.android.service.download.DownloadManager
 import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.metadata.ESPNScoreService
@@ -62,6 +63,12 @@ class SettingsViewModel @Inject constructor(
      * Android Auto browse-order setting, which is meaningless without one. */
     val hasSubsonicAccount: StateFlow<Boolean> = accountManager.accounts
         .map { accounts -> accounts.any { it.isEnabled && it.type is AccountType.Subsonic } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /** Whether an Audiobookshelf account is configured (beads_adagio-59p.2.1)
+     * — gates the podcast episode-order setting, meaningless without one. */
+    val hasAudiobookshelfAccount: StateFlow<Boolean> = accountManager.accounts
+        .map { accounts -> accounts.any { it.isEnabled && it.type is AccountType.Audiobookshelf } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val channelCount: StateFlow<Int> = accountManager.channels
@@ -202,6 +209,12 @@ class SettingsViewModel @Inject constructor(
     /** Android Auto browse-root section order (baw.7.1), Subsonic-only setting. */
     fun updateAutoSourceOrder(order: AutoSourceOrder) {
         _settings.value = _settings.value.copy(autoSourceOrder = order)
+        save()
+    }
+
+    /** Podcast episode list order (beads_adagio-59p.2.1), ABS-only setting. */
+    fun updatePodcastEpisodeSortOrder(order: PodcastEpisodeOrder) {
+        _settings.value = _settings.value.copy(podcastEpisodeSortOrder = order)
         save()
     }
 

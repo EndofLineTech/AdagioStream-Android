@@ -2,15 +2,14 @@ package com.adagiostream.android.ui.screens.audiobooks
 
 import com.adagiostream.android.service.audiobookshelf.AbsLibraryItem
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
+import com.adagiostream.android.service.audiobookshelf.isFinishedProgress
+import com.adagiostream.android.service.audiobookshelf.partitionItemsInProgress
 
 /**
  * Pure progress/state helpers for the Audiobookshelf browsing UI
  * (beads_adagio-59p.1.4). Kept top-level and side-effect free so the
  * shelf-filter and badge rules are directly unit-testable.
  */
-
-/** Threshold above which a book counts as finished even without the flag. */
-private const val FINISHED_PROGRESS = 0.99
 
 /**
  * Loading state shared by the audiobook screens — same transitions as
@@ -41,19 +40,21 @@ val AbsLibraryItem.bookProgress: Double
 /**
  * Whether the user has finished this book: the server's `isFinished` flag OR
  * progress >= 0.99 (epsilon per the iOS port — a book parked in the last
- * credits roll reads as finished).
+ * credits roll reads as finished). One shared epsilon with podcast episodes
+ * ([isFinishedProgress], beads_adagio-59p.2.1).
  */
 val AbsLibraryItem.isFinishedBook: Boolean
-    get() = userMediaProgress?.isFinished == true || bookProgress >= FINISHED_PROGRESS
+    get() = isFinishedProgress(userMediaProgress)
 
 /**
  * The Continue Listening shelf contents from a `GET /api/me/items-in-progress`
  * response: BOOKS ONLY (`recentEpisode != null` marks a podcast episode) that
  * are started and not finished. Server order (most-recently-listened first)
- * is preserved.
+ * is preserved. Delegates to the shared [partitionItemsInProgress] seam so the
+ * book shelf and the podcast episode shelf (beads_adagio-59p.2.1) can't drift.
  */
 fun continueListeningBooks(items: List<AbsLibraryItem>): List<AbsLibraryItem> =
-    items.filter { it.recentEpisode == null && it.bookProgress > 0.0 && !it.isFinishedBook }
+    partitionItemsInProgress(items).books
 
 /**
  * The progress badge for a book row: `null` when unstarted, "Finished" when

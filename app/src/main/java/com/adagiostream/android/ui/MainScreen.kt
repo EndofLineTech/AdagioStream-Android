@@ -40,6 +40,9 @@ import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
 import com.adagiostream.android.ui.screens.audiobooks.AudiobookDetailScreen
 import com.adagiostream.android.ui.screens.audiobooks.AudiobookListScreen
 import com.adagiostream.android.ui.screens.audiobooks.AudiobooksScreen
+import com.adagiostream.android.ui.screens.podcasts.PodcastEpisodeListScreen
+import com.adagiostream.android.ui.screens.podcasts.PodcastLibraryScreen
+import com.adagiostream.android.ui.screens.podcasts.PodcastsScreen
 import com.adagiostream.android.ui.screens.guide.GuideScreen
 import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
 import com.adagiostream.android.ui.screens.licenses.LicensesScreen
@@ -201,6 +204,9 @@ fun MainScreen(
                         onAudiobooksClick = {
                             navController.navigate(Screen.Audiobooks.route)
                         },
+                        onPodcastsClick = {
+                            navController.navigate(Screen.Podcasts.route)
+                        },
                         onAddAccountClick = {
                             navController.navigate(Screen.AddAccount.createRoute())
                         },
@@ -242,6 +248,47 @@ fun MainScreen(
                     ),
                 ) {
                     AudiobookDetailScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                // Audiobookshelf podcast browse routes (beads_adagio-59p.2.1)
+                composable(Screen.Podcasts.route) {
+                    PodcastsScreen(
+                        onOpenLibrary = { libraryId, replace ->
+                            navController.navigate(Screen.PodcastLibrary.createRoute(libraryId)) {
+                                // Single-library auto-forward replaces the picker
+                                // so Back returns to the Library tab.
+                                if (replace) {
+                                    popUpTo(Screen.Podcasts.route) { inclusive = true }
+                                }
+                            }
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = Screen.PodcastLibrary.route,
+                    arguments = listOf(
+                        navArgument("libraryId") { type = NavType.StringType },
+                    ),
+                ) {
+                    PodcastLibraryScreen(
+                        onShowClick = { itemId ->
+                            navController.navigate(Screen.PodcastShowDetail.createRoute(itemId))
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = Screen.PodcastShowDetail.route,
+                    arguments = listOf(
+                        navArgument("itemId") { type = NavType.StringType },
+                    ),
+                ) {
+                    PodcastEpisodeListScreen(
+                        // Playback seam for 59p.2.2: replace this no-op with
+                        // open-session-and-play. Rows are inert until then.
+                        onEpisodeClick = { _, _ -> },
                         onBack = { navController.popBackStack() },
                     )
                 }
