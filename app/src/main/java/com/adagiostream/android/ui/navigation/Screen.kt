@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
@@ -108,6 +109,33 @@ sealed class Screen(
      * Reached from Settings → Downloaded Music.
      */
     data object DownloadedMusic : Screen("music/downloads", "Downloaded Music", Icons.Default.Download)
+
+    /**
+     * Audiobookshelf entry (beads_adagio-59p.1.4) — library picker when the
+     * server has >1 book library, otherwise auto-forwards to
+     * [AudiobookLibrary]. Reached from an "Audiobooks" row on the Library tab
+     * (shown only when an Audiobookshelf account exists) — same pattern as
+     * the Albums/Genres/Playlists rows, no bottom-nav slot.
+     */
+    data object Audiobooks : Screen("music/audiobooks", "Audiobooks", Icons.AutoMirrored.Filled.MenuBook)
+
+    /** Book list for one Audiobookshelf library (beads_adagio-59p.1.4). */
+    data object AudiobookLibrary : Screen(
+        route = "music/audiobooks/library/{libraryId}",
+        label = "Audiobooks",
+        icon = Icons.AutoMirrored.Filled.MenuBook,
+    ) {
+        fun createRoute(libraryId: String): String = "music/audiobooks/library/$libraryId"
+    }
+
+    /** Audiobook detail — one book's header + progress (beads_adagio-59p.1.4). */
+    data object AudiobookDetail : Screen(
+        route = "music/audiobooks/item/{itemId}",
+        label = "Audiobook",
+        icon = Icons.AutoMirrored.Filled.MenuBook,
+    ) {
+        fun createRoute(itemId: String): String = "music/audiobooks/item/$itemId"
+    }
 
     /**
      * Server-side playlist list (baw.4.2).

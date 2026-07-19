@@ -172,6 +172,7 @@ data class AbsMetadata(
     val title: String? = null,
     val authorName: String? = null,
     val author: String? = null,
+    val description: String? = null,
 ) {
     val displayAuthor: String? get() = authorName ?: author
 }

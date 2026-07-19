@@ -9,6 +9,7 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.player.AudiobookPlaybackLauncher
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.Lazy
 import dagger.Module
@@ -100,4 +101,18 @@ object AudiobookshelfModule {
             },
         )
     }
+
+    /**
+     * Bridges the browsing UI's Resume/Play affordance (beads_adagio-59p.1.4)
+     * to the playback engine (59p.1.5). Pure delegation — the coordinator
+     * owns session open/close, resume position, and token rotation.
+     */
+    @Provides
+    @Singleton
+    fun provideAudiobookPlaybackLauncher(
+        coordinator: AudiobookPlaybackCoordinator,
+    ): AudiobookPlaybackLauncher =
+        AudiobookPlaybackLauncher { account, libraryItemId, resumeOverride ->
+            coordinator.playAudiobook(account, libraryItemId, resumeOverride)
+        }
 }

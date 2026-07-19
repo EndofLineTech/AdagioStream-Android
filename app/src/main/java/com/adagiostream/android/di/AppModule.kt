@@ -14,6 +14,8 @@ import coil3.ImageLoader
 import coil3.disk.DiskCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.CachePolicy
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfCoverArtFetcher
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfCoverArtKeyer
 import com.adagiostream.android.service.navidrome.NavidromeCoverArtFetcher
 import com.adagiostream.android.service.navidrome.NavidromeCoverArtKeyer
 import com.adagiostream.android.service.navidrome.NavidromeCoverArtRequest
@@ -116,6 +118,10 @@ object AppModule {
                 // uses it during cache-key resolution for NavidromeCoverArtRequest.
                 add(NavidromeCoverArtKeyer())
                 add(NavidromeCoverArtFetcher.Factory(client))
+                // Audiobookshelf covers: same pattern — stable key (host+item+width),
+                // tokened URL resolved at fetch time (beads_adagio-59p.1.4).
+                add(AudiobookshelfCoverArtKeyer())
+                add(AudiobookshelfCoverArtFetcher.Factory(client))
             }
             .memoryCachePolicy(CachePolicy.ENABLED)
             .diskCache {

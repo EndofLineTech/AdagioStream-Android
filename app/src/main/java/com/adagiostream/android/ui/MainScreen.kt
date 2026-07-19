@@ -37,6 +37,9 @@ import com.adagiostream.android.ui.screens.accounts.AccountsScreen
 import com.adagiostream.android.ui.screens.accounts.AddAccountScreen
 import com.adagiostream.android.ui.screens.channels.ChannelsScreen
 import com.adagiostream.android.ui.screens.favorites.FavoritesScreen
+import com.adagiostream.android.ui.screens.audiobooks.AudiobookDetailScreen
+import com.adagiostream.android.ui.screens.audiobooks.AudiobookListScreen
+import com.adagiostream.android.ui.screens.audiobooks.AudiobooksScreen
 import com.adagiostream.android.ui.screens.guide.GuideScreen
 import com.adagiostream.android.ui.screens.groups.GroupManagementScreen
 import com.adagiostream.android.ui.screens.licenses.LicensesScreen
@@ -195,9 +198,51 @@ fun MainScreen(
                         onPlaylistsClick = {
                             navController.navigate(Screen.NavidromePlaylistList.route)
                         },
+                        onAudiobooksClick = {
+                            navController.navigate(Screen.Audiobooks.route)
+                        },
                         onAddAccountClick = {
                             navController.navigate(Screen.AddAccount.createRoute())
                         },
+                    )
+                }
+                // Audiobookshelf browse routes (beads_adagio-59p.1.4)
+                composable(Screen.Audiobooks.route) {
+                    AudiobooksScreen(
+                        onOpenLibrary = { libraryId, replace ->
+                            navController.navigate(Screen.AudiobookLibrary.createRoute(libraryId)) {
+                                // Single-library auto-forward replaces the picker so
+                                // Back returns to the Library tab, not a re-forwarding
+                                // picker.
+                                if (replace) {
+                                    popUpTo(Screen.Audiobooks.route) { inclusive = true }
+                                }
+                            }
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = Screen.AudiobookLibrary.route,
+                    arguments = listOf(
+                        navArgument("libraryId") { type = NavType.StringType },
+                    ),
+                ) {
+                    AudiobookListScreen(
+                        onBookClick = { itemId ->
+                            navController.navigate(Screen.AudiobookDetail.createRoute(itemId))
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = Screen.AudiobookDetail.route,
+                    arguments = listOf(
+                        navArgument("itemId") { type = NavType.StringType },
+                    ),
+                ) {
+                    AudiobookDetailScreen(
+                        onBack = { navController.popBackStack() },
                     )
                 }
                 // Search screen (baw.4.1)

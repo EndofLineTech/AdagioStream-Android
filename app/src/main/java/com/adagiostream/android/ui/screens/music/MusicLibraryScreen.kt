@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MusicNote
@@ -63,6 +64,7 @@ fun MusicLibraryScreen(
     onAlbumsClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
     onPlaylistsClick: () -> Unit = {},
+    onAudiobooksClick: () -> Unit = {},
     onAddAccountClick: () -> Unit = {},
 ) {
     val api by viewModel.api.collectAsStateWithLifecycle()
@@ -70,6 +72,7 @@ fun MusicLibraryScreen(
     val artists by viewModel.artists.collectAsStateWithLifecycle()
     val offlineMode by viewModel.offlineMode.collectAsStateWithLifecycle()
     val downloadedTracks by viewModel.downloadedTracks.collectAsStateWithLifecycle()
+    val audiobooksAvailable by viewModel.audiobooksAvailable.collectAsStateWithLifecycle()
 
     // Load artists on first appearance when an API is available (suppressed in
     // offline mode — baw.12).
@@ -107,7 +110,15 @@ fun MusicLibraryScreen(
             // No account configured takes precedence over the offline banner
             // (beads_adagio-15x.3) — the Library tab is now always visible, and
             // without an account there's nothing to browse online or offline.
-            api == null -> NoAccountEmptyState(onAddAccountClick = onAddAccountClick)
+            // With an Audiobookshelf account but no music server, the
+            // Audiobooks row still renders above the prompt (beads_adagio-59p.1.4).
+            api == null -> Column(modifier = Modifier.fillMaxSize()) {
+                if (audiobooksAvailable && !offlineMode) {
+                    AudiobooksBrowseRow(onClick = onAudiobooksClick)
+                    HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
+                }
+                NoAccountEmptyState(onAddAccountClick = onAddAccountClick)
+            }
 
             // Offline mode replaces the whole browse UI with the downloaded-only
             // list under a persistent banner (baw.12 — mirrors iOS offlineBrowser).
@@ -186,10 +197,12 @@ fun MusicLibraryScreen(
                 ArtistList(
                     artists = artists,
                     api = api,
+                    showAudiobooks = audiobooksAvailable,
                     onArtistClick = onArtistClick,
                     onGenresClick = onGenresClick,
                     onAlbumsClick = onAlbumsClick,
                     onPlaylistsClick = onPlaylistsClick,
+                    onAudiobooksClick = onAudiobooksClick,
                 )
             }
         }
@@ -336,10 +349,12 @@ private fun NoAccountEmptyState(onAddAccountClick: () -> Unit = {}) {
 private fun ArtistList(
     artists: List<Artist>,
     api: com.adagiostream.android.service.navidrome.NavidromeApi?,
+    showAudiobooks: Boolean,
     onArtistClick: (artistId: String) -> Unit,
     onGenresClick: () -> Unit,
     onAlbumsClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
+    onAudiobooksClick: () -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         // Browse-by-album-list shortcut (baw.9.1) — shown above the artist list.
@@ -358,6 +373,15 @@ private fun ArtistList(
         item {
             PlaylistsBrowseRow(onClick = onPlaylistsClick)
             HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
+        }
+
+        // Audiobookshelf shortcut (beads_adagio-59p.1.4) — only when an ABS
+        // account exists.
+        if (showAudiobooks) {
+            item {
+                AudiobooksBrowseRow(onClick = onAudiobooksClick)
+                HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
+            }
         }
 
         items(artists, key = { it.id }) { artist ->
@@ -395,6 +419,44 @@ private fun PlaylistsBrowseRow(onClick: () -> Unit) {
 
         Text(
             text = "Playlists",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+/** Audiobookshelf browse shortcut (beads_adagio-59p.1.4). */
+@Composable
+private fun AudiobooksBrowseRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(44.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Text(
+            text = "Audiobooks",
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.weight(1f),
         )
