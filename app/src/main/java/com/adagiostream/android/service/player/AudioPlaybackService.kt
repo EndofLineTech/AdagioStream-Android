@@ -40,7 +40,11 @@ import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.persistence.LastPlayed
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.audiobookshelf.AbsLibrary
+import com.adagiostream.android.service.audiobookshelf.AbsLibraryItem
 import com.adagiostream.android.service.audiobookshelf.AudiobookPlaybackCoordinator
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.DebugLogger.Category.AUTO
@@ -73,6 +77,8 @@ class AudioPlaybackService : MediaLibraryService() {
     @Inject lateinit var musicLibraryRepository: MusicLibraryRepository
     @Inject lateinit var navidromeApiFactory: NavidromeApiFactory
     @Inject lateinit var audiobookPlaybackCoordinator: AudiobookPlaybackCoordinator
+    @Inject lateinit var audiobookshelfApiProvider: AudiobookshelfApiProvider
+    @Inject lateinit var audiobookPlaybackLauncher: AudiobookPlaybackLauncher
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -114,6 +120,26 @@ class AudioPlaybackService : MediaLibraryService() {
      * root node (baw.7.1, iOS parity: random 100).
      */
     private val cachedRandomSongs = mutableListOf<Track>()
+
+    // ---- Audiobookshelf browse state (beads_adagio-59p.1.7) ----------------
+
+    /**
+     * Resolved [AudiobookshelfApi] for the first enabled Audiobookshelf
+     * account, or null when none exists. Updated reactively in [onCreate];
+     * a cold browse before the first accounts emission resolves through
+     * [resolveAbsApiNow] (mirrors [resolveSubsonicApiNow]).
+     */
+    private var absApi: AudiobookshelfApi? = null
+
+    /**
+     * Book-type libraries for the "Audiobooks" root, or null when not fetched
+     * yet. Populated on-demand from the first browse (never at service init),
+     * following the baw.7.1 cache + notifyChildrenChanged pattern.
+     */
+    private var cachedAbsLibraries: List<AbsLibrary>? = null
+
+    /** Per-library book cache keyed by ABS library ID (on-demand, baw.7.1 pattern). */
+    private val cachedAbsBooks = mutableMapOf<String, List<AbsLibraryItem>>()
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
@@ -260,8 +286,20 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
                 val apiChanged = newApi?.let { true } ?: (subsonicApi != null)
                 subsonicApi = newApi
-                if (apiChanged) {
-                    // Notify Root children so the Music node appears/disappears
+                // Audiobookshelf account changes (beads_adagio-59p.1.7): the
+                // provider caches per account id+host, so a token rotation
+                // returns the SAME instance (no cache reset); an account
+                // add/edit/delete returns a different one → drop the browse
+                // caches so stale libraries/books never survive an account swap.
+                val newAbsApi = audiobookshelfApiProvider.apiFrom(accounts)
+                val absChanged = newAbsApi !== absApi
+                absApi = newAbsApi
+                if (absChanged) {
+                    cachedAbsLibraries = null
+                    cachedAbsBooks.clear()
+                }
+                if (apiChanged || absChanged) {
+                    // Notify Root children so the Music/Audiobooks nodes appear/disappear
                     val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
                     val rootChildCount = currentRootChildCount()
                     controllers.forEach { controller ->
@@ -506,10 +544,11 @@ class AudioPlaybackService : MediaLibraryService() {
      */
     private fun currentRootChildCount(): Int {
         val hasSubsonic = accountManager.accounts.value.any { it.isEnabled && it.type is AccountType.Subsonic }
+        val hasAudiobookshelf = accountManager.accounts.value.any { it.isEnabled && it.type is AccountType.Audiobookshelf }
         val nonEmptyPlaylistCount = customPlaylistManager.playlists.value
             .count { playlist -> playlist.groups.sumOf { it.entries.size } > 0 }
         val groupCount = accountManager.groups.value.size
-        return 1 + nonEmptyPlaylistCount + groupCount + (if (hasSubsonic) 1 else 0)
+        return 1 + nonEmptyPlaylistCount + groupCount + (if (hasSubsonic) 1 else 0) + (if (hasAudiobookshelf) 1 else 0)
     }
 
     private fun channelListForContext(channel: Channel): List<Channel> {
@@ -711,6 +750,31 @@ class AudioPlaybackService : MediaLibraryService() {
             // routed separately from the IPTV channel-resolution path below since
             // the queue comes from musicPlaybackCoordinator, not vlcPlayerWrapper directly.
             val tappedItem = mediaItems.singleOrNull()
+
+            // Audiobook tap (beads_adagio-59p.1.7): resume via the shared
+            // AudiobookPlaybackLauncher path — same as the detail screen's
+            // Resume button (resumeOverride null so the server position wins).
+            // The launch is fire-and-forget: VLCSessionPlayer rebuilds the
+            // session state from PlaybackSource.Audiobook once the coordinator
+            // opens the session, so the returned item is only the tap echo.
+            if (tappedItem != null && tappedItem.mediaId.startsWith(AudiobookAutoMediaMapper.AUDIOBOOK_BOOK_PREFIX)) {
+                val bookId = AudiobookAutoMediaMapper.bookIdFrom(tappedItem.mediaId)
+                val account = accountManager.accounts.value
+                    .firstOrNull { it.isEnabled && it.type is AccountType.Audiobookshelf }
+                if (account != null) {
+                    serviceScope.launch {
+                        try {
+                            audiobookPlaybackLauncher.play(account, bookId, null)
+                        } catch (e: Exception) {
+                            DebugLogger.log("ABS Auto book tap failed: ${e::class.simpleName}", AUTO)
+                        }
+                    }
+                } else {
+                    DebugLogger.log("ABS Auto book tap: no enabled Audiobookshelf account", AUTO)
+                }
+                return Futures.immediateFuture(listOf(tappedItem))
+            }
+
             if (tappedItem != null && tappedItem.mediaId.startsWith(MusicAutoMediaMapper.MUSIC_TRACK_PREFIX)) {
                 val future = SettableFuture.create<List<MediaItem>>()
                 serviceScope.launch {
@@ -888,8 +952,18 @@ class AudioPlaybackService : MediaLibraryService() {
                         val hasSubsonic = accountManager.accounts.value.any { acct ->
                             acct.isEnabled && acct.type is AccountType.Subsonic
                         }
+                        val hasAudiobookshelf = accountManager.accounts.value.any { acct ->
+                            acct.isEnabled && acct.type is AccountType.Audiobookshelf
+                        }
                         val musicItems = if (hasSubsonic) {
                             listOf(MusicAutoMediaMapper.musicRootItem())
+                        } else {
+                            emptyList()
+                        }
+                        // "Audiobooks" rides in the media section next to Music
+                        // (beads_adagio-59p.1.7).
+                        val mediaItems = musicItems + if (hasAudiobookshelf) {
+                            listOf(AudiobookAutoMediaMapper.audiobooksRootItem())
                         } else {
                             emptyList()
                         }
@@ -931,7 +1005,7 @@ class AudioPlaybackService : MediaLibraryService() {
                         } else {
                             AutoSourceOrder.STREAMING_FIRST
                         }
-                        if (order == AutoSourceOrder.MUSIC_FIRST) musicItems + channelItems else channelItems + musicItems
+                        if (order == AutoSourceOrder.MUSIC_FIRST) mediaItems + channelItems else channelItems + mediaItems
                     }
                     FAVORITES_ID -> {
                         favorites.forEach { DebugLogger.log("  Favorite: id=${it.id}, name=${it.name}", AUTO) }
@@ -958,6 +1032,12 @@ class AudioPlaybackService : MediaLibraryService() {
                         // here so they never fall through to the IPTV group-name lookup.
                         MusicAutoMediaMapper.isMusicId(parentId) ->
                             handleMusicChildren(parentId)
+
+                        // ---- Audiobook browse tree (beads_adagio-59p.1.7) — all
+                        // audiobooks* IDs are handled here so they never fall
+                        // through to the IPTV group-name lookup.
+                        AudiobookAutoMediaMapper.isAudiobookId(parentId) ->
+                            handleAudiobookChildren(parentId)
 
                         parentId.startsWith(CUSTOM_PLAYLIST_PREFIX) -> {
                             val playlistId = parentId.removePrefix(CUSTOM_PLAYLIST_PREFIX)
@@ -1224,6 +1304,104 @@ class AudioPlaybackService : MediaLibraryService() {
             }
         }
     }
+
+    // =========================================================================
+    // Audiobook browse helpers (beads_adagio-59p.1.7)
+    // =========================================================================
+
+    /**
+     * Routes an audiobooks* [parentId] to cache-backed children — the exact
+     * baw.7.1 pattern: never blocks on the network, a cache miss fires a
+     * background fetch and returns an empty list now, and the fetch fires
+     * [MediaLibrarySession.notifyChildrenChanged] when data lands. Fetch
+     * failures are logged (never the tokened URLs) and leave the node empty.
+     */
+    private fun handleAudiobookChildren(parentId: String): List<MediaItem> {
+        DebugLogger.log("handleAudiobookChildren() parentId=$parentId", AUTO)
+        return when {
+            parentId == AudiobookAutoMediaMapper.AUDIOBOOKS_ROOT_ID -> {
+                val libraries = cachedAbsLibraries
+                if (libraries == null) {
+                    fetchAbsLibraries(parentId)
+                    emptyList()
+                } else {
+                    AudiobookAutoMediaMapper.audiobooksRootChildren(
+                        bookLibraries = libraries,
+                        booksFor = { libraryId -> absBooksOrFetch(libraryId, parentId) },
+                        coverArtUri = ::absCoverArtUri,
+                    )
+                }
+            }
+            parentId.startsWith(AudiobookAutoMediaMapper.AUDIOBOOK_LIBRARY_PREFIX) -> {
+                val libraryId = AudiobookAutoMediaMapper.libraryIdFrom(parentId)
+                AudiobookAutoMediaMapper.bookItems(
+                    absBooksOrFetch(libraryId, parentId) ?: emptyList(),
+                    ::absCoverArtUri,
+                )
+            }
+            else -> emptyList()
+        }
+    }
+
+    /**
+     * The cached books for [libraryId], or null after firing a background
+     * fetch that will refresh [notifyParentId] when it lands (baw.7.1 —
+     * mirrors the playlist-track cache-miss branch in [handleMusicChildren]).
+     */
+    private fun absBooksOrFetch(libraryId: String, notifyParentId: String): List<AbsLibraryItem>? {
+        cachedAbsBooks[libraryId]?.let { return it }
+        val api = resolveAbsApiNow() ?: return null
+        serviceScope.launch {
+            try {
+                val books = api.getLibraryItems(libraryId)
+                cachedAbsBooks[libraryId] = books
+                DebugLogger.log("ABS Auto: ${books.size} books cached for library", AUTO)
+                notifyChildrenChangedAll(notifyParentId, books.size)
+            } catch (e: Exception) {
+                DebugLogger.log("ABS Auto book fetch failed: ${e::class.simpleName}", AUTO)
+            }
+        }
+        return null
+    }
+
+    /** Background-fetches the book-type libraries, then refreshes [notifyParentId]. */
+    private fun fetchAbsLibraries(notifyParentId: String) {
+        val api = resolveAbsApiNow() ?: return
+        serviceScope.launch {
+            try {
+                val bookLibraries = api.getLibraries().filter { it.isBook }
+                cachedAbsLibraries = bookLibraries
+                DebugLogger.log("ABS Auto: ${bookLibraries.size} book libraries cached", AUTO)
+                notifyChildrenChangedAll(notifyParentId, bookLibraries.size)
+            } catch (e: Exception) {
+                DebugLogger.log("ABS Auto library fetch failed: ${e::class.simpleName}", AUTO)
+            }
+        }
+    }
+
+    /** Fires [MediaLibrarySession.notifyChildrenChanged] for every connected controller. */
+    private fun notifyChildrenChangedAll(parentId: String, itemCount: Int) {
+        val controllers = mediaLibrarySession?.connectedControllers ?: emptyList()
+        controllers.forEach { controller ->
+            mediaLibrarySession?.notifyChildrenChanged(controller, parentId, itemCount, null)
+        }
+    }
+
+    /**
+     * Resolves the [AudiobookshelfApi] for the first enabled Audiobookshelf
+     * account synchronously (mirrors [resolveSubsonicApiNow]) — a cold browse
+     * can arrive before the reactive accounts watcher's first emission.
+     */
+    private fun resolveAbsApiNow(): AudiobookshelfApi? =
+        absApi ?: audiobookshelfApiProvider.apiFrom(accountManager.accounts.value)?.also { absApi = it }
+
+    /**
+     * Tokened cover-art [Uri] for an ABS library item (`?token=` in the query,
+     * like the Subsonic [coverArtUri] — Auto's image loader can't set headers).
+     * NEVER log this URI.
+     */
+    private fun absCoverArtUri(itemId: String): Uri? =
+        absApi?.coverUrl(itemId)?.let { Uri.parse(it.toString()) }
 
     /**
      * Persists [source]'s queue/index/current position as the last-played
