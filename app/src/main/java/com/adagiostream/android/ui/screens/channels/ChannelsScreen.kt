@@ -1,6 +1,7 @@
 package com.adagiostream.android.ui.screens.channels
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,8 +13,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.DropdownMenu
@@ -31,12 +35,12 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,9 +79,10 @@ fun ChannelsScreen(
     val epgEntries by viewModel.epgEntries.collectAsStateWithLifecycle()
     val customPlaylists by viewModel.customPlaylists.collectAsStateWithLifecycle()
     val favorites by favoritesViewModel.favorites.collectAsStateWithLifecycle()
-    val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
+    val expandedGroups by viewModel.expandedGroups.collectAsStateWithLifecycle()
     var showEPGChannel by remember { mutableStateOf<Channel?>(null) }
     var addToPlaylistChannel by remember { mutableStateOf<Channel?>(null) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -103,6 +108,30 @@ fun ChannelsScreen(
             )
             IconButton(onClick = onOpenGuide) {
                 Icon(Icons.Default.CalendarMonth, contentDescription = "Program guide")
+            }
+            Box {
+                IconButton(onClick = { showOverflowMenu = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Group options")
+                }
+                DropdownMenu(
+                    expanded = showOverflowMenu,
+                    onDismissRequest = { showOverflowMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Expand All") },
+                        onClick = {
+                            showOverflowMenu = false
+                            viewModel.expandAllGroups()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Collapse All") },
+                        onClick = {
+                            showOverflowMenu = false
+                            viewModel.collapseAllGroups()
+                        },
+                    )
+                }
             }
         }
 
@@ -142,29 +171,38 @@ fun ChannelsScreen(
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     if (shouldShowPinnedFavorites(searchQuery, favorites.size)) {
+                        val favoritesExpanded =
+                            isSectionExpanded(FAVORITES_EXPAND_KEY, searchQuery, expandedGroups)
                         item(key = "pinned_favorites_header") {
-                            PinnedFavoritesHeader(onManageClick = onManageFavorites)
-                        }
-                        items(favorites, key = { "pinned_favorite_${it.id}" }) { channel ->
-                            val epgProgram = channel.epgChannelID?.let { epgId ->
-                                epgEntries[epgId]?.firstOrNull { it.isCurrentlyAiring }?.title
-                            }
-                            ChannelListItem(
-                                channel = channel,
-                                onClick = { favoritesViewModel.playChannel(channel) },
-                                onFavoriteToggle = { favoritesViewModel.toggleFavorite(channel) },
-                                trackMetadata = feedMetadata[channel.id],
-                                espnGame = espnGames[channel.id],
-                                currentProgram = epgProgram,
-                                onLongClick = { addToPlaylistChannel = channel },
+                            PinnedFavoritesHeader(
+                                count = favorites.size,
+                                isExpanded = favoritesExpanded,
+                                onToggle = { viewModel.toggleGroupExpanded(FAVORITES_EXPAND_KEY) },
+                                onManageClick = onManageFavorites,
                             )
+                        }
+                        if (favoritesExpanded) {
+                            items(favorites, key = { "pinned_favorite_${it.id}" }) { channel ->
+                                val epgProgram = channel.epgChannelID?.let { epgId ->
+                                    epgEntries[epgId]?.firstOrNull { it.isCurrentlyAiring }?.title
+                                }
+                                ChannelListItem(
+                                    channel = channel,
+                                    onClick = { favoritesViewModel.playChannel(channel) },
+                                    onFavoriteToggle = { favoritesViewModel.toggleFavorite(channel) },
+                                    trackMetadata = feedMetadata[channel.id],
+                                    espnGame = espnGames[channel.id],
+                                    currentProgram = epgProgram,
+                                    onLongClick = { addToPlaylistChannel = channel },
+                                )
+                            }
                         }
                         item(key = "pinned_favorites_divider") {
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                         }
                     }
                     groups.forEach { group ->
-                        val isExpanded = expandedGroups[group.name] ?: false
+                        val isExpanded = isSectionExpanded(group.name, searchQuery, expandedGroups)
 
                         item(key = "header_${group.name}") {
                             GroupHeaderWithMenu(
@@ -172,9 +210,7 @@ fun ChannelsScreen(
                                 count = group.channels.size,
                                 isExpanded = isExpanded,
                                 isFavorite = viewModel.isGroupFavorite(group.name),
-                                onToggle = {
-                                    expandedGroups[group.name] = !isExpanded
-                                },
+                                onToggle = { viewModel.toggleGroupExpanded(group.name) },
                                 onToggleFavorite = { viewModel.toggleGroupFavorite(group.name) },
                                 onHide = { viewModel.hideGroup(group.name) },
                             )
@@ -230,17 +266,30 @@ fun ChannelsScreen(
 }
 
 /**
- * Header for the pinned Favorites section atop the channel list (beads_adagio-15x.1).
+ * Header for the Favorites section atop the channel list (beads_adagio-15x.1),
+ * collapsible like every group section (beads_adagio-59p.4.1) via the
+ * [FAVORITES_EXPAND_KEY] sentinel.
  *
  * The Favorites tab was removed from the bottom nav; reordering favorites
  * still needs a home, so "Manage" reopens the existing [FavoritesScreen] —
  * reusing its drag-to-reorder UX rather than re-implementing it inline here.
  */
 @Composable
-private fun PinnedFavoritesHeader(onManageClick: () -> Unit) {
+private fun PinnedFavoritesHeader(
+    count: Int,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    onManageClick: () -> Unit,
+) {
+    val rotation by animateFloatAsState(
+        targetValue = if (isExpanded) 180f else 0f,
+        label = "chevron",
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onToggle)
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -259,6 +308,17 @@ private fun PinnedFavoritesHeader(onManageClick: () -> Unit) {
         TextButton(onClick = onManageClick) {
             Text("Manage")
         }
+        Text(
+            text = "$count",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Icon(
+            imageVector = Icons.Default.ExpandMore,
+            contentDescription = if (isExpanded) "Collapse" else "Expand",
+            modifier = Modifier.rotate(rotation),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -17,6 +17,12 @@ publishes the signed AAB automatically when a `v*` tag is pushed.
 
 ### Added
 
+- **Collapsible channel groups** — Channel-list groups (including the
+  Favorites section, which renders first) collapse and expand with a tap on
+  the header, all collapsed by default. Expanded groups are remembered
+  across restarts, searching temporarily opens every matching group, and a
+  new overflow menu offers **Expand All** / **Collapse All**. (iOS parity:
+  beads_mobilemusic-ll2.)
 - **Navidrome / Subsonic server support (foundation)** — Add a Navidrome
   (or any Subsonic-compatible) music server as a new account type alongside
   existing M3U and Xtream Codes providers. Enter your server URL, username,

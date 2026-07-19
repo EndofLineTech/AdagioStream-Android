@@ -56,6 +56,24 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `expandedGroups defaults empty and survives a JSON round-trip`() {
+        val json = Json { ignoreUnknownKeys = true }
+        assertTrue(AppSettings().expandedGroups.isEmpty())
+
+        // Includes the NUL-sentinel Favorites key alongside a real group named
+        // "Favorites" — both must survive serialization as distinct entries.
+        val keys = setOf("\u0000favorites", "Favorites", "Rock")
+        val decoded = json.decodeFromString<AppSettings>(
+            json.encodeToString(AppSettings.serializer(), AppSettings(expandedGroups = keys)),
+        )
+        assertEquals(keys, decoded.expandedGroups)
+
+        // Settings blobs written before beads_adagio-59p.4.1 have no
+        // expandedGroups key — must decode to empty (all collapsed).
+        assertTrue(json.decodeFromString<AppSettings>("{}").expandedGroups.isEmpty())
+    }
+
+    @Test
     fun `TextSizeMode values are ordered by scale`() {
         val factors = TextSizeMode.entries.map { it.scaleFactor }
         assertEquals(factors.sorted(), factors)

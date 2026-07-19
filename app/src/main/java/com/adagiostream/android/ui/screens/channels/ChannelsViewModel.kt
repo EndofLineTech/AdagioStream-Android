@@ -9,6 +9,7 @@ import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.model.CustomPlaylist
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,11 +22,39 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Sentinel expand-key for the Favorites section (beads_adagio-59p.4.1, iOS
+ * parity: `ChannelListView.favoritesKey`). The leading NUL can't appear in an
+ * M3U group-title, so a real group named "Favorites" can't collide with it.
+ */
+internal const val FAVORITES_EXPAND_KEY = "\u0000favorites"
+
+/**
+ * Whether a channel-list section renders expanded. While a search is active
+ * every (match-containing) section acts expanded so matches stay visible,
+ * regardless of the persisted expand state.
+ */
+internal fun isSectionExpanded(key: String, searchQuery: String, expandedKeys: Set<String>): Boolean =
+    searchQuery.isNotBlank() || key in expandedKeys
+
+/** Pure expand-key toggle so the round-trip is unit-testable without a ViewModel. */
+internal fun toggleExpandKey(keys: Set<String>, key: String): Set<String> =
+    if (key in keys) keys - key else keys + key
+
+/**
+ * Every section key in on-screen order: Favorites sentinel first, then the
+ * groups as rendered. Used by Expand All; unit-tested for the ordering and
+ * sentinel-non-collision contract.
+ */
+internal fun allSectionKeys(groupNames: List<String>): List<String> =
+    listOf(FAVORITES_EXPAND_KEY) + groupNames
+
 @HiltViewModel
 class ChannelsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val vlcPlayer: VLCPlayerWrapper,
     val playlistManager: CustomPlaylistManager,
+    private val persistenceService: PersistenceService,
 ) : ViewModel() {
 
     val customPlaylists: StateFlow<List<CustomPlaylist>> = playlistManager.playlists
@@ -66,6 +95,47 @@ class ChannelsViewModel @Inject constructor(
             }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
+     * Expand-keys of the currently expanded sections (beads_adagio-59p.4.1).
+     * Empty by default so a fresh install shows only collapsed headers;
+     * persisted in [com.adagiostream.android.model.AppSettings.expandedGroups].
+     */
+    private val _expandedGroups = MutableStateFlow<Set<String>>(emptySet())
+    val expandedGroups: StateFlow<Set<String>> = _expandedGroups.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            _expandedGroups.value = persistenceService.loadSettings().expandedGroups
+        }
+    }
+
+    fun toggleGroupExpanded(key: String) {
+        setExpandedGroups(toggleExpandKey(_expandedGroups.value, key))
+    }
+
+    fun expandAllGroups() {
+        setExpandedGroups(allSectionKeys(filteredGroups.value.map { it.name }).toSet())
+    }
+
+    fun collapseAllGroups() {
+        setExpandedGroups(emptySet())
+    }
+
+    private fun setExpandedGroups(keys: Set<String>) {
+        // While searching, every section renders expanded regardless of stored
+        // state, so any expand-state mutation would silently corrupt it: a
+        // header toggle or Collapse All changes nothing visibly yet rewrites
+        // the persisted set, and Expand All would persist only the
+        // search-filtered subset of groups. Guarded here so every mutation
+        // path is a no-op mid-search.
+        if (_searchQuery.value.isNotBlank()) return
+        _expandedGroups.value = keys
+        viewModelScope.launch {
+            val settings = persistenceService.loadSettings()
+            persistenceService.saveSettings(settings.copy(expandedGroups = keys))
+        }
+    }
 
     fun updateSearch(query: String) {
         _searchQuery.value = query
