@@ -17,6 +17,17 @@ publishes the signed AAB automatically when a `v*` tag is pushed.
 
 ### Added
 
+- **Audiobookshelf support** — Connect an Audiobookshelf server as a new
+  account type, with username/password or OpenID (SSO) sign-in. Browse your
+  book libraries with a Continue Listening shelf, and play with full
+  multi-file timeline support: chapter navigation, variable speed, resume
+  from your server position, and progress that syncs back to the server
+  (queued and flushed when offline). Download books for offline listening,
+  and browse and resume them from **Android Auto** — one "Audiobooks" node
+  with per-library grouping (or a flat list for a single library), showing
+  each book's author and progress ("Finished" / "N% listened") with cover
+  art. (iOS parity: Audiobookshelf E1–E4.)
+
 - **Consolidated Custom M3Us tab** — The My M3Us tab now matches iOS: an
   "M3U Accounts" section lists your M3U provider accounts above your custom
   playlists, with tap-to-edit and delete (with confirmation) right from the

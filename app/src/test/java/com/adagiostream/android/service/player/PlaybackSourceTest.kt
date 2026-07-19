@@ -77,4 +77,24 @@ class PlaybackSourceTest {
         assertEquals("Track 1", source.currentItem.displayTitle)
         assertFalse(source.currentItem.isLiveStream)
     }
+
+    // ---- Audiobook token redaction (beads_adagio-59p.1.7 E1) --------------
+
+    @Test
+    fun `audiobook toString does not leak the tokened cover url`() {
+        val source = PlaybackSource.Audiobook(
+            libraryItemId = "li-1",
+            bookTitle = "Dune",
+            author = "Frank Herbert",
+            chapterTitle = "Chapter 1",
+            totalDurationSeconds = 3600.0,
+            coverUrl = "https://abs.example/api/items/li-1/cover?token=secret-jwt",
+        )
+
+        val text = source.toString()
+
+        assertFalse("toString must not contain the token", text.contains("token="))
+        assertFalse("toString must not contain the cover url", text.contains("secret-jwt"))
+        assertTrue("toString should still identify the book", text.contains("li-1"))
+    }
 }

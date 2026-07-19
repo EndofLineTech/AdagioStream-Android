@@ -138,6 +138,14 @@ sealed interface PlaybackSource {
         val coverUrl: String?,
     ) : PlaybackSource {
         override val currentItem: NowPlayingItem get() = AudiobookNowPlayingItem(this)
+
+        /**
+         * Redacts [coverUrl] — it carries a `?token=` JWT (beads_adagio-59p.1.7
+         * E1). The default data-class toString would leak it into every log
+         * site that interpolates a source (e.g. VLCSessionPlayer.handleSeek).
+         */
+        override fun toString(): String =
+            "Audiobook(libraryItemId=$libraryItemId, bookTitle=$bookTitle, chapterTitle=$chapterTitle)"
     }
 }
 

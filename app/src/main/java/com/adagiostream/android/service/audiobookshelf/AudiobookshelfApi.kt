@@ -111,7 +111,10 @@ class AudiobookshelfApi(
     ): List<AbsLibraryItem> = get(
         "/api/libraries/$libraryId/items",
         AbsLibraryItemsResponse.serializer(),
-        params = mapOf("limit" to "0", "page" to "0", "minified" to "1", "sort" to sort),
+        // include=progress so list items carry userMediaProgress → progress
+        // badges/subtitles work on the phone list AND Auto (beads_adagio-59p.1.7
+        // E2). Harmless if a server ignores it. Live-server validation: 59p.2.5.
+        params = mapOf("limit" to "0", "page" to "0", "minified" to "1", "include" to "progress", "sort" to sort),
     ).results
 
     /** `GET /api/items/{id}?expanded=1&include=progress` — item detail with the
