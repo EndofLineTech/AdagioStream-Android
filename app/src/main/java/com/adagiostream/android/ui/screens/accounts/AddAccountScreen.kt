@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import android.content.ActivityNotFoundException
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -43,12 +45,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -74,10 +78,26 @@ fun AddAccountScreen(
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val addAccountResult by viewModel.addAccountResult.collectAsStateWithLifecycle()
     val connectionTestState by viewModel.connectionTestState.collectAsStateWithLifecycle()
+    val ssoAuthorizeUrl by viewModel.ssoAuthorizeUrl.collectAsStateWithLifecycle()
     var passwordVisible by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(saveComplete) {
         if (saveComplete) onBack()
+    }
+
+    // SSO step 2: open the IdP authorization URL in a Chrome Custom Tab. The
+    // IdP redirects back via adagiostream://oauth (MainActivity intent filter).
+    LaunchedEffect(ssoAuthorizeUrl) {
+        ssoAuthorizeUrl?.let { url ->
+            viewModel.ssoLaunchHandled()
+            try {
+                CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
+            } catch (e: ActivityNotFoundException) {
+                // Browser-less device (kiosk / TV image) — fail soft, not crash.
+                viewModel.ssoLaunchFailed()
+            }
+        }
     }
 
     addAccountResult?.let { result ->
@@ -170,6 +190,7 @@ fun AddAccountScreen(
                     onNameChange = { viewModel.setName(it) },
                     onCheckServer = { viewModel.discoverAbsServer() },
                     onTestConnection = { viewModel.testConnection() },
+                    onSsoSignIn = { viewModel.startSso() },
                 )
 
                 isSubsonic -> SubsonicForm(
@@ -405,11 +426,11 @@ private fun SubsonicForm(
 }
 
 /**
- * Audiobookshelf add/edit form (59p.1.3). Two-step flow: enter the host and
- * check the server (`GET /status` discovery), then — per the discovered auth
- * methods — either sign in with username/password (Test Connection performs
- * the login that produces the stored token pair) or, for OIDC-only servers,
- * see a disabled SSO placeholder until the OIDC flow lands in a later build.
+ * Audiobookshelf add/edit form. Two-step flow: enter the host and check the
+ * server (`GET /status` discovery), then — per the discovered auth methods —
+ * sign in with username/password (Test Connection performs the login that
+ * produces the stored token pair) and/or with SSO (the OIDC flow, labelled
+ * with the server-configured button text).
  */
 @Composable
 private fun AudiobookshelfForm(
@@ -428,6 +449,7 @@ private fun AudiobookshelfForm(
     onNameChange: (String) -> Unit,
     onCheckServer: () -> Unit,
     onTestConnection: () -> Unit,
+    onSsoSignIn: () -> Unit,
 ) {
     val checking = discoveryState is AbsDiscoveryState.Checking
     val testing = connectionTestState is ConnectionTestState.Testing
@@ -554,21 +576,35 @@ private fun AudiobookshelfForm(
                         Text("Test Connection")
                     }
                 }
+            }
 
-                ConnectionTestResult(connectionTestState)
-            } else if (discoveryState.supportsOpenId) {
-                // OIDC-only server — the SSO flow arrives in a later build
-                // (59p.1.2 replaces this placeholder).
+            if (discoveryState.supportsOpenId) {
+                // SSO via the server-fronted OIDC flow; the label comes from
+                // the server's authOpenIDButtonText when configured.
                 Spacer(modifier = Modifier.height(16.dp))
                 OutlinedButton(
-                    onClick = {},
-                    enabled = false,
+                    onClick = onSsoSignIn,
+                    enabled = !testing && host.isNotBlank(),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .height(48.dp)
+                        .semantics { contentDescription = "Sign in with SSO" },
                 ) {
-                    Text("Sign in with SSO (coming in next build)")
+                    if (testing && !discoveryState.supportsLocal) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text("Signing in…")
+                    } else {
+                        Text(discoveryState.openIdButtonText)
+                    }
                 }
+            }
+
+            if (discoveryState.supportsLocal || discoveryState.supportsOpenId) {
+                ConnectionTestResult(connectionTestState)
             } else {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(

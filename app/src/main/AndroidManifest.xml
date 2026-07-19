@@ -23,9 +23,13 @@
         android:theme="@style/Theme.AdagioStream"
         android:networkSecurityConfig="@xml/network_security_config">
 
+        <!-- singleTask so the OIDC redirect below clears the Custom Tab and
+             re-enters the EXISTING instance via onNewIntent — the in-progress
+             sign-in flow (held in a ViewModel) survives the round-trip. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.AdagioStream">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -34,6 +38,15 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.APP_MUSIC" />
+            </intent-filter>
+            <!-- Audiobookshelf OIDC/SSO browser redirect: adagiostream://oauth -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="adagiostream"
+                    android:host="oauth" />
             </intent-filter>
         </activity>
 
