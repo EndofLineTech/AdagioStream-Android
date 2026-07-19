@@ -465,6 +465,10 @@ class AudiobookPlaybackCoordinator(
         val file = currentFile ?: return
         val endGlobal = (file.startOffset + file.duration).coerceAtMost(tl.totalDuration)
         lastObservedGlobal = endGlobal
+        // Boundary sync here + finalizeNow's own sync (when this ends the
+        // book/episode) is an intentional, harmless double: syncAt is
+        // idempotent on position (last-write-wins) and the second carries
+        // zero additional timeListened.
         scope.launch { syncNow(endGlobal) }
         val ctx = podcastContext
         val epId = episodeId
@@ -495,10 +499,19 @@ class AudiobookPlaybackCoordinator(
         scope.launch {
             val behavior = persistenceService?.loadSettings()?.podcastEpisodeEndBehavior
                 ?: PodcastEpisodeEndBehavior.NEXT_UNPLAYED
+            // ponytail: capture-at-start of ctx.order is deliberate iOS parity —
+            // CONTINUE_IN_SORT_ORDER freezes the display order for the show
+            // session even though end-behavior is re-read live above (matches
+            // iOS PodcastPlaybackContext, which carries its own frozen order).
             val next = selectNextEpisode(ctx, epId, behavior) { candidateId ->
                 // A failed lookup reads as unplayed — same as the list badges.
                 runCatching { api.getEpisodeProgress(ctx.libraryItemId, candidateId) }.getOrNull()
             }
+            // The selector suspended on network — the user may have hit Stop
+            // (episodeId=null) or tapped a different episode (episodeId=other)
+            // in that window. Both mutate episodeId, so this one guard covers
+            // "don't resurrect playback" AND "don't override the user's tap".
+            if (episodeId != epId) return@launch
             if (next != null) {
                 DebugLogger.log("ABS podcast: episode $epId ended — auto-playing ${next.id}", DebugLogger.Category.PLAYER)
                 playPodcastEpisode(account, ctx.libraryItemId, next.id, ctx)

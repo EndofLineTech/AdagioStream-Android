@@ -10,6 +10,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
@@ -742,6 +743,53 @@ class AudiobookPlaybackCoordinatorTest {
         coVerify(exactly = 0) { api.getEpisodeProgress(any(), any()) }
         coVerify(exactly = 1) { api.openPlaybackSession(any(), any(), any(), any()) } // no chained session
         assertTrue(player.stopCount > 0)
+    }
+
+    @Test
+    fun `Stop during the selection network window cancels the auto-advance`() = runTest {
+        stubEpisodeSessions()
+        // Gate the candidate lookup so the selector parks mid-network while the
+        // test drives a Stop — UnconfinedTestDispatcher parks at the suspend
+        // point and hands control back here.
+        val gate = CompletableDeferred<Unit>()
+        coEvery { api.getEpisodeProgress("show1", "ep2") } coAnswers {
+            gate.await()
+            null
+        }
+
+        val c = coordinator()
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        player.positionMs = 1_800_000
+        c.onFileEnded() // selector now suspended on the gate
+
+        c.stop() // user stops mid-selection: episodeId -> null, active -> false
+        gate.complete(Unit) // release the lookup; the guard must bail now
+
+        coVerify(exactly = 0) { api.openPlaybackSession("show1", "ep2", any(), any()) }
+        assertNull(c.nowPlaying.value) // no resurrection
+    }
+
+    @Test
+    fun `tapping a different episode during selection is not overridden by auto-advance`() = runTest {
+        stubEpisodeSessions()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { api.getEpisodeProgress("show1", "ep2") } coAnswers {
+            gate.await()
+            null
+        }
+
+        val c = coordinator()
+        c.playPodcastEpisode(account, "show1", "ep1", podcastContext())
+        player.positionMs = 1_800_000
+        c.onFileEnded() // selector suspended on the gate
+
+        // User taps ep2 directly while the old episode's selector is parked.
+        c.playPodcastEpisode(account, "show1", "ep2", podcastContext())
+        gate.complete(Unit) // release the ep1 selector — its guard must bail
+
+        // ep2 opened exactly once (the user's tap), NOT again from auto-advance.
+        coVerify(exactly = 1) { api.openPlaybackSession("show1", "ep2", any(), any()) }
+        assertEquals("Episode Two", c.nowPlaying.value?.bookTitle)
     }
 
     @Test
