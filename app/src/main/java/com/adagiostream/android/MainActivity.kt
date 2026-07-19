@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.adagiostream.android.service.audiobookshelf.AudiobookPlaybackCoordinator
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfOidc
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfOidcCallbackBus
 import com.adagiostream.android.service.player.AudioPlaybackService
@@ -18,6 +19,9 @@ class MainActivity : AppCompatActivity() {
 
     @Inject
     lateinit var oidcCallbacks: AudiobookshelfOidcCallbackBus
+
+    @Inject
+    lateinit var audiobookPlaybackCoordinator: AudiobookPlaybackCoordinator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,5 +57,12 @@ class MainActivity : AppCompatActivity() {
         if (url.startsWith(AudiobookshelfOidc.REDIRECT_URI)) {
             oidcCallbacks.publish(url)
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Audiobook forced sync + offline-queue flush on app background
+        // (beads_adagio-59p.1.5) — mirrors iOS's background sync trigger.
+        audiobookPlaybackCoordinator.onAppBackground()
     }
 }

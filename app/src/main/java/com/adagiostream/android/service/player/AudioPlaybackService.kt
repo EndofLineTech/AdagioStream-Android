@@ -40,6 +40,7 @@ import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.persistence.LastPlayed
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.audiobookshelf.AudiobookPlaybackCoordinator
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.DebugLogger.Category.AUTO
@@ -71,6 +72,7 @@ class AudioPlaybackService : MediaLibraryService() {
     @Inject lateinit var musicPlaybackCoordinator: MusicPlaybackCoordinator
     @Inject lateinit var musicLibraryRepository: MusicLibraryRepository
     @Inject lateinit var navidromeApiFactory: NavidromeApiFactory
+    @Inject lateinit var audiobookPlaybackCoordinator: AudiobookPlaybackCoordinator
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -126,6 +128,7 @@ class AudioPlaybackService : MediaLibraryService() {
         private val TOGGLE_LOVED_TRACK_COMMAND = SessionCommand("TOGGLE_LOVED_TRACK", Bundle.EMPTY)
         private val TOGGLE_SHUFFLE_COMMAND = SessionCommand("TOGGLE_SHUFFLE", Bundle.EMPTY)
         private val CYCLE_REPEAT_COMMAND = SessionCommand("CYCLE_REPEAT", Bundle.EMPTY)
+        private val CYCLE_SPEED_COMMAND = SessionCommand("CYCLE_SPEED", Bundle.EMPTY)
     }
 
     @OptIn(UnstableApi::class)
@@ -137,6 +140,9 @@ class AudioPlaybackService : MediaLibraryService() {
         // wrapper fires this; the coordinator advances the queue (honouring
         // RepeatMode.One restart) and starts the next track.
         vlcPlayerWrapper.onLibraryTrackEnded = { musicPlaybackCoordinator.onTrackEnded() }
+        // Audiobook file chaining (beads_adagio-59p.1.5): when the active FILE of a
+        // multi-file book ends, the coordinator loads the next file on the timeline.
+        vlcPlayerWrapper.onAudiobookFileEnded = { audiobookPlaybackCoordinator.onFileEnded() }
         buildSession()
         DebugLogger.log("MediaLibrarySession built, session=$mediaLibrarySession", AUTO)
 
@@ -310,7 +316,13 @@ class AudioPlaybackService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     private fun buildSession() {
         DebugLogger.log("buildSession() - creating VLCSessionPlayer and MediaLibrarySession", AUTO)
-        val sessionPlayer = VLCSessionPlayer(vlcPlayerWrapper, musicPlaybackCoordinator, accountManager, espnScoreService)
+        val sessionPlayer = VLCSessionPlayer(
+            vlcPlayerWrapper,
+            musicPlaybackCoordinator,
+            accountManager,
+            espnScoreService,
+            audiobookPlaybackCoordinator,
+        )
 
         mediaLibrarySession?.release()
         mediaLibrarySession = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
@@ -341,24 +353,28 @@ class AudioPlaybackService : MediaLibraryService() {
                 val isFav = current != null && channels.find { it.id == current.id }?.isFavorite == true
                 val track = current?.let { trackMeta[it.name] }
                 val isLoved = track != null && lovedTracks.any { it.artist == track.artist && it.title == track.title }
-                Triple(source is PlaybackSource.Library, isFav, isLoved)
+                Triple(source, isFav, isLoved)
             }
-                // Fold in shuffle/repeat so the layout also refreshes when either
-                // changes on its own — e.g. toggled from a controller other than
-                // the one the layout is being drawn for (baw.13 MINOR-3: the
+                // Fold in shuffle/repeat/speed so the layout also refreshes when
+                // any changes on its own — e.g. toggled from a controller other
+                // than the one the layout is being drawn for (baw.13 MINOR-3: the
                 // layout previously only updated on channel/track/source changes,
                 // so non-tapping controllers could show a stale shuffle/repeat icon).
                 .combine(
-                    combine(musicPlaybackCoordinator.shuffleEnabledFlow, musicPlaybackCoordinator.repeatModeFlow) { shuffle, repeat -> shuffle to repeat }
-                ) { libraryState, shuffleState -> libraryState to shuffleState }
+                    combine(
+                        musicPlaybackCoordinator.shuffleEnabledFlow,
+                        musicPlaybackCoordinator.repeatModeFlow,
+                        audiobookPlaybackCoordinator.speedFlow,
+                    ) { shuffle, repeat, speed -> Triple(shuffle, repeat, speed) }
+                ) { sourceState, modeState -> sourceState to modeState }
                 .distinctUntilChanged()
-                .collect { (libraryState, shuffleState) ->
-                    val (isLibrary, isFav, isLoved) = libraryState
-                    val (shuffleEnabled, repeatMode) = shuffleState
-                    val buttons = if (isLibrary) {
-                        buildLibraryCustomButtons(shuffleEnabled, repeatMode)
-                    } else {
-                        buildCustomButtons(isFav, isLoved)
+                .collect { (sourceState, modeState) ->
+                    val (source, isFav, isLoved) = sourceState
+                    val (shuffleEnabled, repeatMode, speed) = modeState
+                    val buttons = when (source) {
+                        is PlaybackSource.Audiobook -> buildAudiobookCustomButtons(speed)
+                        is PlaybackSource.Library -> buildLibraryCustomButtons(shuffleEnabled, repeatMode)
+                        else -> buildCustomButtons(isFav, isLoved)
                     }
                     mediaLibrarySession?.connectedControllers?.forEach { controller ->
                         mediaLibrarySession?.setCustomLayout(controller, buttons)
@@ -405,6 +421,23 @@ class AudioPlaybackService : MediaLibraryService() {
             CommandButton.Builder(repeatIcon)
                 .setDisplayName("Repeat")
                 .setSessionCommand(CYCLE_REPEAT_COMMAND)
+                .build(),
+        )
+    }
+
+    /**
+     * Custom button row for audiobook playback (beads_adagio-59p.1.5): a
+     * single speed-cycle button showing the active rate. Next/prev transport
+     * buttons already exist natively and route to chapter skip via
+     * [VLCSessionPlayer.handleSeek].
+     */
+    @OptIn(UnstableApi::class)
+    private fun buildAudiobookCustomButtons(speed: Float): List<CommandButton> {
+        val label = if (speed % 1f == 0f) "${speed.toInt()}x" else "${speed}x"
+        return listOf(
+            CommandButton.Builder(CommandButton.ICON_PLAYBACK_SPEED)
+                .setDisplayName("Speed $label")
+                .setSessionCommand(CYCLE_SPEED_COMMAND)
                 .build(),
         )
     }
@@ -572,10 +605,14 @@ class AudioPlaybackService : MediaLibraryService() {
                 .add(TOGGLE_LOVED_TRACK_COMMAND)
                 .add(TOGGLE_SHUFFLE_COMMAND)
                 .add(CYCLE_REPEAT_COMMAND)
+                .add(CYCLE_SPEED_COMMAND)
                 .build()
             // Custom layout branches by playback source (baw.7.2): library
-            // playback gets shuffle/repeat, radio keeps favorite/love.
-            val customButtons = if (vlcPlayerWrapper.playbackSource.value is PlaybackSource.Library) {
+            // playback gets shuffle/repeat, audiobooks get speed, radio keeps
+            // favorite/love.
+            val customButtons = if (vlcPlayerWrapper.playbackSource.value is PlaybackSource.Audiobook) {
+                buildAudiobookCustomButtons(audiobookPlaybackCoordinator.speed)
+            } else if (vlcPlayerWrapper.playbackSource.value is PlaybackSource.Library) {
                 buildLibraryCustomButtons(musicPlaybackCoordinator.shuffleEnabled, musicPlaybackCoordinator.repeatMode)
             } else {
                 val channel = vlcPlayerWrapper.currentChannel.value
@@ -644,6 +681,18 @@ class AudioPlaybackService : MediaLibraryService() {
                 if (vlcPlayerWrapper.playbackSource.value is PlaybackSource.Library) {
                     musicPlaybackCoordinator.setRepeatMode(musicPlaybackCoordinator.repeatMode.next)
                     refreshLibraryCustomLayout(controller)
+                }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            // Audiobook speed cycle (beads_adagio-59p.1.5) — no-op outside
+            // audiobook playback, mirroring the library-button guards above.
+            if (customCommand.customAction == CYCLE_SPEED_COMMAND.customAction) {
+                if (vlcPlayerWrapper.playbackSource.value is PlaybackSource.Audiobook) {
+                    audiobookPlaybackCoordinator.cycleSpeed()
+                    mediaLibrarySession?.setCustomLayout(
+                        controller,
+                        buildAudiobookCustomButtons(audiobookPlaybackCoordinator.speed),
+                    )
                 }
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }

@@ -117,4 +117,33 @@ sealed interface PlaybackSource {
 
         override val currentItem: NowPlayingItem get() = currentTrack.asNowPlayingItem()
     }
+
+    /**
+     * An Audiobookshelf book on its global timeline (beads_adagio-59p.1.5).
+     *
+     * One snapshot per metadata state — the AudiobookPlaybackCoordinator swaps
+     * in a fresh copy on chapter change (via `updateAudiobookSource`) so the
+     * media session subtitle follows the current chapter. Seek/duration are
+     * BOOK-GLOBAL: [totalDurationSeconds] is the whole book, and positional
+     * seeks route through the coordinator's timeline, never straight into the
+     * single file libVLC happens to have loaded.
+     */
+    data class Audiobook(
+        val libraryItemId: String,
+        val bookTitle: String,
+        val author: String?,
+        /** Current chapter title on the global timeline, if the book has chapters. */
+        val chapterTitle: String?,
+        val totalDurationSeconds: Double,
+        val coverUrl: String?,
+    ) : PlaybackSource {
+        override val currentItem: NowPlayingItem get() = AudiobookNowPlayingItem(this)
+    }
+}
+
+private data class AudiobookNowPlayingItem(val book: PlaybackSource.Audiobook) : NowPlayingItem {
+    override val displayTitle: String get() = book.bookTitle
+    override val displaySubtitle: String? get() = book.chapterTitle ?: book.author
+    override val artworkUrl: String? get() = book.coverUrl
+    override val isLiveStream: Boolean get() = false
 }

@@ -241,6 +241,10 @@ data class AbsPlaybackSession(
     val duration: Double? = null,
     val chapters: List<AbsChapter>? = null,
     val audioTracks: List<AbsAudioTrack>? = null,
+    /** Server-computed display title for the session's item (book title). */
+    val displayTitle: String? = null,
+    /** The item's `media.metadata` echoed on the session (title/author). */
+    val mediaMetadata: AbsMetadata? = null,
 )
 
 /**

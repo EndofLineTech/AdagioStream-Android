@@ -202,6 +202,31 @@ class PersistenceService(
         favoritesFile.delete()
     }
 
+    private val deviceIdFile: File
+        get() = File(context.filesDir, "device_id.txt")
+
+    /**
+     * Stable per-install device id (beads_adagio-59p.1.5) — required by
+     * Audiobookshelf's `POST /api/items/{id}/play` deviceInfo. Generated once
+     * (random UUID) and persisted for the life of the install; not a hardware
+     * identifier. Synchronous, mirroring [loadSettingsSync].
+     */
+    fun deviceId(): String {
+        val existing = try {
+            if (deviceIdFile.exists()) deviceIdFile.readText().trim().ifEmpty { null } else null
+        } catch (_: Exception) {
+            null
+        }
+        if (existing != null) return existing
+        val generated = java.util.UUID.randomUUID().toString()
+        try {
+            deviceIdFile.writeText(generated)
+        } catch (_: Exception) {
+            // Best-effort: an unpersisted id just rotates next launch.
+        }
+        return generated
+    }
+
     private val lovedTracksFile: File
         get() = File(context.filesDir, "loved_tracks.json")
 

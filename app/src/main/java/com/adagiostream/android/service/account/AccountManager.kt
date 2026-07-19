@@ -259,10 +259,20 @@ class AccountManager @Inject constructor(
     }
 
     suspend fun updateAccount(account: Account) {
+        updateAccountCredentials(account)
+        loadAllChannels()
+    }
+
+    /**
+     * Persist-only account update (beads_adagio-59p.1.5): swaps [account] into
+     * the store WITHOUT re-fetching channel lists — for credential/token
+     * rotations (e.g. Audiobookshelf JWT refresh) where nothing channel-related
+     * changed.
+     */
+    suspend fun updateAccountCredentials(account: Account) {
         val updated = _accounts.value.map { if (it.id == account.id) account else it }
         _accounts.value = updated
         persistenceService.saveAccounts(updated)
-        loadAllChannels()
     }
 
     suspend fun toggleAccountEnabled(accountId: String) {
