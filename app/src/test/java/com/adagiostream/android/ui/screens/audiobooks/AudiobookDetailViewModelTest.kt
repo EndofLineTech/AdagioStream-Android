@@ -10,8 +10,12 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
+import com.adagiostream.android.service.download.AudiobookDownloadActions
+import com.adagiostream.android.service.library.db.AudiobookDownloadEntity
+import com.adagiostream.android.service.library.db.DownloadStatus
 import com.adagiostream.android.service.player.AudiobookPlaybackLauncher
 import com.adagiostream.android.testutil.MainDispatcherRule
+import com.adagiostream.android.ui.screens.music.DownloadUiState
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,6 +54,21 @@ class AudiobookDetailViewModelTest {
     private val fakeAccountsFlow = MutableStateFlow<List<Account>>(emptyList())
     private val fakeAccountRepository = object : AccountRepository {
         override val accounts: StateFlow<List<Account>> = fakeAccountsFlow
+    }
+
+    /** Manifest row backing the download-state flow (59p.1.6). */
+    private val downloadRows = MutableStateFlow<AudiobookDownloadEntity?>(null)
+    private val downloadCalls = mutableListOf<Pair<String, String>>() // (accountId, itemId)
+    private val deleteCalls = mutableListOf<String>()
+    private val fakeDownloadActions = object : AudiobookDownloadActions {
+        override fun observe(libraryItemId: String): StateFlow<AudiobookDownloadEntity?> = downloadRows
+        override fun observeAll(): StateFlow<List<AudiobookDownloadEntity>> = MutableStateFlow(emptyList())
+        override suspend fun download(account: Account, libraryItemId: String, title: String?, author: String?) {
+            downloadCalls += account.id to libraryItemId
+        }
+        override suspend fun delete(libraryItemId: String) {
+            deleteCalls += libraryItemId
+        }
     }
 
     @Before
@@ -94,6 +113,7 @@ class AudiobookDetailViewModelTest {
                 factory = factory,
             ),
             playbackLauncher = fakeLauncher,
+            downloadActions = fakeDownloadActions,
             savedStateHandle = SavedStateHandle(mapOf("itemId" to "bk1")),
         )
     }
@@ -135,5 +155,34 @@ class AudiobookDetailViewModelTest {
         viewModel.play()
 
         assertEquals(listOf(Triple("abs-acct", "bk1", null as Double?)), launched)
+    }
+
+    // ---- download affordance (beads_adagio-59p.1.6) ------------------------
+
+    private fun manifestRow(status: String) = AudiobookDownloadEntity(
+        id = "bk1",
+        accountId = "abs-acct",
+        title = "Annihilation",
+        status = status,
+        createdAt = 1L,
+        updatedAt = 1L,
+    )
+
+    @Test
+    fun `downloadState maps the manifest row to the button state`() = runTest {
+        viewModel.downloadState.test {
+            assertEquals(DownloadUiState.NOT_DOWNLOADED, awaitItem()) // no row
+            downloadRows.value = manifestRow(DownloadStatus.QUEUED)
+            assertEquals(DownloadUiState.QUEUED, awaitItem())
+            downloadRows.value = manifestRow(DownloadStatus.DOWNLOADING)
+            assertEquals(DownloadUiState.DOWNLOADING, awaitItem())
+            downloadRows.value = manifestRow(DownloadStatus.COMPLETED)
+            assertEquals(DownloadUiState.COMPLETED, awaitItem())
+            downloadRows.value = manifestRow(DownloadStatus.FAILED)
+            assertEquals(DownloadUiState.FAILED, awaitItem())
+            downloadRows.value = null // deleted
+            assertEquals(DownloadUiState.NOT_DOWNLOADED, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 }

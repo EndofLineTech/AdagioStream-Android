@@ -92,12 +92,12 @@ class AudiobookDownloadManager @Inject constructor(
                 accountId = account.id,
                 title = title ?: "Audiobook",
                 author = author,
-                status = DownloadStatus.DOWNLOADING,
+                status = DownloadStatus.QUEUED,
                 createdAt = now(),
                 updatedAt = now(),
             )).copy(
                 accountId = account.id,
-                status = DownloadStatus.DOWNLOADING,
+                status = DownloadStatus.QUEUED,
                 error = null,
                 updatedAt = now(),
             ),
@@ -115,6 +115,7 @@ class AudiobookDownloadManager @Inject constructor(
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .setRequiresStorageNotLow(true) // GB-scale books
                         .build(),
                 )
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)

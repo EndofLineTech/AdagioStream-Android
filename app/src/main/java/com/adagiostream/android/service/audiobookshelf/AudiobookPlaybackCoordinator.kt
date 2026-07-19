@@ -471,6 +471,11 @@ class AudiobookPlaybackCoordinator(
         lastSyncedGlobal = global
         lastSyncAtMs = clock()
         lastKnownPositions[itemId] = global
+        // Review B1: cache UNCONDITIONALLY — online listening must keep the
+        // download manifest's resume position fresh, or reboot + airplane mode
+        // resumes at the stale download-time position. A WHERE-id no-op for
+        // books that aren't downloaded.
+        cachePositionToManifest(itemId, global)
         val sid = sessionId
         if (sid == null) {
             enqueueProgress(itemId, global)
@@ -508,12 +513,11 @@ class AudiobookPlaybackCoordinator(
                 lastUpdate = clock(),
             ),
         )
-        cachePositionToManifest(itemId, global)
     }
 
     /**
-     * Mirrors an offline-queued position into the download manifest so offline
-     * resume survives process death after the queue drains (bead .1.6).
+     * Mirrors the synced position into the download manifest so offline resume
+     * survives process death after the queue drains (bead .1.6, review B1).
      */
     private fun cachePositionToManifest(itemId: String, global: Double) {
         val offline = offlineBooks ?: return
@@ -625,6 +629,7 @@ class AudiobookPlaybackCoordinator(
 
     private suspend fun runFinalSync(f: FinalState) {
         lastKnownPositions[f.libraryItemId] = f.global
+        cachePositionToManifest(f.libraryItemId, f.global) // B1: also on clean finalize
         try {
             val sid = f.sessionId
             if (sid != null) {
@@ -648,7 +653,6 @@ class AudiobookPlaybackCoordinator(
                 lastUpdate = clock(),
             ),
         )
-        cachePositionToManifest(f.libraryItemId, f.global)
     }
 
     /** Fire-and-forget finalize — the stop/Idle path. Idempotent via [active]. */

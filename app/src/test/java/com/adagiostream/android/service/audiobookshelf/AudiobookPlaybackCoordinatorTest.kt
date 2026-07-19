@@ -432,6 +432,21 @@ class AudiobookPlaybackCoordinatorTest {
     )
 
     @Test
+    fun `online sync updates the manifest position cache`() = runTest {
+        // Review B1: hours of ONLINE listening must keep the download
+        // manifest's resume position fresh — reboot + airplane mode would
+        // otherwise resume at the stale download-time position.
+        val offline = FakeOfflineSource(offlineBook())
+        val c = coordinator(offline)
+        c.playAudiobook(account, "book1") // streaming session opens fine
+
+        nowMs = 20_000; player.positionMs = 20_000
+        c.onTick() // periodic ONLINE sync
+        coVerify(exactly = 1) { api.syncSession(any(), any(), any(), any()) }
+        assertTrue(offline.savedPositions.contains("book1" to 20.0))
+    }
+
+    @Test
     fun `session open failure falls back to the complete local copy`() = runTest {
         coEvery { api.openPlaybackSession(any(), any(), any(), any()) } throws
             AudiobookshelfApiException.Unreachable(IOException("no route"))

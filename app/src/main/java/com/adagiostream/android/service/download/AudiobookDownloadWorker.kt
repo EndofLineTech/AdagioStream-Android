@@ -12,18 +12,18 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.adagiostream.android.R
 import com.adagiostream.android.model.AccountType
-import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
-import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
-import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import com.adagiostream.android.service.library.db.AudiobookDownloadDao
+import com.adagiostream.android.service.library.db.DownloadStatus
 import com.adagiostream.android.service.persistence.PersistenceService
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import java.io.IOException
-import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.ensureActive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -33,9 +33,12 @@ import okhttp3.Request
  *
  * WorkManager survives process death; on re-run the persisted manifest lets
  * [AudiobookDownloader] skip files already on disk (file-granular resume).
- * Auth goes through [AudiobookshelfAuth.execute] (Bearer header, 401 →
- * refresh → retry) and rotated JWTs are persisted back to the encrypted
- * account store, so a queued download never strands on token rotation.
+ *
+ * The API comes from the shared [AudiobookshelfApiProvider] (review B2): one
+ * auth instance per account means a worker 401 and a foreground 401 coalesce
+ * through the same refresh mutex instead of racing the rotating refresh
+ * token, and the provider never persists a cleared pair — a background
+ * definitive failure can't brick the account.
  */
 class AudiobookDownloadWorker(
     appContext: Context,
@@ -46,11 +49,10 @@ class AudiobookDownloadWorker(
     @InstallIn(SingletonComponent::class)
     interface AudiobookDownloadWorkerEntryPoint {
         fun persistenceService(): PersistenceService
-        fun audiobookshelfApiFactory(): AudiobookshelfApiFactory
+        fun audiobookshelfApiProvider(): AudiobookshelfApiProvider
         fun okHttpClient(): OkHttpClient
         fun audiobookDownloadDao(): AudiobookDownloadDao
         fun fileStore(): DownloadFileStore
-        fun accountManager(): dagger.Lazy<AccountManager>
     }
 
     companion object {
@@ -61,38 +63,27 @@ class AudiobookDownloadWorker(
     }
 
     override suspend fun doWork(): Result {
-        val itemId = inputData.getString(AudiobookDownloadManager.KEY_ITEM_ID) ?: return Result.failure()
-        val accountId = inputData.getString(AudiobookDownloadManager.KEY_ACCOUNT_ID) ?: return Result.failure()
-
         val deps = EntryPointAccessors.fromApplication(
             applicationContext,
             AudiobookDownloadWorkerEntryPoint::class.java,
         )
+        val dao = deps.audiobookDownloadDao()
 
-        // Resolve the ABS account from disk (survives process death).
-        val account = deps.persistenceService().loadAccounts().firstOrNull { it.id == accountId }
-            ?: return Result.failure()
-        val abs = account.type as? AccountType.Audiobookshelf ?: return Result.failure()
+        val itemId = inputData.getString(AudiobookDownloadManager.KEY_ITEM_ID) ?: return Result.failure()
+        val accountId = inputData.getString(AudiobookDownloadManager.KEY_ACCOUNT_ID)
+            ?: return failRow(dao, itemId, "missing account id")
 
-        val tokens = abs.accessToken?.let { at ->
-            abs.refreshToken?.let { rt -> AudiobookshelfAuth.Tokens(at, rt) }
+        // Resolve accounts from disk (survives process death). The account must
+        // be the ACTIVE ABS account — the shared provider serves exactly that one.
+        val accounts = deps.persistenceService().loadAccounts()
+        val active = accounts.firstOrNull { it.isEnabled && it.type is AccountType.Audiobookshelf }
+        if (active?.id != accountId) {
+            return failRow(dao, itemId, "Audiobookshelf account not available")
         }
-        val tokenPersistScope = kotlinx.coroutines.CoroutineScope(
-            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
-        )
-        val api = deps.audiobookshelfApiFactory().create(abs.host, abs.username, null, tokens) { newTokens ->
-            // Rotated JWTs must persist immediately (refresh tokens are single-use).
-            tokenPersistScope.launch {
-                deps.accountManager().get().updateAccountCredentials(
-                    account.copy(
-                        type = abs.copy(
-                            accessToken = newTokens?.accessToken,
-                            refreshToken = newTokens?.refreshToken,
-                        ),
-                    ),
-                )
-            }
-        }
+        // B2: the SAME shared API instance the UI/coordinator use, so concurrent
+        // 401s coalesce through one refresh mutex (no rotation race).
+        val api = deps.audiobookshelfApiProvider().apiFrom(accounts)
+            ?: return failRow(dao, itemId, "Audiobookshelf account not available")
 
         try {
             setForeground(foregroundInfo("Starting…"))
@@ -178,21 +169,32 @@ class AudiobookDownloadWorker(
     }
 
     /** Streams a plain GET (token-in-query cover URL) to the file store. */
-    private fun streamPlain(client: OkHttpClient, url: String, dest: String, files: DownloadFileStore) {
+    private suspend fun streamPlain(client: OkHttpClient, url: String, dest: String, files: DownloadFileStore) {
         client.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
             if (resp.code !in 200..299) throw IOException("HTTP ${resp.code}")
             copyBody(resp.body.byteStream(), dest, files)
         }
     }
 
-    private fun copyBody(input: java.io.InputStream, dest: String, files: DownloadFileStore) {
+    private suspend fun copyBody(input: java.io.InputStream, dest: String, files: DownloadFileStore) {
         files.delete(dest)
         val buffer = ByteArray(BUFFER_SIZE)
         while (true) {
+            // Delete-mid-download cancels this worker — stop writing at the next
+            // chunk so a cancelled book can't resurrect files after cleanup.
+            coroutineContext.ensureActive()
             val read = input.read(buffer)
             if (read < 0) break
             if (read > 0) files.append(dest, buffer, read)
         }
+    }
+
+    /** Marks the manifest row FAILED so a dead early-return never strands DOWNLOADING/QUEUED. */
+    private suspend fun failRow(dao: AudiobookDownloadDao, itemId: String, error: String): Result {
+        dao.getById(itemId)?.let {
+            dao.upsert(it.copy(status = DownloadStatus.FAILED, error = error, updatedAt = System.currentTimeMillis()))
+        }
+        return Result.failure()
     }
 
     private fun foregroundInfo(progressText: String): ForegroundInfo {

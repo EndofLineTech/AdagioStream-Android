@@ -14,6 +14,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -22,7 +25,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.service.audiobookshelf.AbsLibraryItem
+import com.adagiostream.android.ui.screens.music.DownloadUiState
 
 /**
  * Audiobook detail screen (beads_adagio-59p.1.4): cover, title, author,
@@ -49,6 +55,7 @@ fun AudiobookDetailScreen(
     val api by viewModel.api.collectAsStateWithLifecycle()
     val itemState by viewModel.itemState.collectAsStateWithLifecycle()
     val item by viewModel.item.collectAsStateWithLifecycle()
+    val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
 
     LaunchedEffect(api) {
         if (api != null && itemState == AbsLoadState.Idle) {
@@ -108,7 +115,10 @@ fun AudiobookDetailScreen(
                     BookDetail(
                         book = book,
                         api = api,
+                        downloadState = downloadState,
                         onPlay = { viewModel.play() },
+                        onDownload = { viewModel.download() },
+                        onDeleteDownload = { viewModel.deleteDownload() },
                     )
                 }
             }
@@ -120,7 +130,10 @@ fun AudiobookDetailScreen(
 private fun BookDetail(
     book: AbsLibraryItem,
     api: com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi?,
+    downloadState: DownloadUiState,
     onPlay: () -> Unit,
+    onDownload: () -> Unit,
+    onDeleteDownload: () -> Unit,
 ) {
     val metadata = book.media?.metadata
     val started = book.bookProgress > 0.0 && !book.isFinishedBook
@@ -176,6 +189,12 @@ private fun BookDetail(
             Text(if (started) "Resume" else "Play")
         }
 
+        DownloadAffordance(
+            state = downloadState,
+            onDownload = onDownload,
+            onDelete = onDeleteDownload,
+        )
+
         progressBadge(book)?.let { badge ->
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 LinearProgressIndicator(
@@ -197,6 +216,72 @@ private fun BookDetail(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
+    }
+}
+
+/**
+ * Download / downloading / downloaded affordance below the Play button
+ * (beads_adagio-59p.1.6). Mirrors the storage screen's manifest states:
+ * Download → indeterminate progress with cancel → Downloaded with remove.
+ */
+@Composable
+private fun DownloadAffordance(
+    state: DownloadUiState,
+    onDownload: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    when (state) {
+        DownloadUiState.NOT_DOWNLOADED, DownloadUiState.FAILED -> {
+            OutlinedButton(
+                onClick = onDownload,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(imageVector = Icons.Filled.Download, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (state == DownloadUiState.FAILED) "Retry Download" else "Download")
+            }
+        }
+
+        DownloadUiState.QUEUED, DownloadUiState.DOWNLOADING -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(6.dp),
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Downloading…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Cancel download",
+                    )
+                }
+            }
+        }
+
+        DownloadUiState.COMPLETED -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Downloaded",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                TextButton(onClick = onDelete) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
     }
 }
