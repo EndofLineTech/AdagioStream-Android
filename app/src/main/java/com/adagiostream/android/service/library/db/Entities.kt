@@ -139,3 +139,48 @@ data class DownloadEntity(
     val createdAt: Long,
     val updatedAt: Long,
 )
+
+/**
+ * Audiobookshelf offline download manifest — one row per book
+ * (beads_adagio-59p.1.6, port of iOS `AudiobookDownloadRecord`).
+ *
+ * [filesJson]/[chaptersJson] are JSON blobs (mirrors the iOS GRDB columns) so
+ * the manifest travels flat with the row — decode via the typed helpers in
+ * `service/download/AudiobookDownloadManifest.kt`. Each file carries the
+ * book-global `startOffset`/`duration` captured from the streaming session at
+ * download time, so offline playback rebuilds the exact same
+ * `AudiobookTimeline` a live `/play` session would produce.
+ *
+ * [currentTime] caches the last-known global playback position for offline
+ * resume across process death (the in-memory position map and the progress
+ * queue both drain; this survives).
+ *
+ * Status uses [DownloadStatus.DOWNLOADING]/[DownloadStatus.COMPLETED]/
+ * [DownloadStatus.FAILED]. No FK to any cached-library table — the manifest
+ * must outlive cache wipes so on-disk files are never orphaned.
+ */
+@Entity(
+    tableName = "audiobook_downloads",
+    indices = [Index(value = ["status"], name = "index_audiobook_downloads_status")],
+)
+data class AudiobookDownloadEntity(
+    /** The ABS library-item id. */
+    @PrimaryKey val id: String,
+    val accountId: String,
+    val title: String,
+    val author: String? = null,
+    /** Local path of the cached cover image, once fetched. */
+    val coverPath: String? = null,
+    /** Whole-book duration in seconds. */
+    val duration: Double? = null,
+    val status: String,
+    /** JSON array of `AudiobookDownloadFile`. */
+    val filesJson: String = "[]",
+    /** JSON array of `AbsChapter`. */
+    val chaptersJson: String = "[]",
+    /** Last-known global playback position (seconds) — offline resume cache. */
+    val currentTime: Double = 0.0,
+    val error: String? = null,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
