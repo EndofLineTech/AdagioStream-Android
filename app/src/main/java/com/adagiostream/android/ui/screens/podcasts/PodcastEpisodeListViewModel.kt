@@ -3,15 +3,20 @@ package com.adagiostream.android.ui.screens.podcasts
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.adagiostream.android.model.Account
+import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
 import com.adagiostream.android.service.audiobookshelf.AbsEpisode
 import com.adagiostream.android.service.audiobookshelf.AbsMediaProgress
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
+import com.adagiostream.android.service.audiobookshelf.PodcastPlaybackContext
 import com.adagiostream.android.service.audiobookshelf.PodcastProgressHydrator
 import com.adagiostream.android.service.audiobookshelf.sortedEpisodes
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.player.PodcastPlaybackLauncher
 import com.adagiostream.android.ui.screens.audiobooks.AbsLoadState
 import com.adagiostream.android.ui.screens.audiobooks.userMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,6 +41,7 @@ class PodcastEpisodeListViewModel @Inject constructor(
     accountRepository: AccountRepository,
     private val apiProvider: AudiobookshelfApiProvider,
     private val persistenceService: PersistenceService,
+    private val playbackLauncher: PodcastPlaybackLauncher,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -67,9 +73,19 @@ class PodcastEpisodeListViewModel @Inject constructor(
      *  Absent key = not yet hydrated. */
     val episodeProgress: StateFlow<Map<String, AbsMediaProgress?>> = hydrator.progress
 
+    /** The account behind [api] — the launcher plays through it. */
+    private var absAccount: Account? = null
+
+    /** The order [episodes] was sorted with — carried into the playback
+     *  context so display order and auto-play direction can't disagree. */
+    private var loadedOrder: PodcastEpisodeOrder = PodcastEpisodeOrder.NEWEST_FIRST
+
     init {
         viewModelScope.launch {
             accountRepository.accounts.collect { accounts ->
+                absAccount = accounts.firstOrNull {
+                    it.isEnabled && it.type is AccountType.Audiobookshelf
+                }
                 _api.value = apiProvider.apiFrom(accounts)
             }
         }
@@ -84,6 +100,7 @@ class PodcastEpisodeListViewModel @Inject constructor(
             _episodesState.value = AbsLoadState.Loading
             try {
                 val order = persistenceService.loadSettings().podcastEpisodeSortOrder
+                loadedOrder = order
                 val item = api.getItem(itemId)
                 _showTitle.value = item.media?.metadata?.title
                 val sorted = sortedEpisodes(item.media?.episodes ?: emptyList(), order)
@@ -106,6 +123,24 @@ class PodcastEpisodeListViewModel @Inject constructor(
     fun onEpisodeVisible(episodeId: String) {
         viewModelScope.launch {
             hydrator.hydrate(listOf(itemId to episodeId))
+        }
+    }
+
+    /**
+     * Plays an episode (beads_adagio-59p.2.2): builds the auto-play context
+     * from the already-loaded episode list + order and hands it to the
+     * playback engine via [PodcastPlaybackLauncher].
+     */
+    fun playEpisode(episodeId: String) {
+        val account = absAccount ?: return
+        val context = PodcastPlaybackContext(
+            libraryItemId = itemId,
+            showTitle = _showTitle.value,
+            episodes = _episodes.value,
+            order = loadedOrder,
+        )
+        viewModelScope.launch {
+            playbackLauncher.play(account, itemId, episodeId, context)
         }
     }
 

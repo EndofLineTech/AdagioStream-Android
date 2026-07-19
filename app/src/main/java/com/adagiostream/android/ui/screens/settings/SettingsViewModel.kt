@@ -15,6 +15,7 @@ import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeEndBehavior
 import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
 import com.adagiostream.android.service.download.DownloadManager
 import com.adagiostream.android.service.library.MusicLibraryRepository
@@ -215,6 +216,12 @@ class SettingsViewModel @Inject constructor(
     /** Podcast episode list order (beads_adagio-59p.2.1), ABS-only setting. */
     fun updatePodcastEpisodeSortOrder(order: PodcastEpisodeOrder) {
         _settings.value = _settings.value.copy(podcastEpisodeSortOrder = order)
+        save()
+    }
+
+    /** Podcast episode end behavior (beads_adagio-59p.2.2), ABS-only setting. */
+    fun updatePodcastEpisodeEndBehavior(behavior: PodcastEpisodeEndBehavior) {
+        _settings.value = _settings.value.copy(podcastEpisodeEndBehavior = behavior)
         save()
     }
 

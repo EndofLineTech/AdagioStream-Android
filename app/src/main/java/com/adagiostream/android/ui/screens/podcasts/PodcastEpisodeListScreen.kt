@@ -33,16 +33,13 @@ import com.adagiostream.android.ui.screens.audiobooks.AbsLoadState
 /**
  * One podcast show's episode list (beads_adagio-59p.2.1), sorted per the
  * episode-order setting, with per-row progress hydrated on visibility.
- *
- * @param onEpisodeClick the playback seam for 59p.2.2 — that bead replaces
- *   the no-op with open-session-and-play. Until then episode rows are
- *   navigation-inert.
+ * Tapping an episode plays it (beads_adagio-59p.2.2) via
+ * [PodcastEpisodeListViewModel.playEpisode].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PodcastEpisodeListScreen(
     viewModel: PodcastEpisodeListViewModel = hiltViewModel(),
-    onEpisodeClick: (itemId: String, episodeId: String) -> Unit,
     onBack: () -> Unit,
 ) {
     val api by viewModel.api.collectAsStateWithLifecycle()
@@ -131,7 +128,7 @@ fun PodcastEpisodeListScreen(
                         } else {
                             null
                         },
-                        onClick = { onEpisodeClick(viewModel.itemId, episode.id) },
+                        onClick = { viewModel.playEpisode(episode.id) },
                     )
                     HorizontalDivider(modifier = Modifier.padding(start = 36.dp))
                 }

@@ -12,6 +12,7 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
 import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
+import com.adagiostream.android.service.audiobookshelf.PodcastPlaybackContext
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.testutil.MainDispatcherRule
 import com.adagiostream.android.ui.screens.audiobooks.AbsLoadState
@@ -57,6 +58,15 @@ class PodcastEpisodeListViewModelTest {
 
     /** Counts progress-endpoint hits per episode id. */
     private val progressHits = ConcurrentHashMap<String, AtomicInteger>()
+
+    /** Records playbackLauncher invocations (beads_adagio-59p.2.2). */
+    data class LaunchedPlay(
+        val accountId: String,
+        val showId: String,
+        val episodeId: String,
+        val context: PodcastPlaybackContext?,
+    )
+    private val launchedPlays = mutableListOf<LaunchedPlay>()
 
     // show1's episodes arrive in scrambled wire order; ep-mid is undated.
     private val itemBody = """{"id":"show1","media":{"metadata":{"title":"The Show"},"episodes":[
@@ -131,6 +141,9 @@ class PodcastEpisodeListViewModelTest {
                 factory = factory,
             ),
             persistenceService = persistenceService,
+            playbackLauncher = { account, showId, episodeId, context ->
+                launchedPlays += LaunchedPlay(account.id, showId, episodeId, context)
+            },
             savedStateHandle = SavedStateHandle(mapOf("itemId" to "show1")),
         )
     }
@@ -207,6 +220,43 @@ class PodcastEpisodeListViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(1, progressHits["ep-new"]?.get())
+    }
+
+    @Test
+    fun `playEpisode launches with the loaded context - list, order and show title`() = runTest {
+        storedSettings = AppSettings(podcastEpisodeSortOrder = PodcastEpisodeOrder.OLDEST_FIRST)
+        val viewModel = buildViewModel()
+        setAbsAccount()
+
+        viewModel.episodesState.test {
+            assertEquals(AbsLoadState.Idle, awaitItem())
+            viewModel.load()
+            assertEquals(AbsLoadState.Loading, awaitItem())
+            assertEquals(AbsLoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.playEpisode("ep-mid")
+
+        assertEquals(1, launchedPlays.size)
+        val play = launchedPlays.single()
+        assertEquals("test-abs", play.accountId)
+        assertEquals("show1", play.showId)
+        assertEquals("ep-mid", play.episodeId)
+        val context = play.context!!
+        assertEquals("show1", context.libraryItemId)
+        assertEquals("The Show", context.showTitle)
+        assertEquals(PodcastEpisodeOrder.OLDEST_FIRST, context.order)
+        assertEquals(
+            listOf("ep-old", "ep-mid", "ep-new", "ep-undated"),
+            context.episodes.map { it.id },
+        )
+    }
+
+    @Test
+    fun `playEpisode without an ABS account is a no-op`() = runTest {
+        val viewModel = buildViewModel()
+        viewModel.playEpisode("ep-old")
+        assertTrue(launchedPlays.isEmpty())
     }
 
     @Test

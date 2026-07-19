@@ -1,7 +1,13 @@
 package com.adagiostream.android.service.audiobookshelf
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import java.text.ParsePosition
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -28,6 +34,134 @@ enum class PodcastEpisodeOrder(val displayName: String) {
 
     @SerialName("oldestFirst")
     OLDEST_FIRST("Oldest First"),
+}
+
+/**
+ * What to auto-play when a podcast episode ends (beads_adagio-59p.2.2, iOS
+ * parity: `PodcastEpisodeEndBehavior`). Serial names match the iOS raw values
+ * so exports stay comparable. Default is [NEXT_UNPLAYED] (iOS default): it can
+ * only advance into the future, so finishing the newest episode stops instead
+ * of replaying something older.
+ */
+@Serializable(with = PodcastEpisodeEndBehaviorSerializer::class)
+enum class PodcastEpisodeEndBehavior(val serialName: String, val displayName: String) {
+    /** Stop at the end of the episode. No auto-advance. */
+    STOP("stop", "Stop"),
+
+    /** Closest strictly-newer-by-pubDate unfinished episode; undated episodes
+     *  are never selected. */
+    NEXT_UNPLAYED("nextUnplayed", "Next Unplayed"),
+
+    /** Walk the display order ([PodcastEpisodeOrder] via [sortedEpisodes])
+     *  skipping finished episodes; stop when none remain. */
+    CONTINUE_IN_SORT_ORDER("continueInSortOrder", "Sort Order"),
+}
+
+/**
+ * Tolerant serializer: an unknown/garbage stored value decodes to the default
+ * ([PodcastEpisodeEndBehavior.NEXT_UNPLAYED]) instead of failing the whole
+ * AppSettings decode — same pattern as `SXMMetadataSourceSerializer`.
+ */
+object PodcastEpisodeEndBehaviorSerializer : KSerializer<PodcastEpisodeEndBehavior> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("PodcastEpisodeEndBehavior", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: PodcastEpisodeEndBehavior) =
+        encoder.encodeString(value.serialName)
+
+    override fun deserialize(decoder: Decoder): PodcastEpisodeEndBehavior {
+        val raw = decoder.decodeString()
+        return PodcastEpisodeEndBehavior.entries.firstOrNull { it.serialName == raw }
+            ?: PodcastEpisodeEndBehavior.NEXT_UNPLAYED
+    }
+}
+
+/**
+ * The show's episode list + display order — enough state to answer "what
+ * plays after this episode ends" without re-fetching the show (iOS parity:
+ * `PodcastPlaybackContext`). Carried inside the coordinator's active session
+ * by beads_adagio-59p.2.2.
+ */
+data class PodcastPlaybackContext(
+    /** The show's library item id. */
+    val libraryItemId: String,
+    val showTitle: String?,
+    /** Episodes in server wire order (sorting happens per-behavior). */
+    val episodes: List<AbsEpisode>,
+    val order: PodcastEpisodeOrder,
+)
+
+/**
+ * The episode that plays after [after] ends, per [behavior]. `null` means
+ * stop — either the policy says so ([PodcastEpisodeEndBehavior.STOP]) or
+ * nothing left qualifies. Pure — [isFinished] is an injected predicate so the
+ * caller can hydrate per-episode progress on demand (see [selectNextEpisode]).
+ *
+ * - [PodcastEpisodeEndBehavior.NEXT_UNPLAYED]: closest strictly-newer-by-
+ *   `pubDate` unfinished episode, regardless of display [order]. Undated
+ *   episodes have no comparable `pubDate` and are never selected; an undated
+ *   CURRENT episode yields null.
+ * - [PodcastEpisodeEndBehavior.CONTINUE_IN_SORT_ORDER]: first unfinished
+ *   episode walking [order] forward from [after] in [sortedEpisodes].
+ */
+fun nextEpisode(
+    episodes: List<AbsEpisode>,
+    after: String,
+    order: PodcastEpisodeOrder,
+    behavior: PodcastEpisodeEndBehavior,
+    isFinished: (String) -> Boolean,
+): AbsEpisode? = when (behavior) {
+    PodcastEpisodeEndBehavior.STOP -> null
+
+    PodcastEpisodeEndBehavior.NEXT_UNPLAYED -> {
+        val currentDate = episodes.firstOrNull { it.id == after }?.let { parsePubDate(it.pubDate) }
+        if (currentDate == null) {
+            null
+        } else {
+            episodes
+                .mapNotNull { ep -> parsePubDate(ep.pubDate)?.takeIf { it > currentDate }?.let { ep to it } }
+                .filterNot { isFinished(it.first.id) }
+                .minByOrNull { it.second }
+                ?.first
+        }
+    }
+
+    PodcastEpisodeEndBehavior.CONTINUE_IN_SORT_ORDER -> {
+        val ordered = sortedEpisodes(episodes, order)
+        val pos = ordered.indexOfFirst { it.id == after }
+        if (pos < 0) null else ordered.drop(pos + 1).firstOrNull { !isFinished(it.id) }
+    }
+}
+
+/**
+ * Resolves the next episode to auto-play, hydrating per-episode progress ONLY
+ * as needed (iOS parity: `AudioPlayerService.nextPodcastEpisode`). [nextEpisode]
+ * is the pure selector; this loop feeds it a growing finished-id set, fetching
+ * one new candidate's progress per iteration via [progressLookup], until the
+ * selector converges on an episode already known unfinished or returns null.
+ * Bounded by the show's episode count — each iteration hydrates a distinct id.
+ */
+suspend fun selectNextEpisode(
+    context: PodcastPlaybackContext,
+    after: String,
+    behavior: PodcastEpisodeEndBehavior,
+    progressLookup: suspend (episodeId: String) -> AbsMediaProgress?,
+): AbsEpisode? {
+    val finishedIds = mutableSetOf<String>()
+    val checkedIds = mutableSetOf<String>()
+    while (true) {
+        val candidate = nextEpisode(context.episodes, after, context.order, behavior) {
+            it in finishedIds
+        } ?: return null
+        // Already hydrated and known unfinished — the selector is stably
+        // re-selecting it, so it's the answer.
+        if (!checkedIds.add(candidate.id)) return candidate
+        if (isFinishedProgress(progressLookup(candidate.id))) {
+            finishedIds.add(candidate.id) // re-run the selector so it skips this one
+        } else {
+            return candidate
+        }
+    }
 }
 
 /**

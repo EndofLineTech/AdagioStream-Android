@@ -64,6 +64,7 @@ import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SXMMetadataSource
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeEndBehavior
 import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
 import com.adagiostream.android.util.BitrateFormatter
 import com.adagiostream.android.util.DebugLogger
@@ -568,6 +569,29 @@ fun SettingsScreen(
                 }
             }
             FooterText("How podcast episode lists are ordered. Also sets the direction auto-play walks through a show.")
+
+            // ---- Podcast episode end behavior (beads_adagio-59p.2.2) ----
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "When an Episode Ends",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                PodcastEpisodeEndBehavior.entries.forEachIndexed { index, behavior ->
+                    SegmentedButton(
+                        selected = settings.podcastEpisodeEndBehavior == behavior,
+                        onClick = { viewModel.updatePodcastEpisodeEndBehavior(behavior) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = PodcastEpisodeEndBehavior.entries.size,
+                        ),
+                    ) {
+                        Text(text = behavior.displayName, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            FooterText("What plays when a podcast episode finishes: stop, the closest newer unplayed episode, or the next unfinished episode in your sort order.")
         }
 
         Spacer(modifier = Modifier.height(16.dp))

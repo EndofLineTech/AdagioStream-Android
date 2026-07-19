@@ -3,6 +3,8 @@ package com.adagiostream.android.ui.screens.podcasts
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.adagiostream.android.model.Account
+import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
 import com.adagiostream.android.service.audiobookshelf.AbsEpisode
 import com.adagiostream.android.service.audiobookshelf.AbsMediaProgress
@@ -11,11 +13,13 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiExceptio
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeEntry
 import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
+import com.adagiostream.android.service.audiobookshelf.PodcastPlaybackContext
 import com.adagiostream.android.service.audiobookshelf.PodcastProgressHydrator
 import com.adagiostream.android.service.audiobookshelf.PodcastShow
 import com.adagiostream.android.service.audiobookshelf.partitionItemsInProgress
 import com.adagiostream.android.service.audiobookshelf.sortedEpisodes
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.player.PodcastPlaybackLauncher
 import com.adagiostream.android.ui.screens.audiobooks.AbsLoadState
 import com.adagiostream.android.ui.screens.audiobooks.userMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -48,6 +52,7 @@ class PodcastLibraryViewModel @Inject constructor(
     accountRepository: AccountRepository,
     private val apiProvider: AudiobookshelfApiProvider,
     private val persistenceService: PersistenceService,
+    private val playbackLauncher: PodcastPlaybackLauncher,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -112,9 +117,15 @@ class PodcastLibraryViewModel @Inject constructor(
      *  so re-entering the mode doesn't refetch. */
     private val showEpisodesCache = mutableMapOf<String, List<AbsEpisode>>()
 
+    /** The account behind [api] — the launcher plays through it. */
+    private var absAccount: Account? = null
+
     init {
         viewModelScope.launch {
             accountRepository.accounts.collect { accounts ->
+                absAccount = accounts.firstOrNull {
+                    it.isEnabled && it.type is AccountType.Audiobookshelf
+                }
                 _api.value = apiProvider.apiFrom(accounts)
             }
         }
@@ -220,6 +231,27 @@ class PodcastLibraryViewModel @Inject constructor(
     fun onEpisodeVisible(showLibraryItemId: String, episodeId: String) {
         viewModelScope.launch {
             hydrator.hydrate(listOf(showLibraryItemId to episodeId))
+        }
+    }
+
+    /**
+     * Plays an episode from the Continue Listening shelf or the Recent
+     * Episodes list (beads_adagio-59p.2.2). When the show's episode list is
+     * already cached (Recent mode fetched it) the full auto-play context goes
+     * along; otherwise the coordinator fetches the show detail itself.
+     */
+    fun playEpisode(entry: PodcastEpisodeEntry) {
+        val account = absAccount ?: return
+        val context = showEpisodesCache[entry.showLibraryItemId]?.let { episodes ->
+            PodcastPlaybackContext(
+                libraryItemId = entry.showLibraryItemId,
+                showTitle = entry.showTitle,
+                episodes = episodes,
+                order = _episodeOrder.value,
+            )
+        }
+        viewModelScope.launch {
+            playbackLauncher.play(account, entry.showLibraryItemId, entry.episode.id, context)
         }
     }
 
