@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.WifiOff
@@ -65,6 +66,7 @@ fun MusicLibraryScreen(
     onSearchClick: () -> Unit = {},
     onPlaylistsClick: () -> Unit = {},
     onAudiobooksClick: () -> Unit = {},
+    onPodcastsClick: () -> Unit = {},
     onAddAccountClick: () -> Unit = {},
 ) {
     val api by viewModel.api.collectAsStateWithLifecycle()
@@ -73,6 +75,7 @@ fun MusicLibraryScreen(
     val offlineMode by viewModel.offlineMode.collectAsStateWithLifecycle()
     val downloadedTracks by viewModel.downloadedTracks.collectAsStateWithLifecycle()
     val audiobooksAvailable by viewModel.audiobooksAvailable.collectAsStateWithLifecycle()
+    val podcastsAvailable by viewModel.podcastsAvailable.collectAsStateWithLifecycle()
 
     // Load artists on first appearance when an API is available (suppressed in
     // offline mode — baw.12).
@@ -115,6 +118,10 @@ fun MusicLibraryScreen(
             api == null -> Column(modifier = Modifier.fillMaxSize()) {
                 if (audiobooksAvailable && !offlineMode) {
                     AudiobooksBrowseRow(onClick = onAudiobooksClick)
+                    HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
+                }
+                if (podcastsAvailable && !offlineMode) {
+                    PodcastsBrowseRow(onClick = onPodcastsClick)
                     HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
                 }
                 NoAccountEmptyState(onAddAccountClick = onAddAccountClick)
@@ -198,11 +205,13 @@ fun MusicLibraryScreen(
                     artists = artists,
                     api = api,
                     showAudiobooks = audiobooksAvailable,
+                    showPodcasts = podcastsAvailable,
                     onArtistClick = onArtistClick,
                     onGenresClick = onGenresClick,
                     onAlbumsClick = onAlbumsClick,
                     onPlaylistsClick = onPlaylistsClick,
                     onAudiobooksClick = onAudiobooksClick,
+                    onPodcastsClick = onPodcastsClick,
                 )
             }
         }
@@ -350,11 +359,13 @@ private fun ArtistList(
     artists: List<Artist>,
     api: com.adagiostream.android.service.navidrome.NavidromeApi?,
     showAudiobooks: Boolean,
+    showPodcasts: Boolean,
     onArtistClick: (artistId: String) -> Unit,
     onGenresClick: () -> Unit,
     onAlbumsClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
     onAudiobooksClick: () -> Unit,
+    onPodcastsClick: () -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         // Browse-by-album-list shortcut (baw.9.1) — shown above the artist list.
@@ -380,6 +391,15 @@ private fun ArtistList(
         if (showAudiobooks) {
             item {
                 AudiobooksBrowseRow(onClick = onAudiobooksClick)
+                HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
+            }
+        }
+
+        // Podcasts shortcut (beads_adagio-59p.2.1) — only when the ABS
+        // account has a podcast library.
+        if (showPodcasts) {
+            item {
+                PodcastsBrowseRow(onClick = onPodcastsClick)
                 HorizontalDivider(modifier = Modifier.padding(start = 60.dp))
             }
         }
@@ -457,6 +477,44 @@ private fun AudiobooksBrowseRow(onClick: () -> Unit) {
 
         Text(
             text = "Audiobooks",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+/** Podcasts browse shortcut (beads_adagio-59p.2.1). */
+@Composable
+private fun PodcastsBrowseRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(44.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Podcasts,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Text(
+            text = "Podcasts",
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.weight(1f),
         )

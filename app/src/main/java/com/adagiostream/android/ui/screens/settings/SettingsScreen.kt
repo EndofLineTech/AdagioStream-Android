@@ -64,6 +64,7 @@ import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.model.SXMMetadataSource
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
+import com.adagiostream.android.service.audiobookshelf.PodcastEpisodeOrder
 import com.adagiostream.android.util.BitrateFormatter
 import com.adagiostream.android.util.DebugLogger
 import kotlin.math.roundToInt
@@ -80,6 +81,7 @@ fun SettingsScreen(
     onDataDeleted: (() -> Unit)? = null,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val hasAudiobookshelfAccount by viewModel.hasAudiobookshelfAccount.collectAsStateWithLifecycle()
     val accountCount by viewModel.accountCount.collectAsStateWithLifecycle()
     val channelCount by viewModel.channelCount.collectAsStateWithLifecycle()
     val favoritesCount by viewModel.favoritesCount.collectAsStateWithLifecycle()
@@ -541,6 +543,32 @@ fun SettingsScreen(
             }
         }
         FooterText("When a channel is carrying a live game, show the score instead of song metadata on the Now Playing screen and lock screen.")
+
+        // ---- Podcast Episode Order (beads_adagio-59p.2.1) — only meaningful
+        // with an Audiobookshelf account ----
+        if (hasAudiobookshelfAccount) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Podcast Episode Order",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                PodcastEpisodeOrder.entries.forEachIndexed { index, order ->
+                    SegmentedButton(
+                        selected = settings.podcastEpisodeSortOrder == order,
+                        onClick = { viewModel.updatePodcastEpisodeSortOrder(order) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = PodcastEpisodeOrder.entries.size,
+                        ),
+                    ) {
+                        Text(text = order.displayName, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            FooterText("How podcast episode lists are ordered. Also sets the direction auto-play walks through a show.")
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 

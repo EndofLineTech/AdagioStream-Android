@@ -5,6 +5,7 @@ import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.service.account.AccountRepository
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.library.db.DownloadEntity
 import com.adagiostream.android.service.navidrome.NavidromeApi
@@ -112,6 +113,11 @@ class NavidromeLibraryViewModelTest {
             ),
             persistenceService = fakePersistenceService,
             libraryRepository = fakeLibraryRepository,
+            // No ABS account in these tests — the podcast-library probe never
+            // fires (apiFrom returns null → podcastsAvailable stays false).
+            audiobookshelfApiProvider = mockk<AudiobookshelfApiProvider> {
+                every { apiFrom(any()) } returns null
+            },
         )
     }
 

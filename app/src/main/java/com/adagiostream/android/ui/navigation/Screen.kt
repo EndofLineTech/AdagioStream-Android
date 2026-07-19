@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
@@ -135,6 +136,33 @@ sealed class Screen(
         icon = Icons.AutoMirrored.Filled.MenuBook,
     ) {
         fun createRoute(itemId: String): String = "music/audiobooks/item/$itemId"
+    }
+
+    /**
+     * Podcasts entry (beads_adagio-59p.2.1) — library picker when the server
+     * has >1 podcast library, otherwise auto-forwards to [PodcastLibrary].
+     * Reached from a "Podcasts" row on the Library tab (shown only when an
+     * Audiobookshelf account with a podcast library exists) — same pattern
+     * as [Audiobooks].
+     */
+    data object Podcasts : Screen("music/podcasts", "Podcasts", Icons.Default.Podcasts)
+
+    /** Show grid / recent episodes for one podcast library (beads_adagio-59p.2.1). */
+    data object PodcastLibrary : Screen(
+        route = "music/podcasts/library/{libraryId}",
+        label = "Podcasts",
+        icon = Icons.Default.Podcasts,
+    ) {
+        fun createRoute(libraryId: String): String = "music/podcasts/library/$libraryId"
+    }
+
+    /** Episode list for one podcast show (beads_adagio-59p.2.1). */
+    data object PodcastShowDetail : Screen(
+        route = "music/podcasts/show/{itemId}",
+        label = "Podcast",
+        icon = Icons.Default.Podcasts,
+    ) {
+        fun createRoute(itemId: String): String = "music/podcasts/show/$itemId"
     }
 
     /**

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.navidrome.Album
 import com.adagiostream.android.service.navidrome.AlbumListType
@@ -45,6 +46,7 @@ class NavidromeLibraryViewModel @Inject constructor(
     private val musicPlaybackCoordinator: MusicPlaybackCoordinator,
     private val persistenceService: PersistenceService,
     private val libraryRepository: MusicLibraryRepository,
+    private val audiobookshelfApiProvider: AudiobookshelfApiProvider,
 ) : ViewModel() {
 
     // -------------------------------------------------------------------------
@@ -96,6 +98,18 @@ class NavidromeLibraryViewModel @Inject constructor(
      */
     val audiobooksAvailable: StateFlow<Boolean> = _audiobooksAvailable.asStateFlow()
 
+    private val _podcastsAvailable = MutableStateFlow(false)
+
+    /**
+     * Whether the enabled Audiobookshelf account has at least one PODCAST
+     * library (beads_adagio-59p.2.1) — gates the "Podcasts" browse row.
+     * Unlike [audiobooksAvailable] (account presence is enough), this needs a
+     * `GET /api/libraries` probe, done best-effort per account change: a
+     * failed probe just leaves the row hidden, exactly like iOS's
+     * `hasPodcastLibrary` gate.
+     */
+    val podcastsAvailable: StateFlow<Boolean> = _podcastsAvailable.asStateFlow()
+
     init {
         // Watch for account changes (add/remove/edit) and rebuild the API.
         viewModelScope.launch {
@@ -110,6 +124,24 @@ class NavidromeLibraryViewModel @Inject constructor(
 
                 _audiobooksAvailable.value = accounts.any {
                     it.isEnabled && it.type is AccountType.Audiobookshelf
+                }
+
+                val absApi = audiobookshelfApiProvider.apiFrom(accounts)
+                if (absApi == null) {
+                    _podcastsAvailable.value = false
+                } else {
+                    // ponytail: re-probes on every accounts emission (rare —
+                    // add/edit/token rotation); cache per host if it ever
+                    // shows up in traffic.
+                    launch {
+                        _podcastsAvailable.value = try {
+                            absApi.getLibraries().any { it.isPodcast }
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            false
+                        }
+                    }
                 }
             }
         }
