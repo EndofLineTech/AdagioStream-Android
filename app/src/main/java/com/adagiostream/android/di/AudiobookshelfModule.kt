@@ -9,6 +9,7 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.player.AudiobookPlaybackLauncher
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import dagger.Lazy
 import dagger.Module
@@ -100,4 +101,14 @@ object AudiobookshelfModule {
             },
         )
     }
+
+    /**
+     * ponytail: no-op until the playback branch (59p.1.5) lands — it replaces
+     * this binding with the real audiobook player wiring; the browsing UI
+     * (beads_adagio-59p.1.4) only ever talks to the interface.
+     */
+    @Provides
+    @Singleton
+    fun provideAudiobookPlaybackLauncher(): AudiobookPlaybackLauncher =
+        AudiobookPlaybackLauncher { _, _, _ -> }
 }

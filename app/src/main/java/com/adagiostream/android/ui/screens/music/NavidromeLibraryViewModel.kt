@@ -87,6 +87,15 @@ class NavidromeLibraryViewModel @Inject constructor(
     /** The active [NavidromeApi], or `null` if no Subsonic account is configured. */
     val api: StateFlow<NavidromeApi?> = _api.asStateFlow()
 
+    private val _audiobooksAvailable = MutableStateFlow(false)
+
+    /**
+     * Whether an enabled Audiobookshelf account exists (beads_adagio-59p.1.4)
+     * — gates the "Audiobooks" browse row on the Library tab, mirroring how
+     * the Navidrome browse gates on a Subsonic account.
+     */
+    val audiobooksAvailable: StateFlow<Boolean> = _audiobooksAvailable.asStateFlow()
+
     init {
         // Watch for account changes (add/remove/edit) and rebuild the API.
         viewModelScope.launch {
@@ -97,6 +106,10 @@ class NavidromeLibraryViewModel @Inject constructor(
 
                 _api.value = subsonic?.let { s ->
                     navidromeApiFactory.create(s.host, s.username, s.password)
+                }
+
+                _audiobooksAvailable.value = accounts.any {
+                    it.isEnabled && it.type is AccountType.Audiobookshelf
                 }
             }
         }
