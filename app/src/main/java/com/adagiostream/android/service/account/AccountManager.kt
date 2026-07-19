@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -258,7 +259,32 @@ class AccountManager @Inject constructor(
         )
     }
 
+    // -------------------------------------------------------------------------
+    // Account-edit listeners (beads_adagio-59p.1.4)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Invoked synchronously with the account id on every [updateAccount] /
+     * [deleteAccount] — NOT on [updateAccountCredentials], which is the
+     * token-rotation persistence path. Lets AudiobookshelfApiProvider evict
+     * its cached API when an account is edited (fresh login mints new tokens)
+     * or deleted, while rotation re-emits keep the same live instance.
+     */
+    private val accountEditListeners = CopyOnWriteArrayList<(String) -> Unit>()
+
+    /** Registers [listener] for account edit/delete events. Never unregistered — callers are singletons. */
+    fun addAccountEditListener(listener: (String) -> Unit) {
+        accountEditListeners += listener
+    }
+
+    private fun notifyAccountEdited(accountId: String) {
+        accountEditListeners.forEach { it(accountId) }
+    }
+
     suspend fun updateAccount(account: Account) {
+        // Evict caches BEFORE the accounts flow re-emits so collectors never
+        // resolve against a stale API instance (beads_adagio-59p.1.4 B1).
+        notifyAccountEdited(account.id)
         updateAccountCredentials(account)
         loadAllChannels()
     }
@@ -285,6 +311,7 @@ class AccountManager @Inject constructor(
     }
 
     suspend fun deleteAccount(accountId: String) {
+        notifyAccountEdited(accountId)
         val updated = _accounts.value.filter { it.id != accountId }
         _accounts.value = updated
         persistenceService.saveAccounts(updated)

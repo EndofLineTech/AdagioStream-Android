@@ -9,6 +9,7 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -74,9 +75,13 @@ class AudiobookListViewModel @Inject constructor(
                 _booksState.value = AbsLoadState.Error(e.message ?: "Unknown error")
             }
         }
+        // The shelf is intentionally SERVER-WIDE (items-in-progress spans all
+        // libraries), matching iOS's merged-library Continue Listening shelf.
         viewModelScope.launch {
             _continueListening.value = try {
                 continueListeningBooks(api.getItemsInProgress())
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 emptyList() // Best-effort: shelf failure never blocks the list.
             }

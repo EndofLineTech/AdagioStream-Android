@@ -24,6 +24,10 @@ import javax.inject.Singleton
  * The cache is keyed on account identity (id + host), NOT on the token pair —
  * a token rotation re-emits [AccountManager.accounts], and rebuilding the API
  * from the stale stored pair mid-flight would discard the live auth state.
+ * Account EDITS and DELETES instead evict explicitly via
+ * [AccountManager.addAccountEditListener] → [invalidate], so a re-login's
+ * fresh tokens are always picked up (and a deleted account leaves no ghost
+ * authed API).
  */
 @Singleton
 class AudiobookshelfApiProvider @Inject constructor(
@@ -35,6 +39,26 @@ class AudiobookshelfApiProvider @Inject constructor(
     private var cachedAccountId: String? = null
     private var cachedHost: String? = null
     private var cached: AudiobookshelfApi? = null
+
+    init {
+        // B1: an edited account carries a fresh login's token pair; without
+        // eviction the cached instance keeps serving its stale (possibly
+        // cleared) auth state forever — or rotates old-but-live tokens over
+        // the freshly-stored pair. Rotation persistence
+        // (updateAccountCredentials) does NOT fire this listener, so token
+        // refreshes keep the same live instance.
+        accountManager.addAccountEditListener { invalidate(it) }
+    }
+
+    /** Drops the cached API if it belongs to [accountId] (edit/delete eviction). */
+    @Synchronized
+    fun invalidate(accountId: String) {
+        if (cachedAccountId == accountId) {
+            cached = null
+            cachedAccountId = null
+            cachedHost = null
+        }
+    }
 
     /**
      * The API for the first enabled Audiobookshelf account in [accounts], or

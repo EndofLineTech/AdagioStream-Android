@@ -165,4 +165,26 @@ class AudiobookListViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `shelf failure never blocks the book list`() = runTest {
+        // Books succeed, items-in-progress 500s — list must still load.
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                when (request.url.encodedPath) {
+                    "/api/libraries/lib1/items" -> mockJson(200, itemsBody)
+                    else -> mockJson(500, """{"error":"boom"}""")
+                }
+        }
+        setAbsAccount()
+
+        viewModel.booksState.test {
+            assertEquals(AbsLoadState.Idle, awaitItem())
+            viewModel.load()
+            assertEquals(AbsLoadState.Loading, awaitItem())
+            assertEquals(AbsLoadState.Loaded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(emptyList<Any>(), viewModel.continueListening.value)
+    }
 }
