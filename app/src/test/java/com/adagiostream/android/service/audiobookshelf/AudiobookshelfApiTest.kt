@@ -128,6 +128,7 @@ class AudiobookshelfApiTest {
         assertEquals("0", request.url.queryParameter("limit"))
         assertEquals("0", request.url.queryParameter("page"))
         assertEquals("1", request.url.queryParameter("minified"))
+        assertEquals("progress", request.url.queryParameter("include"))
         assertEquals("media.metadata.title", request.url.queryParameter("sort"))
         assertEquals("Bearer acc-1", request.headers["Authorization"])
     }
