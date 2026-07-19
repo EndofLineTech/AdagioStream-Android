@@ -49,6 +49,7 @@ fun StorageManagementScreen(
     onBack: () -> Unit,
 ) {
     val items by viewModel.storageItems.collectAsStateWithLifecycle()
+    val audiobooks by viewModel.audiobookItems.collectAsStateWithLifecycle()
     val totalBytes by viewModel.totalBytes.collectAsStateWithLifecycle()
     var showDeleteAll by remember { mutableStateOf(false) }
 
@@ -90,7 +91,7 @@ fun StorageManagementScreen(
 
         HorizontalDivider()
 
-        if (items.isEmpty()) {
+        if (items.isEmpty() && audiobooks.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = "No downloaded music yet.\nTap the download icon on any track or album.",
@@ -102,49 +103,36 @@ fun StorageManagementScreen(
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(items, key = { it.trackId }) { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = item.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (item.subtitle.isNotBlank()) {
-                                Text(
-                                    text = item.subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
+                    DownloadedRow(
+                        title = item.title,
+                        subtitle = item.subtitle,
+                        sizeText = viewModel.formatSize(item.sizeBytes),
+                        onDelete = { viewModel.delete(item.trackId) },
+                    )
+                }
+                if (audiobooks.isNotEmpty()) {
+                    item(key = "audiobooks-header") {
                         Text(
-                            text = viewModel.formatSize(item.sizeBytes),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = "Audiobooks",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        IconButton(onClick = { viewModel.delete(item.trackId) }) {
-                            Icon(
-                                Icons.Filled.Delete,
-                                contentDescription = "Delete download",
-                                tint = MaterialTheme.colorScheme.error,
-                            )
-                        }
                     }
-                    HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+                    items(audiobooks, key = { "abs:${it.libraryItemId}" }) { book ->
+                        DownloadedRow(
+                            title = book.title,
+                            subtitle = book.author,
+                            sizeText = viewModel.formatSize(book.sizeBytes),
+                            onDelete = { viewModel.deleteAudiobook(book.libraryItemId) },
+                        )
+                    }
                 }
             }
         }
     }
 
+    // ponytail: "Delete All" covers music only (as its dialog says); audiobooks
+    // delete per book — add a bulk action if books ever pile up.
     if (showDeleteAll) {
         AlertDialog(
             onDismissRequest = { showDeleteAll = false },
@@ -163,4 +151,52 @@ fun StorageManagementScreen(
             },
         )
     }
+}
+
+/** One downloaded-content row: title/subtitle, size, delete (music + audiobooks). */
+@Composable
+private fun DownloadedRow(
+    title: String,
+    subtitle: String,
+    sizeText: String,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(
+            text = sizeText,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        IconButton(onClick = onDelete) {
+            Icon(
+                Icons.Filled.Delete,
+                contentDescription = "Delete download",
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+    HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
 }

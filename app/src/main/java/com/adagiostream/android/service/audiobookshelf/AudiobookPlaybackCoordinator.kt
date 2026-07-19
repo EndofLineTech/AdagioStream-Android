@@ -59,6 +59,8 @@ class AudiobookPlaybackCoordinator(
     private val playbackSource: StateFlow<PlaybackSource?>? = null,
     /** Persists rotated JWTs back to the encrypted account store (production). */
     private val onTokensRotated: (Account, AudiobookshelfAuth.Tokens?) -> Unit = { _, _ -> },
+    /** Downloaded-book manifests for the offline path (beads_adagio-59p.1.6); null = streaming only. */
+    private val offlineBooks: OfflineAudiobookSource? = null,
     internal val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     internal val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -213,13 +215,29 @@ class AudiobookPlaybackCoordinator(
 
         // Offline-first (iOS ymf.6): push queued progress BEFORE asking the
         // server for a resume position, so reconnecting never rewinds.
-        runCatching { queue.flush(api) }
+        if (!offlineMode()) runCatching { queue.flush(api) }
         val pendingPosition = queue.pendingPosition(libraryItemId)
 
-        val session = try {
-            api.openPlaybackSession(libraryItemId, deviceId = deviceId())
-        } catch (e: Exception) {
-            DebugLogger.log("ABS playAudiobook: open session failed — ${e::class.simpleName}", DebugLogger.Category.PLAYER)
+        // Offline gate (mirrors the LocalFirstResolver/offlineMode pattern):
+        // the local copy is used when the app's offline mode is on, or when the
+        // session open fails AND a complete download exists.
+        val session = if (offlineMode()) {
+            null
+        } else {
+            try {
+                api.openPlaybackSession(libraryItemId, deviceId = deviceId())
+            } catch (e: Exception) {
+                DebugLogger.log("ABS playAudiobook: open session failed — ${e::class.simpleName}", DebugLogger.Category.PLAYER)
+                null
+            }
+        }
+        if (session == null) {
+            val offline = offlineBooks?.completeBook(libraryItemId)
+            if (offline == null || offline.timeline.files.isEmpty()) {
+                DebugLogger.log("ABS playAudiobook: no session and no complete download", DebugLogger.Category.PLAYER)
+                return
+            }
+            startOffline(api, offline, resumeOverride, pendingPosition)
             return
         }
         val timeline = AudiobookTimeline(session.audioTracks.orEmpty(), session.chapters.orEmpty())
@@ -248,6 +266,45 @@ class AudiobookPlaybackCoordinator(
         lastObservedGlobal = resume
         lastSyncAtMs = clock()
         lastChapterTitle = timeline.chapterAt(resume)?.title
+        active = true
+        loadFileAt(resume)
+        startTicker()
+    }
+
+    /**
+     * Starts offline playback from a downloaded book's manifest — no server
+     * session (beads_adagio-59p.1.6). The [api] stays set with sessionId null,
+     * so every sync routes to the offline queue (batch-flushed on the next
+     * session open / app background). Resume: pending queue position, then the
+     * in-memory last-known, then the manifest-cached currentTime.
+     */
+    private fun startOffline(
+        api: AudiobookshelfApi,
+        offline: OfflineAudiobook,
+        resumeOverride: Double?,
+        pendingPosition: Double?,
+    ) {
+        this.api = api
+        this.timeline = offline.timeline
+        this.libraryItemId = offline.libraryItemId
+        this.sessionId = null // syncs go to the queue only
+        this.bookTitle = offline.title
+        this.author = offline.author
+        this.coverUrl = offline.coverPath?.let { java.io.File(it).toURI().toString() }
+        this.totalDuration = offline.timeline.totalDuration
+
+        val resume = resumePosition(
+            override = resumeOverride,
+            pendingQueue = pendingPosition,
+            sessionTime = null,
+            cached = lastKnownPositions[offline.libraryItemId]
+                ?: offline.currentTime.takeIf { it > 0.0 },
+        ).coerceIn(0.0, offline.timeline.totalDuration)
+
+        lastSyncedGlobal = resume
+        lastObservedGlobal = resume
+        lastSyncAtMs = clock()
+        lastChapterTitle = offline.timeline.chapterAt(resume)?.title
         active = true
         loadFileAt(resume)
         startTicker()
@@ -451,6 +508,16 @@ class AudiobookPlaybackCoordinator(
                 lastUpdate = clock(),
             ),
         )
+        cachePositionToManifest(itemId, global)
+    }
+
+    /**
+     * Mirrors an offline-queued position into the download manifest so offline
+     * resume survives process death after the queue drains (bead .1.6).
+     */
+    private fun cachePositionToManifest(itemId: String, global: Double) {
+        val offline = offlineBooks ?: return
+        scope.launch { runCatching { offline.savePosition(itemId, global) } }
     }
 
     // ---- Internals -----------------------------------------------------------
@@ -458,7 +525,13 @@ class AudiobookPlaybackCoordinator(
     private fun loadFileAt(globalSeconds: Double) {
         val tl = timeline ?: return
         val location = tl.locate(globalSeconds) ?: return
-        val url = api?.resolveContentUrl(location.file.contentUrl)?.toString()
+        // Offline manifests carry ready-to-play file:// URIs; server sessions
+        // carry server-relative paths that need host + token resolution.
+        val url = if (location.file.contentUrl.startsWith("file:")) {
+            location.file.contentUrl
+        } else {
+            api?.resolveContentUrl(location.file.contentUrl)?.toString()
+        }
         if (url == null) {
             DebugLogger.log("ABS loadFileAt: unresolvable content URL (no token?)", DebugLogger.Category.PLAYER)
             stop()
@@ -499,6 +572,10 @@ class AudiobookPlaybackCoordinator(
     }
 
     private fun deviceId(): String = persistenceService?.deviceId() ?: fallbackDeviceId
+
+    /** The app-wide offline toggle — same gate MusicPlaybackCoordinator uses. */
+    private fun offlineMode(): Boolean =
+        persistenceService?.settings?.value?.offlineMode == true
 
     private fun persistSpeed(value: Float) {
         val ps = persistenceService ?: return
@@ -571,6 +648,7 @@ class AudiobookPlaybackCoordinator(
                 lastUpdate = clock(),
             ),
         )
+        cachePositionToManifest(f.libraryItemId, f.global)
     }
 
     /** Fire-and-forget finalize — the stop/Idle path. Idempotent via [active]. */

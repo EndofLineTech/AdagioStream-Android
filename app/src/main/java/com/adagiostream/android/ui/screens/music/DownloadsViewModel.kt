@@ -2,6 +2,7 @@ package com.adagiostream.android.ui.screens.music
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.adagiostream.android.service.download.AudiobookDownloadManager
 import com.adagiostream.android.service.download.DownloadFileStore
 import com.adagiostream.android.service.download.DownloadManager
 import com.adagiostream.android.service.download.StorageAccounting
@@ -11,6 +12,7 @@ import com.adagiostream.android.service.navidrome.Track
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,6 +33,15 @@ data class DownloadedItem(
     val sizeBytes: Long,
 )
 
+/** A downloaded audiobook shown on the storage-management screen (beads_adagio-59p.1.6). */
+data class DownloadedAudiobookItem(
+    val libraryItemId: String,
+    val title: String,
+    val author: String,
+    val sizeBytes: Long,
+    val status: String,
+)
+
 /**
  * Drives the download UI (baw.6.2): per-track button state + actions, bulk
  * "Download All", and the storage-management listing.
@@ -42,6 +53,7 @@ class DownloadsViewModel @Inject constructor(
     private val downloadManager: DownloadManager,
     private val repository: MusicLibraryRepository,
     private val fileStore: DownloadFileStore,
+    private val audiobookDownloads: AudiobookDownloadManager,
 ) : ViewModel() {
 
     /** trackId → button state, kept live from the `downloads` table. */
@@ -67,11 +79,27 @@ class DownloadsViewModel @Inject constructor(
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Downloaded audiobooks (title + size) for the storage screen (beads_adagio-59p.1.6). */
+    val audiobookItems: StateFlow<List<DownloadedAudiobookItem>> =
+        audiobookDownloads.observeAll()
+            .map { rows ->
+                rows.map { row ->
+                    DownloadedAudiobookItem(
+                        libraryItemId = row.id,
+                        title = row.title,
+                        author = row.author ?: "",
+                        sizeBytes = audiobookDownloads.sizeOf(row),
+                        status = row.status,
+                    )
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     /** Total on-disk size of all downloads (File.length sums, never a DB counter). */
     val totalBytes: StateFlow<Long> =
-        storageItems
-            .map { items -> StorageAccounting.totalBytes(items.map { it.sizeBytes }) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+        combine(storageItems, audiobookItems) { music, books ->
+            StorageAccounting.totalBytes(music.map { it.sizeBytes } + books.map { it.sizeBytes })
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     fun formatSize(bytes: Long): String = StorageAccounting.formatSize(bytes)
 
@@ -98,6 +126,10 @@ class DownloadsViewModel @Inject constructor(
     fun retry(track: Track) = viewModelScope.launch { downloadManager.retry(track) }
 
     fun deleteAll() = viewModelScope.launch { downloadManager.deleteAll() }
+
+    /** Deletes one downloaded audiobook (files + manifest; cancels in-flight work). */
+    fun deleteAudiobook(libraryItemId: String) =
+        viewModelScope.launch { audiobookDownloads.delete(libraryItemId) }
 }
 
 /** Maps a stored status string to the button's UI state. */
