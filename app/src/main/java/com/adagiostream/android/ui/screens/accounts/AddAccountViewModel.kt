@@ -370,6 +370,12 @@ class AddAccountViewModel @Inject constructor(
         _ssoAuthorizeUrl.value = null
     }
 
+    /** The UI could not open a browser for the authorize URL (none installed). */
+    fun ssoLaunchFailed() {
+        pendingSso = null
+        _connectionTestState.value = ConnectionTestState.Error("No browser available for SSO sign-in")
+    }
+
     /**
      * Completes the SSO flow from the `adagiostream://oauth` browser redirect:
      * validates state and exchanges the code (with cookie replay) for the

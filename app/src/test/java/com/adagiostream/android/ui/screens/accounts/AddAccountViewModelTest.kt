@@ -799,6 +799,26 @@ class AddAccountViewModelTest {
     }
 
     @Test
+    fun `ssoLaunchFailed surfaces a no-browser error and resets the flow`() = runTest {
+        coEvery { oidc.startAuthorization(any(), any(), any()) } returns
+            AudiobookshelfOidc.Authorization("https://idp.example.com/auth", "")
+        val vm = absSsoViewModel()
+        vm.startSso()
+        advanceUntilIdle()
+        vm.ssoLaunchHandled()
+
+        vm.ssoLaunchFailed()
+
+        val state = vm.connectionTestState.value
+        assertTrue(state is ConnectionTestState.Error)
+        assertEquals("No browser available for SSO sign-in", (state as ConnectionTestState.Error).message)
+        // Flow was reset — a late callback must not attempt an exchange.
+        oidcCallbacks.publish("adagiostream://oauth?code=c&state=s")
+        advanceUntilIdle()
+        coVerify(exactly = 0) { oidc.exchange(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `startSso failure maps to a user-facing error`() = runTest {
         coEvery { oidc.startAuthorization(any(), any(), any()) } throws
             AudiobookshelfApiException.OidcFailed("sign-in start", 500, "IdP down")

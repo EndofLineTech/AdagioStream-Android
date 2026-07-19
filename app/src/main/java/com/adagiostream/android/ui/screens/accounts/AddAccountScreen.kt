@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import android.content.ActivityNotFoundException
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -90,7 +91,12 @@ fun AddAccountScreen(
     LaunchedEffect(ssoAuthorizeUrl) {
         ssoAuthorizeUrl?.let { url ->
             viewModel.ssoLaunchHandled()
-            CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
+            try {
+                CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
+            } catch (e: ActivityNotFoundException) {
+                // Browser-less device (kiosk / TV image) — fail soft, not crash.
+                viewModel.ssoLaunchFailed()
+            }
         }
     }
 

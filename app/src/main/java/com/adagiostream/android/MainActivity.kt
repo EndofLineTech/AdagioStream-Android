@@ -28,7 +28,11 @@ class MainActivity : AppCompatActivity() {
         setContent {
             MainScreen()
         }
-        handleOidcCallback(intent)
+        // Only a true cold start delivers a fresh deep link — a config-change
+        // recreation must not replay an already-consumed OIDC callback.
+        if (savedInstanceState == null) {
+            handleOidcCallback(intent)
+        }
     }
 
     // launchMode="singleTask" routes the adagiostream://oauth redirect here,
@@ -36,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     // AddAccount ViewModel (which holds the flow state) is still alive.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleOidcCallback(intent)
     }
 
