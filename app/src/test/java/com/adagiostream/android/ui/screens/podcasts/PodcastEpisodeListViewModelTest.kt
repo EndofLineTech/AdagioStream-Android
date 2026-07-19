@@ -144,6 +144,9 @@ class PodcastEpisodeListViewModelTest {
             playbackLauncher = { account, showId, episodeId, context ->
                 launchedPlays += LaunchedPlay(account.id, showId, episodeId, context)
             },
+            downloadActions = mockk(relaxed = true) {
+                every { observeAll() } returns kotlinx.coroutines.flow.flowOf(emptyList())
+            },
             savedStateHandle = SavedStateHandle(mapOf("itemId" to "show1")),
         )
     }
