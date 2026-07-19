@@ -3,6 +3,8 @@ package com.adagiostream.android.di
 import android.content.Context
 import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.metadata.ITunesSearchApi
+import com.adagiostream.android.service.metadata.SXMMetadataService
+import com.adagiostream.android.service.metadata.StellarTunerLogApi
 import com.adagiostream.android.service.metadata.XMPlaylistApi
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.CastManager
@@ -74,6 +76,22 @@ object AppModule {
     @Provides
     @Singleton
     fun provideXMPlaylistApi(client: OkHttpClient): XMPlaylistApi = XMPlaylistApi(client)
+
+    @Provides
+    @Singleton
+    fun provideStellarTunerLogApi(client: OkHttpClient): StellarTunerLogApi = StellarTunerLogApi(client)
+
+    @Provides
+    @Singleton
+    fun provideSXMMetadataService(
+        xmPlaylistApi: XMPlaylistApi,
+        stellarTunerLogApi: StellarTunerLogApi,
+        persistenceService: PersistenceService,
+    ): SXMMetadataService = SXMMetadataService(
+        xmPlaylistApi = xmPlaylistApi,
+        stellarTunerLogApi = stellarTunerLogApi,
+        initialSource = persistenceService.loadSettingsSync().sxmMetadataSource,
+    )
 
     @Provides
     @Singleton
