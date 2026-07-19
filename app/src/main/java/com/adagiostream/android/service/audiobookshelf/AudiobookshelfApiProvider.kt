@@ -98,8 +98,15 @@ class AudiobookshelfApiProvider @Inject constructor(
         }
     }
 
-    /** Writes the rotated (or cleared) token pair back to the encrypted store. */
+    /** Writes the rotated token pair back to the encrypted store. */
     private fun persistTokens(accountId: String, tokens: AudiobookshelfAuth.Tokens?) {
+        // B2 (59p.1.6): NEVER persist a cleared pair. A definitive refresh
+        // failure on one caller (e.g. a background download worker losing a
+        // rotation race to the foreground) must not null out tokens another
+        // caller just rotated and stored. Worst case the stale stored pair
+        // re-401s on next use and the user re-logs in via account edit —
+        // which evicts this instance and picks up the fresh pair.
+        if (tokens == null) return
         scope.launch {
             val account = accountManager.accounts.value.firstOrNull { it.id == accountId } ?: return@launch
             val abs = account.type as? AccountType.Audiobookshelf ?: return@launch

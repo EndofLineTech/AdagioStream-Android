@@ -138,13 +138,14 @@ class AudiobookPlaybackCoordinatorTest {
         every { api.coverUrl(any(), any(), any()) } returns "https://abs.example/cover".toHttpUrl()
     }
 
-    private fun coordinator() = AudiobookPlaybackCoordinator(
+    private fun coordinator(offlineBooks: OfflineAudiobookSource? = null) = AudiobookPlaybackCoordinator(
         player = player,
         queue = queue,
         apiFactory = { _, _, _, _, _ -> api },
         persistenceService = null,
         playerState = playerState,
         playbackSource = sourceFlow,
+        offlineBooks = offlineBooks,
         scope = testScope,
         clock = { nowMs },
     )
@@ -400,6 +401,118 @@ class AudiobookPlaybackCoordinatorTest {
         coVerify(exactly = 1) {
             api.syncSession("sess1", currentTime = 300.0, timeListened = 10.0, duration = 400.0)
         }
+    }
+
+    // ---- offline playback from a downloaded book (bead .1.6) ---------------
+
+    /** Serves one downloaded book; records manifest position writes. */
+    private class FakeOfflineSource(private val book: OfflineAudiobook?) : OfflineAudiobookSource {
+        val savedPositions = mutableListOf<Pair<String, Double>>()
+        override suspend fun completeBook(libraryItemId: String): OfflineAudiobook? = book
+        override suspend fun savePosition(libraryItemId: String, seconds: Double) {
+            savedPositions += libraryItemId to seconds
+        }
+    }
+
+    /** Same three-file shape as the streaming session, but with file:// URLs. */
+    private fun offlineBook(currentTime: Double = 0.0) = OfflineAudiobook(
+        libraryItemId = "book1",
+        title = "My Book",
+        author = "Author",
+        coverPath = "/dl/abs_book1_cover.webp",
+        currentTime = currentTime,
+        timeline = AudiobookTimeline(
+            listOf(
+                AbsAudioTrack(0, 0.0, 100.0, null, "file:///dl/f0.m4b"),
+                AbsAudioTrack(1, 100.0, 150.0, null, "file:///dl/f1.m4b"),
+                AbsAudioTrack(2, 250.0, 150.0, null, "file:///dl/f2.m4b"),
+            ),
+            chapters,
+        ),
+    )
+
+    @Test
+    fun `online sync updates the manifest position cache`() = runTest {
+        // Review B1: hours of ONLINE listening must keep the download
+        // manifest's resume position fresh — reboot + airplane mode would
+        // otherwise resume at the stale download-time position.
+        val offline = FakeOfflineSource(offlineBook())
+        val c = coordinator(offline)
+        c.playAudiobook(account, "book1") // streaming session opens fine
+
+        nowMs = 20_000; player.positionMs = 20_000
+        c.onTick() // periodic ONLINE sync
+        coVerify(exactly = 1) { api.syncSession(any(), any(), any(), any()) }
+        assertTrue(offline.savedPositions.contains("book1" to 20.0))
+    }
+
+    @Test
+    fun `session open failure falls back to the complete local copy`() = runTest {
+        coEvery { api.openPlaybackSession(any(), any(), any(), any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+
+        val offline = FakeOfflineSource(offlineBook(currentTime = 50.0))
+        coordinator(offline).playAudiobook(account, "book1")
+
+        val play = player.lastPlay!!
+        assertEquals("file:///dl/f0.m4b", play.url)
+        assertEquals(50_000L, play.startPositionMs) // manifest-cached resume
+        assertEquals("My Book", play.source.bookTitle)
+        assertEquals(400.0, play.source.totalDurationSeconds, 1e-9)
+    }
+
+    @Test
+    fun `no session and no complete download does not start playback`() = runTest {
+        coEvery { api.openPlaybackSession(any(), any(), any(), any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+
+        coordinator(FakeOfflineSource(null)).playAudiobook(account, "book1")
+        assertNull(player.lastPlay)
+    }
+
+    @Test
+    fun `offline resume - pending queue position beats the manifest cache`() = runTest {
+        coEvery { api.openPlaybackSession(any(), any(), any(), any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+        coEvery { api.batchUpdateProgress(any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+        queue.enqueue(AbsProgressUpdate.of("book1", currentTime = 200.0, duration = 400.0, lastUpdate = 1L))
+
+        coordinator(FakeOfflineSource(offlineBook(currentTime = 50.0))).playAudiobook(account, "book1")
+
+        val play = player.lastPlay!!
+        assertEquals("file:///dl/f1.m4b", play.url) // 200s global = file 1
+        assertEquals(100_000L, play.startPositionMs)
+    }
+
+    @Test
+    fun `offline progress goes only to the queue and the manifest cache`() = runTest {
+        coEvery { api.openPlaybackSession(any(), any(), any(), any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+
+        val offline = FakeOfflineSource(offlineBook())
+        val c = coordinator(offline)
+        c.playAudiobook(account, "book1")
+        player.positionMs = 30_000
+
+        c.seekTo(30.0)
+        coVerify(exactly = 0) { api.syncSession(any(), any(), any(), any()) }
+        assertEquals(30.0, queue.pendingPosition("book1")!!, 1e-9)
+        assertTrue(offline.savedPositions.contains("book1" to 30.0))
+    }
+
+    @Test
+    fun `offline seek crosses file boundaries through the manifest timeline`() = runTest {
+        coEvery { api.openPlaybackSession(any(), any(), any(), any()) } throws
+            AudiobookshelfApiException.Unreachable(IOException("no route"))
+
+        val c = coordinator(FakeOfflineSource(offlineBook()))
+        c.playAudiobook(account, "book1")
+        c.seekTo(300.0)
+
+        val play = player.lastPlay!!
+        assertEquals("file:///dl/f2.m4b", play.url)
+        assertEquals(50_000L, play.startPositionMs)
     }
 
     // ---- stop / finalize ---------------------------------------------------

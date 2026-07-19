@@ -8,6 +8,7 @@ import com.adagiostream.android.service.audiobookshelf.AudiobookPlaybackCoordina
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
+import com.adagiostream.android.service.audiobookshelf.OfflineAudiobookSource
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.AudiobookPlaybackLauncher
 import com.adagiostream.android.service.player.VLCPlayerWrapper
@@ -73,6 +74,7 @@ object AudiobookshelfModule {
         apiFactory: AudiobookshelfApiFactory,
         persistenceService: PersistenceService,
         accountManager: Lazy<AccountManager>,
+        offlineBooks: OfflineAudiobookSource,
     ): AudiobookPlaybackCoordinator {
         val tokenPersistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         return AudiobookPlaybackCoordinator(
@@ -99,6 +101,7 @@ object AudiobookshelfModule {
                     }
                 }
             },
+            offlineBooks = offlineBooks,
         )
     }
 

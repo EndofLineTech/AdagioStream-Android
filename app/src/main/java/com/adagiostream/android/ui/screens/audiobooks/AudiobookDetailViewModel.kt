@@ -10,11 +10,18 @@ import com.adagiostream.android.service.audiobookshelf.AbsLibraryItem
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
+import com.adagiostream.android.service.download.AudiobookDownloadActions
+import com.adagiostream.android.service.library.db.AudiobookDownloadEntity
 import com.adagiostream.android.service.player.AudiobookPlaybackLauncher
+import com.adagiostream.android.ui.screens.music.DownloadUiState
+import com.adagiostream.android.ui.screens.music.toUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -31,11 +38,18 @@ class AudiobookDetailViewModel @Inject constructor(
     accountRepository: AccountRepository,
     private val apiProvider: AudiobookshelfApiProvider,
     private val playbackLauncher: AudiobookPlaybackLauncher,
+    private val downloadActions: AudiobookDownloadActions,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     /** The library item id (nav arg). */
     val itemId: String = savedStateHandle["itemId"] ?: ""
+
+    /** Download-button state, live from the offline manifest row (59p.1.6). */
+    val downloadState: StateFlow<DownloadUiState> =
+        downloadActions.observe(itemId)
+            .map { it.toDownloadUiState() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DownloadUiState.NOT_DOWNLOADED)
 
     private val _api = MutableStateFlow<AudiobookshelfApi?>(null)
     val api: StateFlow<AudiobookshelfApi?> = _api.asStateFlow()
@@ -96,4 +110,22 @@ class AudiobookDetailViewModel @Inject constructor(
             playbackLauncher.play(account, item.id, null)
         }
     }
+
+    /** Download tap → queues the book for offline (59p.1.6). No-ops without an account. */
+    fun download() {
+        val account = absAccount ?: return
+        val metadata = _item.value?.media?.metadata
+        viewModelScope.launch {
+            downloadActions.download(account, itemId, metadata?.title, metadata?.displayAuthor)
+        }
+    }
+
+    /** Deletes the offline copy (also cancels an in-flight download). */
+    fun deleteDownload() {
+        viewModelScope.launch { downloadActions.delete(itemId) }
+    }
 }
+
+/** Manifest row → download-button state; a missing row reads as not downloaded. */
+internal fun AudiobookDownloadEntity?.toDownloadUiState(): DownloadUiState =
+    this?.status?.toUiState() ?: DownloadUiState.NOT_DOWNLOADED

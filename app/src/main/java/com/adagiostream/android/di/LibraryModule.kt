@@ -1,10 +1,14 @@
 package com.adagiostream.android.di
 
 import android.content.Context
+import com.adagiostream.android.service.audiobookshelf.OfflineAudiobookSource
 import com.adagiostream.android.service.download.AppFileDownloadStore
+import com.adagiostream.android.service.download.AudiobookDownloadActions
+import com.adagiostream.android.service.download.AudiobookDownloadManager
 import com.adagiostream.android.service.download.DownloadFileStore
 import com.adagiostream.android.service.download.DownloadLocator
 import com.adagiostream.android.service.download.RoomDownloadLocator
+import com.adagiostream.android.service.library.db.AudiobookDownloadDao
 import com.adagiostream.android.service.library.db.DownloadDao
 import com.adagiostream.android.service.library.db.LibraryDao
 import com.adagiostream.android.service.library.db.NavidromeCacheDatabase
@@ -50,4 +54,21 @@ object LibraryModule {
     @Provides
     @Singleton
     fun provideDownloadLocator(locator: RoomDownloadLocator): DownloadLocator = locator
+
+    @Provides
+    @Singleton
+    fun provideAudiobookDownloadDao(db: NavidromeCacheDatabase): AudiobookDownloadDao =
+        db.audiobookDownloadDao()
+
+    /** The detail-screen download button seam (beads_adagio-59p.1.6). */
+    @Provides
+    @Singleton
+    fun provideAudiobookDownloadActions(manager: AudiobookDownloadManager): AudiobookDownloadActions =
+        manager
+
+    /** The coordinator's offline-playback source (beads_adagio-59p.1.6). */
+    @Provides
+    @Singleton
+    fun provideOfflineAudiobookSource(manager: AudiobookDownloadManager): OfflineAudiobookSource =
+        manager
 }

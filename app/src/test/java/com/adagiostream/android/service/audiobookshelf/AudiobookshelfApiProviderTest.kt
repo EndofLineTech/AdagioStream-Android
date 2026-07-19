@@ -140,6 +140,32 @@ class AudiobookshelfApiProviderTest {
     }
 
     @Test
+    fun `a cleared pair is never persisted - a losing background refresh cannot brick the account`() = runTest {
+        // The old failure (59p.1.6 B2): two auth instances 401 together, both
+        // refresh, the loser's refresh gets a definitive 4xx → forgetTokens →
+        // persists NULL over the winner's freshly-rotated stored pair. Sharing
+        // one instance kills the race (concurrent 401s coalesce — see
+        // AudiobookshelfAuthTest); this guards the remaining path: a cleared
+        // pair must never reach the store.
+        accountsFlow.value = listOf(account())
+        val shared = provider.apiFrom(accountsFlow.value)
+        // A worker resolving through the provider gets the SAME instance/mutex.
+        assertSame(shared, provider.apiFrom(accountsFlow.value))
+
+        // Winner's rotation persists…
+        tokenCallbacks.last().invoke(AudiobookshelfAuth.Tokens("acc-2", "ref-2"))
+        // …then a definitive failure clears the in-memory pair.
+        tokenCallbacks.last().invoke(null)
+
+        coVerify(exactly = 1) { accountManager.updateAccountCredentials(any()) }
+        coVerify(exactly = 1) {
+            accountManager.updateAccountCredentials(
+                match { (it.type as AccountType.Audiobookshelf).accessToken == "acc-2" },
+            )
+        }
+    }
+
+    @Test
     fun `deletion clears the cache entry - no ghost authed API`() {
         val api1 = provider.apiFrom(listOf(account()))
 
