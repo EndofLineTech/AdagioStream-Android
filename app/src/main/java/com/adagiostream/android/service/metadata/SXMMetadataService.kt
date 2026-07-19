@@ -59,7 +59,7 @@ class SXMMetadataService(
      * Retained so tests can await loop completion; production never cancels it
      * — the generation guard supersedes stale loops.
      */
-    var matchJob: Job? = null
+    internal var matchJob: Job? = null
         private set
 
     /**
@@ -105,6 +105,9 @@ class SXMMetadataService(
         val sxmChannels = channels.filter { sxmPattern.containsMatchIn(it.group) }
         if (sxmChannels.isEmpty()) {
             DebugLogger.log("No SXM channels found in ${channels.size} channels", DebugLogger.Category.SXM)
+            // The generation bump above already superseded any in-flight loop;
+            // don't leave matchJob pointing at it.
+            matchJob = null
             return
         }
         DebugLogger.log("Found ${sxmChannels.size} SXM channels, fetching ${source.serialName} station list...", DebugLogger.Category.SXM)
@@ -231,6 +234,15 @@ class SXMMetadataService(
                 stationLookup.putIfAbsent(station.name.lowercase().trim(), station)
             }
 
+            // Precompile per-station norms + patterns once — tier 2 runs per
+            // (unmatched channel × station) pair, and compiling two Regexes
+            // inside that pair loop was tens of thousands of constructions on
+            // the main dispatcher at launch.
+            val stationPatterns = stations.map { station ->
+                val norm = station.name.lowercase().trim()
+                Triple(station, norm, Regex("\\b${Regex.escape(norm)}\\b"))
+            }
+
             val result = mutableMapOf<String, String>()
             var exactMatches = 0
             var wordMatches = 0
@@ -256,10 +268,8 @@ class SXMMetadataService(
 
                 // Tier 2: Word-boundary match
                 var matched = false
-                for (station in stations) {
-                    val stationNorm = station.name.lowercase().trim()
-                    val channelPattern = Regex("\\b${Regex.escape(normalized)}\\b")
-                    val stationPattern = Regex("\\b${Regex.escape(stationNorm)}\\b")
+                val channelPattern = Regex("\\b${Regex.escape(normalized)}\\b")
+                for ((station, stationNorm, stationPattern) in stationPatterns) {
                     if (channelPattern.containsMatchIn(stationNorm) ||
                         stationPattern.containsMatchIn(normalized)
                     ) {

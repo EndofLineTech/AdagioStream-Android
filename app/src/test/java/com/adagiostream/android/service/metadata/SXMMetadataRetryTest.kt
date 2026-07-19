@@ -95,6 +95,37 @@ class SXMMetadataRetryTest {
         assertEquals("stale loop must not overwrite the table", "8206", service.stationIdForChannel("c1"))
     }
 
+    @Test
+    fun `supersession arriving during the sleep exits at the post-sleep checkpoint`() = runTest {
+        val service = makeService(this)
+        var fetchCount = 0
+        service.stationListFetcher = {
+            fetchCount++
+            // First loop's fetch fails so it reaches the sleep; every later
+            // fetch (the superseding loop's) succeeds immediately.
+            if (fetchCount == 1) null else stations
+        }
+        var superseded = false
+        service.retrySleep = {
+            if (!superseded) {
+                superseded = true
+                // A newer matchChannels lands mid-sleep — the sleeping loop
+                // must notice at the post-sleep generation check and exit
+                // without fetching again.
+                service.matchChannels(channels(), emptyList())
+            }
+            false
+        }
+
+        service.matchChannels(channels(), emptyList())
+        val firstJob = service.matchJob
+        firstJob?.join() // fails once, sleeps, gets superseded mid-sleep, exits
+        service.matchJob?.join() // the superseding loop fetches and builds
+
+        assertEquals("stale loop must not fetch again after its sleep", 2, fetchCount)
+        assertEquals("8206", service.stationIdForChannel("c1"))
+    }
+
     // MARK: - Late success re-attach
 
     @Test

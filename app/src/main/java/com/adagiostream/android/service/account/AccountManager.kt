@@ -57,7 +57,7 @@ class AccountManager @Inject constructor(
                 .substringBefore('?')
                 .substringBefore('#')
             val lastComponent = path.trimEnd('/').substringAfterLast('/')
-            return lastComponent.isNotEmpty() && title.trim() == lastComponent
+            return lastComponent.isNotEmpty() && title.trim().equals(lastComponent, ignoreCase = true)
         }
     }
 

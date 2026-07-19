@@ -153,6 +153,23 @@ class StellarTunerLogApiTest {
     }
 
     @Test
+    fun `re-observation after the history window gets a fresh startedAt`() = runTest {
+        // Long ad break: every poll in between was success-null, so
+        // mergeIntoHistory never ran and never pruned the pre-break entry.
+        // The reuse lookup itself must reject entries outside the 10-minute
+        // window relative to the observation time.
+        val t0 = System.currentTimeMillis()
+        val t1 = t0 + 15 * 60_000L // same track observed again 15 minutes later
+        enqueue("""{"station":${stationJson()}}""")
+        enqueue("""{"station":${stationJson()}}""")
+
+        api.getRecentTrack("8206", nowMillis = t0)
+        val later = api.getRecentTrack("8206", nowMillis = t1).getOrNull()
+
+        assertEquals("stale pre-break startedAt must not be reused", t1, later?.timestamp)
+    }
+
+    @Test
     fun `a new track gets a fresh startedAt`() = runTest {
         val t1 = System.currentTimeMillis() - 60_000L
         val t3 = t1 + 45_000L

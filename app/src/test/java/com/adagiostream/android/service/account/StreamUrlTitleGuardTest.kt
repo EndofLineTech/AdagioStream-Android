@@ -29,6 +29,11 @@ class StreamUrlTitleGuardTest {
     }
 
     @Test
+    fun `comparison is case-insensitive`() {
+        assertTrue(isStreamUrlFilename("20998.TS", "http://host.example/live/20998.ts"))
+    }
+
+    @Test
     fun `real track titles pass through`() {
         assertFalse(isStreamUrlFilename("The Sign", "http://host.example/live/20998.ts"))
         assertFalse(isStreamUrlFilename("20998", "http://host.example/live/20998.ts"))

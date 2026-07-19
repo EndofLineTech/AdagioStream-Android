@@ -107,8 +107,16 @@ class StellarTunerLogApi(
             val station = json.decodeFromString<STLStationResponse>(response.body.string()).station
             // No per-track timestamp from this API: stamp first observation,
             // reusing the startedAt already in history for the same track.
+            // The reuse lookup is bounded to the history window relative to
+            // nowMillis: pruning only happens in mergeIntoHistory, which never
+            // runs while polls return non-displayable cuts (long ad break), so
+            // a track returning after a >10min gap must get a fresh startedAt
+            // instead of reusing a stale pre-break entry.
             val startedAt = trackHistory[stationId]
-                ?.firstOrNull { it.artist == station.artist && it.title == station.title }
+                ?.firstOrNull {
+                    it.artist == station.artist && it.title == station.title &&
+                        it.timestamp >= nowMillis - historyWindowMs
+                }
                 ?.timestamp ?: nowMillis
             val track = station.toTrackMetadataOrNull(startedAt)
             if (track != null) mergeIntoHistory(stationId, track)
