@@ -160,6 +160,7 @@ private fun AccountCard(
                         is AccountType.M3U -> "M3U Playlist"
                         is AccountType.XtreamCodes -> "Xtream Codes"
                         is AccountType.Subsonic -> "Navidrome / Subsonic"
+                        is AccountType.Audiobookshelf -> "Audiobookshelf"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

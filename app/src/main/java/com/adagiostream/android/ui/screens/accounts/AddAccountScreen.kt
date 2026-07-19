@@ -60,6 +60,8 @@ fun AddAccountScreen(
 ) {
     val isXtream by viewModel.isXtream.collectAsStateWithLifecycle()
     val isSubsonic by viewModel.isSubsonic.collectAsStateWithLifecycle()
+    val isAudiobookshelf by viewModel.isAudiobookshelf.collectAsStateWithLifecycle()
+    val absDiscoveryState by viewModel.absDiscoveryState.collectAsStateWithLifecycle()
     val name by viewModel.name.collectAsStateWithLifecycle()
     val m3uUrl by viewModel.m3uUrl.collectAsStateWithLifecycle()
     val host by viewModel.host.collectAsStateWithLifecycle()
@@ -115,28 +117,36 @@ fun AddAccountScreen(
             if (!viewModel.isEditing) {
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     SegmentedButton(
-                        selected = !isXtream && !isSubsonic,
+                        selected = !isXtream && !isSubsonic && !isAudiobookshelf,
                         onClick = {
                             viewModel.setIsSubsonic(false)
                             viewModel.setIsXtream(false)
+                            viewModel.setIsAudiobookshelf(false)
                         },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 4),
                     ) {
                         Text("M3U")
                     }
                     SegmentedButton(
                         selected = isXtream,
                         onClick = { viewModel.setIsXtream(true) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 4),
                     ) {
                         Text("Xtream")
                     }
                     SegmentedButton(
                         selected = isSubsonic,
                         onClick = { viewModel.setIsSubsonic(true) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 4),
                     ) {
                         Text("Navidrome")
+                    }
+                    SegmentedButton(
+                        selected = isAudiobookshelf,
+                        onClick = { viewModel.setIsAudiobookshelf(true) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 3, count = 4),
+                    ) {
+                        Text("Audiobooks")
                     }
                 }
 
@@ -144,6 +154,24 @@ fun AddAccountScreen(
             }
 
             when {
+                isAudiobookshelf -> AudiobookshelfForm(
+                    host = host,
+                    username = username,
+                    password = password,
+                    name = name,
+                    passwordVisible = passwordVisible,
+                    onPasswordVisibilityToggle = { passwordVisible = !passwordVisible },
+                    showHttpWarning = viewModel.isHostCleartextHttp(),
+                    discoveryState = absDiscoveryState,
+                    connectionTestState = connectionTestState,
+                    onHostChange = { viewModel.setHost(it) },
+                    onUsernameChange = { viewModel.setUsername(it) },
+                    onPasswordChange = { viewModel.setPassword(it) },
+                    onNameChange = { viewModel.setName(it) },
+                    onCheckServer = { viewModel.discoverAbsServer() },
+                    onTestConnection = { viewModel.testConnection() },
+                )
+
                 isSubsonic -> SubsonicForm(
                     host = host,
                     username = username,
@@ -250,9 +278,9 @@ fun AddAccountScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // For Subsonic, saving is gated on a successful connection test.
+            // For Subsonic/Audiobookshelf, saving is gated on a successful connection test.
             val saveEnabled = !isSaving && viewModel.isValid() &&
-                (!isSubsonic || connectionTestState is ConnectionTestState.Success)
+                (!(isSubsonic || isAudiobookshelf) || connectionTestState is ConnectionTestState.Success)
 
             Button(
                 onClick = { viewModel.save() },
@@ -373,8 +401,192 @@ private fun SubsonicForm(
         }
     }
 
-    // Inline result of the connection test.
-    when (val state = connectionTestState) {
+    ConnectionTestResult(connectionTestState)
+}
+
+/**
+ * Audiobookshelf add/edit form (59p.1.3). Two-step flow: enter the host and
+ * check the server (`GET /status` discovery), then — per the discovered auth
+ * methods — either sign in with username/password (Test Connection performs
+ * the login that produces the stored token pair) or, for OIDC-only servers,
+ * see a disabled SSO placeholder until the OIDC flow lands in a later build.
+ */
+@Composable
+private fun AudiobookshelfForm(
+    host: String,
+    username: String,
+    password: String,
+    name: String,
+    passwordVisible: Boolean,
+    onPasswordVisibilityToggle: () -> Unit,
+    showHttpWarning: Boolean,
+    discoveryState: AbsDiscoveryState,
+    connectionTestState: ConnectionTestState,
+    onHostChange: (String) -> Unit,
+    onUsernameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onNameChange: (String) -> Unit,
+    onCheckServer: () -> Unit,
+    onTestConnection: () -> Unit,
+) {
+    val checking = discoveryState is AbsDiscoveryState.Checking
+    val testing = connectionTestState is ConnectionTestState.Testing
+
+    OutlinedTextField(
+        value = host,
+        onValueChange = onHostChange,
+        label = { Text("Server URL") },
+        placeholder = { Text("http://192.168.1.10:13378") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        enabled = !checking && !testing,
+    )
+
+    if (showHttpWarning) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = "Warning",
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text(
+                text = "http is unencrypted — your password and session tokens travel " +
+                    "in the clear. Use https if your server supports it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+    OutlinedButton(
+        onClick = onCheckServer,
+        enabled = !checking && !testing && host.isNotBlank(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .semantics { contentDescription = "Check Server" },
+    ) {
+        if (checking) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text("Checking…")
+        } else {
+            Text("Check Server")
+        }
+    }
+
+    when (discoveryState) {
+        is AbsDiscoveryState.Error -> {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = "Server check failed",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = discoveryState.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+
+        is AbsDiscoveryState.Discovered -> {
+            if (discoveryState.supportsLocal) {
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = onUsernameChange,
+                    label = { Text("Username") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !testing,
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                PasswordField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    passwordVisible = passwordVisible,
+                    onToggle = onPasswordVisibilityToggle,
+                    enabled = !testing,
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    label = { Text("Display Name (Optional)") },
+                    placeholder = { Text("My Audiobookshelf") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !testing,
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = onTestConnection,
+                    enabled = !testing && host.isNotBlank() &&
+                        username.isNotBlank() && password.isNotBlank(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .semantics { contentDescription = "Test Connection" },
+                ) {
+                    if (testing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text("Testing…")
+                    } else {
+                        Text("Test Connection")
+                    }
+                }
+
+                ConnectionTestResult(connectionTestState)
+            } else if (discoveryState.supportsOpenId) {
+                // OIDC-only server — the SSO flow arrives in a later build
+                // (59p.1.2 replaces this placeholder).
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                ) {
+                    Text("Sign in with SSO (coming in next build)")
+                }
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "This server has no supported sign-in method.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+
+        else -> Unit
+    }
+}
+
+/** Inline success/error rows shown under a "Test Connection" button. */
+@Composable
+private fun ConnectionTestResult(state: ConnectionTestState) {
+    when (state) {
         is ConnectionTestState.Success -> {
             Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {

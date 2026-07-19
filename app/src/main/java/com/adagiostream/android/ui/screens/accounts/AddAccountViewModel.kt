@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
+import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
 import com.adagiostream.android.service.navidrome.NavidromeApiException
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.util.UrlSanitizer
@@ -21,6 +24,7 @@ import javax.inject.Inject
 class AddAccountViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val navidromeApiFactory: NavidromeApiFactory,
+    private val audiobookshelfApiFactory: AudiobookshelfApiFactory,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -33,9 +37,22 @@ class AddAccountViewModel @Inject constructor(
     private val _isSubsonic = MutableStateFlow(false)
     val isSubsonic: StateFlow<Boolean> = _isSubsonic.asStateFlow()
 
-    /** State of the Subsonic "Test Connection" flow. */
+    private val _isAudiobookshelf = MutableStateFlow(false)
+    val isAudiobookshelf: StateFlow<Boolean> = _isAudiobookshelf.asStateFlow()
+
+    /** State of the Subsonic/Audiobookshelf "Test Connection" flow. */
     private val _connectionTestState = MutableStateFlow<ConnectionTestState>(ConnectionTestState.Idle)
     val connectionTestState: StateFlow<ConnectionTestState> = _connectionTestState.asStateFlow()
+
+    /** State of the Audiobookshelf `GET /status` discovery step. */
+    private val _absDiscoveryState = MutableStateFlow<AbsDiscoveryState>(AbsDiscoveryState.Idle)
+    val absDiscoveryState: StateFlow<AbsDiscoveryState> = _absDiscoveryState.asStateFlow()
+
+    /**
+     * Token pair from a successful Audiobookshelf test login — saved into the
+     * account on save. Kept out of any StateFlow the UI could log.
+     */
+    private var absTokens: AudiobookshelfAuth.Tokens? = null
 
     private val _name = MutableStateFlow("")
     val name: StateFlow<String> = _name.asStateFlow()
@@ -96,6 +113,14 @@ class AddAccountViewModel @Inject constructor(
                         // Edits must be re-validated before saving.
                         _connectionTestState.value = ConnectionTestState.Idle
                     }
+                    is AccountType.Audiobookshelf -> {
+                        _isAudiobookshelf.value = true
+                        _host.value = type.host
+                        _username.value = type.username ?: ""
+                        // The password is never stored (only tokens are) — the
+                        // user re-enters it and re-tests before saving edits.
+                        _connectionTestState.value = ConnectionTestState.Idle
+                    }
                 }
             }
         }
@@ -103,19 +128,42 @@ class AddAccountViewModel @Inject constructor(
 
     fun setIsXtream(value: Boolean) {
         _isXtream.value = value
-        if (value) _isSubsonic.value = false
+        if (value) {
+            _isSubsonic.value = false
+            _isAudiobookshelf.value = false
+        }
         resetConnectionTest()
     }
 
     fun setIsSubsonic(value: Boolean) {
         _isSubsonic.value = value
-        if (value) _isXtream.value = false
+        if (value) {
+            _isXtream.value = false
+            _isAudiobookshelf.value = false
+        }
+        resetConnectionTest()
+    }
+
+    fun setIsAudiobookshelf(value: Boolean) {
+        _isAudiobookshelf.value = value
+        if (value) {
+            _isXtream.value = false
+            _isSubsonic.value = false
+        }
         resetConnectionTest()
     }
 
     fun setName(value: String) { _name.value = value }
     fun setM3uUrl(value: String) { _m3uUrl.value = value }
-    fun setHost(value: String) { _host.value = value; resetConnectionTest() }
+
+    fun setHost(value: String) {
+        _host.value = value
+        resetConnectionTest()
+        // A different host may have different auth methods — re-discover.
+        if (_absDiscoveryState.value != AbsDiscoveryState.Idle) {
+            _absDiscoveryState.value = AbsDiscoveryState.Idle
+        }
+    }
     fun setUsername(value: String) { _username.value = value; resetConnectionTest() }
     fun setPassword(value: String) { _password.value = value; resetConnectionTest() }
     fun setEpgUrl(value: String) { _epgUrl.value = value }
@@ -125,11 +173,14 @@ class AddAccountViewModel @Inject constructor(
         _saveComplete.value = true
     }
 
-    /** Resets the Subsonic connection-test state to [ConnectionTestState.Idle]. */
+    /** Resets the connection-test state to [ConnectionTestState.Idle]. */
     private fun resetConnectionTest() {
         if (_connectionTestState.value != ConnectionTestState.Idle) {
             _connectionTestState.value = ConnectionTestState.Idle
         }
+        // Tokens from a previous successful ABS login are stale once any
+        // credential input changes.
+        absTokens = null
     }
 
     /** True when the entered Subsonic host uses cleartext http (drives the in-UI warning). */
@@ -138,6 +189,9 @@ class AddAccountViewModel @Inject constructor(
 
     fun isValid(): Boolean {
         return when {
+            _isAudiobookshelf.value ->
+                // Display name is optional; local login credentials are required.
+                _host.value.isNotBlank() && _username.value.isNotBlank() && _password.value.isNotBlank()
             _isSubsonic.value ->
                 // Display name is optional for Subsonic; credentials are required.
                 _host.value.isNotBlank() && _username.value.isNotBlank() && _password.value.isNotBlank()
@@ -169,15 +223,55 @@ class AddAccountViewModel @Inject constructor(
         viewModelScope.launch {
             _connectionTestState.value = try {
                 UrlSanitizer.requireHttpUrl(host)
-                val api = navidromeApiFactory.create(host, username, password)
-                api.ping()
+                if (_isAudiobookshelf.value) {
+                    val api = audiobookshelfApiFactory.create(host, username, password, null) {}
+                    absTokens = api.auth.login().tokens
+                } else {
+                    val api = navidromeApiFactory.create(host, username, password)
+                    api.ping()
+                }
                 ConnectionTestState.Success
             } catch (e: NavidromeApiException) {
+                ConnectionTestState.Error(messageFor(e))
+            } catch (e: AudiobookshelfApiException) {
                 ConnectionTestState.Error(messageFor(e))
             } catch (e: IllegalArgumentException) {
                 ConnectionTestState.Error("Enter a valid http or https URL")
             } catch (e: Exception) {
                 ConnectionTestState.Error("Connection failed. Please try again.")
+            }
+        }
+    }
+
+    /**
+     * Audiobookshelf discovery: unauthenticated `GET /status` on the entered
+     * host, deciding whether the form shows local username/password fields
+     * and/or the SSO placeholder.
+     */
+    fun discoverAbsServer() {
+        val host = _host.value.trim()
+        if (host.isBlank()) {
+            _absDiscoveryState.value = AbsDiscoveryState.Error("Enter the server URL first")
+            return
+        }
+
+        _absDiscoveryState.value = AbsDiscoveryState.Checking
+        viewModelScope.launch {
+            _absDiscoveryState.value = try {
+                UrlSanitizer.requireHttpUrl(host)
+                val api = audiobookshelfApiFactory.create(host, null, null, null) {}
+                val status = api.getStatus()
+                AbsDiscoveryState.Discovered(
+                    supportsLocal = status.supportsLocal,
+                    supportsOpenId = status.supportsOpenId,
+                    openIdButtonText = status.openIdButtonText,
+                )
+            } catch (e: AudiobookshelfApiException) {
+                AbsDiscoveryState.Error(messageFor(e))
+            } catch (e: IllegalArgumentException) {
+                AbsDiscoveryState.Error("Enter a valid http or https URL")
+            } catch (e: Exception) {
+                AbsDiscoveryState.Error("Couldn't reach the server. Please try again.")
             }
         }
     }
@@ -201,14 +295,40 @@ class AddAccountViewModel @Inject constructor(
             "Unexpected response from the server"
     }
 
+    /** Maps an [AudiobookshelfApiException] to a distinct, user-facing message. */
+    private fun messageFor(e: AudiobookshelfApiException): String = when (e) {
+        is AudiobookshelfApiException.LoginFailed ->
+            "Incorrect username or password"
+        is AudiobookshelfApiException.ReauthRequired ->
+            "Session expired — sign in again"
+        is AudiobookshelfApiException.Unreachable,
+        is AudiobookshelfApiException.TimedOut ->
+            "Can't reach server — check the URL"
+        is AudiobookshelfApiException.ServerError ->
+            "Server error (HTTP ${e.statusCode}). Try again later."
+        is AudiobookshelfApiException.InvalidUrl ->
+            "Enter a valid server URL"
+        is AudiobookshelfApiException.SessionNotFound,
+        is AudiobookshelfApiException.DecodingError ->
+            "That doesn't look like an Audiobookshelf server"
+    }
+
     fun save() {
         if (!isValid()) {
             _errorMessage.value = "Please fill in all required fields"
             return
         }
 
-        // Subsonic accounts must pass a connection test before they can be saved.
-        if (_isSubsonic.value && _connectionTestState.value !is ConnectionTestState.Success) {
+        // Subsonic and Audiobookshelf accounts must pass a connection test
+        // before they can be saved (for ABS, the test IS the login that
+        // produces the stored token pair).
+        if ((_isSubsonic.value || _isAudiobookshelf.value) &&
+            _connectionTestState.value !is ConnectionTestState.Success
+        ) {
+            _errorMessage.value = "Test the connection before saving"
+            return
+        }
+        if (_isAudiobookshelf.value && absTokens == null) {
             _errorMessage.value = "Test the connection before saving"
             return
         }
@@ -219,6 +339,7 @@ class AddAccountViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 when {
+                    _isAudiobookshelf.value -> UrlSanitizer.requireHttpUrl(_host.value.trim())
                     _isSubsonic.value -> UrlSanitizer.requireHttpUrl(_host.value.trim())
                     _isXtream.value -> UrlSanitizer.requireHttpUrl(_host.value.trim())
                     else -> {
@@ -229,6 +350,14 @@ class AddAccountViewModel @Inject constructor(
                 }
 
                 val type = when {
+                    _isAudiobookshelf.value -> AccountType.Audiobookshelf(
+                        host = _host.value.trim(),
+                        username = _username.value.trim().ifBlank { null },
+                        // Token pair from the successful test login — persisted
+                        // only via the encrypted accounts store.
+                        accessToken = absTokens?.accessToken,
+                        refreshToken = absTokens?.refreshToken,
+                    )
                     _isSubsonic.value -> AccountType.Subsonic(
                         host = _host.value.trim(),
                         username = _username.value.trim(),
@@ -248,9 +377,13 @@ class AddAccountViewModel @Inject constructor(
                     )
                 }
 
-                // Display name is optional for Subsonic; fall back to the host.
+                // Display name is optional for Subsonic/ABS; fall back to the host.
                 val resolvedName = _name.value.trim().ifBlank {
-                    if (_isSubsonic.value) hostLabel(_host.value.trim()) else _name.value.trim()
+                    when {
+                        _isSubsonic.value -> hostLabel(_host.value.trim(), "Navidrome")
+                        _isAudiobookshelf.value -> hostLabel(_host.value.trim(), "Audiobookshelf")
+                        else -> _name.value.trim()
+                    }
                 }
 
                 val account = Account(
@@ -281,14 +414,14 @@ class AddAccountViewModel @Inject constructor(
     /**
      * Extracts the host portion of a URL for use as a default display name
      * (e.g. `https://music.example.com:4533/` → `music.example.com`).
-     * Falls back to "Navidrome" if the host can't be parsed.
+     * Falls back to [fallback] if the host can't be parsed.
      */
-    private fun hostLabel(url: String): String {
+    private fun hostLabel(url: String, fallback: String): String {
         val host = try {
             java.net.URI(url).host
         } catch (_: Exception) {
             null
         }
-        return host?.takeIf { it.isNotBlank() } ?: "Navidrome"
+        return host?.takeIf { it.isNotBlank() } ?: fallback
     }
 }
