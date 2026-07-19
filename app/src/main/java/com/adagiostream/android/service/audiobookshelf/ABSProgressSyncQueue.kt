@@ -38,10 +38,25 @@ class ABSProgressSyncQueue(private val file: File) {
         emptyList()
     }
 
-    /** Best-effort persist — a failed disk write must never break playback. */
+    /**
+     * Best-effort persist — a failed disk write must never break playback.
+     * Writes a sibling temp file then renames it over the target (review M3):
+     * [load] degrades corrupt JSON to an empty queue, so a crash mid-write on
+     * the real file would silently drop ALL queued progress.
+     */
     private fun persist() {
         try {
-            if (pending.isEmpty()) file.delete() else file.writeText(json.encodeToString(pending))
+            if (pending.isEmpty()) {
+                file.delete()
+                return
+            }
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(json.encodeToString(pending))
+            if (!tmp.renameTo(file)) {
+                // Some filesystems refuse rename-over-existing; fall back.
+                file.delete()
+                tmp.renameTo(file)
+            }
         } catch (_: Exception) {
             // Best-effort.
         }

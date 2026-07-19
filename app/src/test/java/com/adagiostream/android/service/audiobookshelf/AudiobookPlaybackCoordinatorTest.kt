@@ -5,6 +5,7 @@ import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.PlaybackState
 import com.adagiostream.android.service.player.AudiobookFilePlayer
 import com.adagiostream.android.service.player.PlaybackSource
+import com.adagiostream.android.testutil.TestFixtures
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -114,6 +115,7 @@ class AudiobookPlaybackCoordinatorTest {
     private lateinit var api: AudiobookshelfApi
     private lateinit var queue: ABSProgressSyncQueue
     private lateinit var playerState: MutableStateFlow<PlaybackState>
+    private lateinit var sourceFlow: MutableStateFlow<PlaybackSource?>
     private var nowMs = 0L
 
     private val testScope = TestScope(UnconfinedTestDispatcher())
@@ -123,6 +125,7 @@ class AudiobookPlaybackCoordinatorTest {
         player = FakeAudiobookFilePlayer()
         queue = ABSProgressSyncQueue(File(tmp.root, "queue.json"))
         playerState = MutableStateFlow(PlaybackState.Playing)
+        sourceFlow = MutableStateFlow(null)
         nowMs = 0L
         api = mockk()
         coEvery { api.openPlaybackSession(any(), any(), any(), any()) } returns session()
@@ -141,6 +144,7 @@ class AudiobookPlaybackCoordinatorTest {
         apiFactory = { _, _, _, _, _ -> api },
         persistenceService = null,
         playerState = playerState,
+        playbackSource = sourceFlow,
         scope = testScope,
         clock = { nowMs },
     )
@@ -269,7 +273,8 @@ class AudiobookPlaybackCoordinatorTest {
         val play = player.lastPlay!!
         assertTrue(play.url.contains("/hls/file2.m4b"))
         assertEquals(50_000L, play.startPositionMs)
-        coVerify { api.syncSession("sess1", currentTime = 300.0, timeListened = any(), duration = 400.0) }
+        // Position was 0 at seek time — the jumped span is NOT listened time.
+        coVerify { api.syncSession("sess1", currentTime = 300.0, timeListened = 0.0, duration = 400.0) }
     }
 
     // ---- chapter skip ------------------------------------------------------
@@ -357,6 +362,44 @@ class AudiobookPlaybackCoordinatorTest {
 
         c.seekTo(30.0)
         assertEquals(30.0, queue.pendingPosition("book1")!!, 1e-9)
+    }
+
+    // ---- cross-source takeover (review B1) --------------------------------
+
+    @Test
+    fun `music takeover finalizes the book once at its last observed position`() = runTest {
+        val c = coordinator()
+        c.playAudiobook(account, "book1")
+        nowMs = 5_000; player.positionMs = 42_000
+        c.onTick() // last observed audiobook position = 42s
+
+        // Music starts: the wrapper swaps straight to a Library source without
+        // ever emitting Idle.
+        sourceFlow.value = PlaybackSource.Library(listOf(TestFixtures.makeTrack()), 0)
+        coVerify(exactly = 1) { api.syncSession("sess1", currentTime = 42.0, timeListened = any(), duration = 400.0) }
+        coVerify(exactly = 1) { api.closeSession("sess1") }
+        assertNull(c.nowPlaying.value)
+
+        // The music track's position advances — the coordinator must NEVER
+        // read it as audiobook progress again.
+        nowMs = 60_000; player.positionMs = 90_000
+        c.onTick()
+        c.onTick()
+        coVerify(exactly = 1) { api.syncSession(any(), any(), any(), any()) }
+    }
+
+    // ---- forward seek accounting (review B2) ------------------------------
+
+    @Test
+    fun `forward seek reports only pre-seek listened time, never the skipped span`() = runTest {
+        val c = coordinator()
+        c.playAudiobook(account, "book1")
+        player.positionMs = 10_000 // 10s actually listened
+
+        c.seekTo(300.0) // scrub far forward
+        coVerify(exactly = 1) {
+            api.syncSession("sess1", currentTime = 300.0, timeListened = 10.0, duration = 400.0)
+        }
     }
 
     // ---- stop / finalize ---------------------------------------------------

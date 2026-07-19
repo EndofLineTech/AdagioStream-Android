@@ -80,11 +80,14 @@ object AudiobookshelfModule {
             apiFactory = apiFactory,
             persistenceService = persistenceService,
             playerState = wrapper.playbackState,
+            playbackSource = wrapper.playbackSource,
             onTokensRotated = { account, tokens ->
                 val abs = account.type as? AccountType.Audiobookshelf
                 if (abs != null) {
                     tokenPersistScope.launch {
-                        accountManager.get().updateAccount(
+                        // Persist-only: a token rotation must not re-fetch every
+                        // channel list (review M2).
+                        accountManager.get().updateAccountCredentials(
                             account.copy(
                                 type = abs.copy(
                                     accessToken = tokens?.accessToken,

@@ -55,6 +55,8 @@ class AudiobookPlaybackCoordinator(
     private val persistenceService: PersistenceService? = null,
     /** The wrapper's playback state — drives forced-sync-on-pause and finalize-on-stop. */
     private val playerState: StateFlow<PlaybackState>? = null,
+    /** The wrapper's active source — finalizes the book when music/radio takes the player over. */
+    private val playbackSource: StateFlow<PlaybackSource?>? = null,
     /** Persists rotated JWTs back to the encrypted account store (production). */
     private val onTokensRotated: (Account, AudiobookshelfAuth.Tokens?) -> Unit = { _, _ -> },
     internal val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
@@ -166,6 +168,24 @@ class AudiobookPlaybackCoordinator(
                 }
             }
         }
+        // Cross-source takeover (review B1): starting music/IPTV goes straight
+        // to Buffering — the player never emits Idle on a direct source swap —
+        // so without this the book session would stay active and sync the
+        // MUSIC track's position onto the book every ~20s. Finalize (one last
+        // sync at the last observed audiobook position + best-effort close)
+        // the moment a non-audiobook source takes the player. A stale
+        // Library/Radio emission racing a brand-new playAudiobook would need
+        // the user to start a book within the flow's collect latency of
+        // starting music — accepted.
+        playbackSource?.let { flow ->
+            scope.launch {
+                flow.collect { source ->
+                    if (active && (source is PlaybackSource.Radio || source is PlaybackSource.Library)) {
+                        finalizeSession()
+                    }
+                }
+            }
+        }
     }
 
     // ---- Public entry --------------------------------------------------------
@@ -256,6 +276,12 @@ class AudiobookPlaybackCoordinator(
     fun seekTo(globalSeconds: Double) {
         if (!active) return
         val tl = timeline ?: return
+        // Review B2: timeListened accrues only up to the PRE-seek position —
+        // the jumped span must never count as listening (a 10s→3600s scrub is
+        // 10s listened, not 3590s). Deliberate divergence from iOS, which
+        // syncs at the target and counts a forward scrub as listened.
+        val preSeek = globalPositionSeconds()
+        val listened = (preSeek - lastSyncedGlobal).coerceAtLeast(0.0)
         val target = globalSeconds.coerceIn(0.0, tl.totalDuration)
         val location = tl.locate(target) ?: return
         lastObservedGlobal = target
@@ -266,7 +292,7 @@ class AudiobookPlaybackCoordinator(
         } else {
             loadFileAt(target)
         }
-        scope.launch { syncNow(target) }
+        scope.launch { syncAt(target, listened) }
     }
 
     /** Skips to the next chapter start; no-op in/past the last chapter. */
@@ -358,19 +384,33 @@ class AudiobookPlaybackCoordinator(
     }
 
     /**
-     * Syncs [global] to the live session. `timeListened` is the (never
-     * negative) global delta since the last sync — iOS accounting. On
+     * Syncs [global] to the live session with `timeListened` = the (never
+     * negative) MEDIA-position delta since the last sync — exact iOS parity
+     * with `AudioPlayerService.timeListened(sinceLastSynced:currentGlobal:)`:
+     * iOS reports media seconds, not wall clock, so at 2x speed 20s of real
+     * time reports 40s listened. Seeks bypass this via [syncAt] with the
+     * pre-seek delta (review B2).
+     */
+    internal suspend fun syncNow(global: Double = globalPositionSeconds()) {
+        syncAt(global, (global - lastSyncedGlobal).coerceAtLeast(0.0))
+    }
+
+    /**
+     * Reports position [global] + [timeListened] to the live session. On
      * `SessionNotFound` (expired/foreign session) reopens via `/play` at the
      * current position and retries once; on any other failure the update goes
      * to the offline queue instead of being dropped. Always resets the
      * throttle timer, so a forced sync (pause/seek/boundary) delays the next
      * periodic one.
      */
-    internal suspend fun syncNow(global: Double = globalPositionSeconds()) {
+    // ponytail: no lock — a tick sync racing a forced sync can interleave
+    // lastSyncedGlobal and double-count/drop a few seconds of timeListened;
+    // position is last-write and self-corrects on the next sync. Add a Mutex
+    // only if server-side listening stats start mattering.
+    private suspend fun syncAt(global: Double, timeListened: Double) {
         if (!active) return
         val api = api ?: return
         val itemId = libraryItemId ?: return
-        val timeListened = (global - lastSyncedGlobal).coerceAtLeast(0.0)
         lastSyncedGlobal = global
         lastSyncAtMs = clock()
         lastKnownPositions[itemId] = global

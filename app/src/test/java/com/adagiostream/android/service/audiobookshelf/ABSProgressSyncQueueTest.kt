@@ -143,6 +143,18 @@ class ABSProgressSyncQueueTest {
     }
 
     @Test
+    fun `persist writes via a temp file and leaves no temp behind`() {
+        val file = queueFile()
+        val queue = ABSProgressSyncQueue(file)
+        queue.enqueue(update("book1", currentTime = 42.0, lastUpdate = 1_000))
+        // Atomic write (review M3): the real file holds valid JSON and the
+        // sibling temp file never lingers after a successful persist.
+        assertTrue(file.exists())
+        assertFalse(File(tmp.root, "abs_progress_queue.json.tmp").exists())
+        assertEquals(42.0, ABSProgressSyncQueue(file).pendingPosition("book1")!!, 1e-9)
+    }
+
+    @Test
     fun `a corrupt queue file degrades to an empty queue`() {
         val file = queueFile()
         file.writeText("not json at all {]")
