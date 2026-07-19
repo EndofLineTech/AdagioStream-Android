@@ -291,6 +291,9 @@ fun MainScreen(
                         onPlaylistClick = { playlistId ->
                             navController.navigate(Screen.PlaylistDetail.createRoute(playlistId))
                         },
+                        onEditAccount = { accountId ->
+                            navController.navigate(Screen.AddAccount.createRoute(accountId))
+                        },
                     )
                 }
                 composable(

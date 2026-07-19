@@ -17,6 +17,14 @@ publishes the signed AAB automatically when a `v*` tag is pushed.
 
 ### Added
 
+- **Consolidated Custom M3Us tab** — The My M3Us tab now matches iOS: an
+  "M3U Accounts" section lists your M3U provider accounts above your custom
+  playlists, with tap-to-edit and delete (with confirmation) right from the
+  tab. Custom playlists can now be reordered via **Move Up / Move Down** in
+  each playlist's menu. The empty state only shows when you have neither
+  playlists nor M3U accounts. Adding new M3U accounts remains in
+  Settings → Accounts.
+
 - **Collapsible channel groups** — Channel-list groups (including the
   Favorites section, which renders first) collapse and expand with a tap on
   the header, all collapsed by default. Expanded groups are remembered
