@@ -65,6 +65,8 @@ class VLCSessionPlayer(
                 accountManager?.trackMetadata ?: MutableStateFlow<Map<String, com.adagiostream.android.model.TrackMetadata>>(emptyMap()),
                 espnScoreService?.gamesByChannel ?: MutableStateFlow<Map<String, com.adagiostream.android.model.ESPNGameInfo>>(emptyMap()),
                 accountManager?.epgEntries ?: MutableStateFlow<Map<String, List<com.adagiostream.android.model.EPGEntry>>>(emptyMap()),
+                // Recompose when the prefer-live-scores toggle flips (beads_adagio-59p.3.3)
+                accountManager?.appSettings ?: MutableStateFlow(com.adagiostream.android.model.AppSettings()),
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
                 (values[0] as PlaybackState) to (values[1] as com.adagiostream.android.model.Channel?)
@@ -115,6 +117,10 @@ class VLCSessionPlayer(
                         accountManager?.trackMetadata?.value?.get(channel.name)
                     }
                     val espnGame = espnScoreService?.gamesByChannel?.value?.get(channel.id)
+                    // beads_adagio-59p.3.3: an in-progress game outranks the SXM
+                    // track when the user prefers live scores (default on).
+                    val liveGameWins = espnGame?.state == com.adagiostream.android.model.ESPNGameInfo.GameState.LIVE &&
+                        accountManager?.appSettings?.value?.preferLiveScoresOverMetadata != false
 
                     val displayTitle: String
                     val displayArtist: String
@@ -130,7 +136,7 @@ class VLCSessionPlayer(
                             accountManager?.epgEntries?.value?.get(epgId)?.firstOrNull { it.isCurrentlyAiring }
                         }
                         when {
-                            trackMeta != null -> {
+                            trackMeta != null && !liveGameWins -> {
                                 displayTitle = trackMeta.title
                                 displayArtist = trackMeta.artist
                                 artworkUri = (trackMeta.albumArtURL ?: channel.logoURL)?.let { android.net.Uri.parse(it) }

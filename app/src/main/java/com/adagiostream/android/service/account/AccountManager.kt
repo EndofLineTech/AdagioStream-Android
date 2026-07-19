@@ -2,16 +2,18 @@ package com.adagiostream.android.service.account
 
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
+import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.ChannelGroup
 import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.LovedTrack
 import com.adagiostream.android.model.ChannelGroupingMode
+import com.adagiostream.android.model.SXMMetadataSource
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.model.ESPNGameInfo
 import com.adagiostream.android.service.metadata.ESPNScoreService
-import com.adagiostream.android.service.metadata.XMPlaylistApi
+import com.adagiostream.android.service.metadata.SXMMetadataService
 import com.adagiostream.android.service.parsing.EPGParser
 import com.adagiostream.android.service.parsing.M3UParser
 import com.adagiostream.android.service.parsing.XtreamCodesApi
@@ -36,10 +38,28 @@ import javax.inject.Singleton
 class AccountManager @Inject constructor(
     private val persistenceService: PersistenceService,
     private val client: OkHttpClient,
-    private val xmPlaylistApi: XMPlaylistApi,
+    private val sxmMetadataService: SXMMetadataService,
     private val espnScoreService: ESPNScoreService,
 ) : AccountRepository {
-    companion object
+    companion object {
+        /**
+         * Whether [title] is just the stream URL's last path component (e.g.
+         * "20998.ts") — beads_adagio-59p.3.5. On Android track titles only
+         * enter now-playing metadata from the metadata APIs (libVLC/Media3
+         * stream meta is never read into [trackMetadata]), so this leak can't
+         * currently happen here — the guard sits at the single choke point
+         * anyway because it's cheap and the iOS player did leak exactly this.
+         */
+        fun isStreamUrlFilename(title: String, streamUrl: String): Boolean {
+            val path = streamUrl
+                .substringAfter("://", streamUrl)
+                .substringAfter('/', missingDelimiterValue = "")
+                .substringBefore('?')
+                .substringBefore('#')
+            val lastComponent = path.trimEnd('/').substringAfterLast('/')
+            return lastComponent.isNotEmpty() && title.trim().equals(lastComponent, ignoreCase = true)
+        }
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val m3uParser = M3UParser(client)
@@ -68,6 +88,20 @@ class AccountManager @Inject constructor(
     val trackMetadata: StateFlow<Map<String, TrackMetadata>> = _trackMetadata.asStateFlow()
     private var trackMetadataJob: Job? = null
 
+    /**
+     * The channel now-playing polling was last asked to track — kept even when
+     * it has no station mapping yet, so a late station-list success can attach
+     * metadata to it retroactively (beads_adagio-59p.3.4).
+     */
+    private var currentMetadataChannel: Channel? = null
+
+    /**
+     * Live app settings, exposed for consumers that compose now-playing
+     * metadata (e.g. the prefer-live-scores gate in VLCSessionPlayer,
+     * beads_adagio-59p.3.3).
+     */
+    val appSettings: StateFlow<AppSettings> get() = persistenceService.settings
+
     // Feed metadata keyed by XM slug — used for channel list subtitles
     private val _feedMetadata = MutableStateFlow<Map<String, TrackMetadata>>(emptyMap())
     val feedMetadata: StateFlow<Map<String, TrackMetadata>> = _feedMetadata.asStateFlow()
@@ -88,6 +122,12 @@ class AccountManager @Inject constructor(
     var groupingMode: ChannelGroupingMode = ChannelGroupingMode.ALL_GROUPS
         private set
     var espnPollingIntervalSeconds: Int = 15
+    /**
+     * SXM now-playing poll interval (beads_adagio-59p.3.2). Set from persisted
+     * settings on load and by SettingsViewModel on change; consumed clamped
+     * (10–45s) so stored garbage can't produce a runaway timer.
+     */
+    var sxmPollIntervalSeconds: Int = AppSettings.SXM_POLL_INTERVAL_DEFAULT
 
     // Group management
     private var enabledGroups: MutableSet<String>? = null  // null = all enabled
@@ -128,6 +168,16 @@ class AccountManager @Inject constructor(
     suspend fun awaitInitialLoad() = _initialLoadComplete.await()
 
     init {
+        // A matching table landing (possibly minutes after launch thanks to the
+        // retry loop, beads_adagio-59p.3.4) drives SXM state: feed polling
+        // starts, and the already-playing channel gets its metadata attached
+        // late by re-running the polling entry point. Restarting an
+        // already-mapped poll is harmless (one extra immediate fetch).
+        sxmMetadataService.onMappingBuilt = {
+            hasSxmChannels = sxmMetadataService.hasMappedChannels()
+            startFeedPollingIfNeeded()
+            currentMetadataChannel?.let { startTrackMetadataPolling(it) }
+        }
         scope.launch {
             val settings = persistenceService.loadSettings()
             sortPrefixes = settings.sortPrefixes
@@ -135,6 +185,7 @@ class AccountManager @Inject constructor(
             groupSortMode = settings.groupSortMode
             groupingMode = settings.channelGroupingMode
             espnPollingIntervalSeconds = settings.espnPollingIntervalSeconds
+            sxmPollIntervalSeconds = settings.sxmPollIntervalSeconds
             enabledGroups = settings.enabledGroups?.toMutableSet()
             _enabledGroupNames.value = enabledGroups?.toSet()
             favoriteGroupOrder = settings.favoriteGroupOrder.toMutableList()
@@ -157,7 +208,7 @@ class AccountManager @Inject constructor(
         if (feedJob != null) return // already polling
         feedJob = scope.launch {
             while (true) {
-                val feed = xmPlaylistApi.getFeed()
+                val feed = sxmMetadataService.getFeed()
                 if (feed.isNotEmpty()) {
                     _feedMetadata.value = feed
                     DebugLogger.log("Feed loaded: ${feed.size} channels with track data", DebugLogger.Category.SXM)
@@ -271,9 +322,9 @@ class AccountManager @Inject constructor(
             _channels.value = withFavorites
             rebuildGroups()
             loadEPG()
-            xmPlaylistApi.matchChannels(withFavorites, sortPrefixes)
-            hasSxmChannels = xmPlaylistApi.hasMappedChannels()
-            startFeedPollingIfNeeded()
+            // Async with retry (beads_adagio-59p.3.4): hasSxmChannels and feed
+            // polling update via onMappingBuilt when the matching table lands.
+            sxmMetadataService.matchChannels(withFavorites, sortPrefixes)
             espnScoreService.epgDataProvider = { _epgEntries.value }
             espnScoreService.matchChannels(withFavorites, sortPrefixes)
             if (espnPollingIntervalSeconds > 0) {
@@ -495,22 +546,42 @@ class AccountManager @Inject constructor(
 
     fun startTrackMetadataPolling(channel: Channel) {
         trackMetadataJob?.cancel()
-        val deeplink = xmPlaylistApi.deeplinkForChannel(channel.id)
-        if (deeplink == null) {
-            DebugLogger.log("No XM deeplink for channel: '${channel.name}' (id=${channel.id})", DebugLogger.Category.SXM)
+        // Remember the channel even when no mapping exists yet — a late
+        // station-list success re-attaches metadata for it via onMappingBuilt
+        // (beads_adagio-59p.3.4).
+        currentMetadataChannel = channel
+        val stationId = sxmMetadataService.stationIdForChannel(channel.id)
+        if (stationId == null) {
+            DebugLogger.log("No SXM station mapping for channel: '${channel.name}' (id=${channel.id})", DebugLogger.Category.SXM)
             return
         }
-        DebugLogger.log("Starting XM metadata polling for '${channel.name}' → deeplink='$deeplink'", DebugLogger.Category.SXM)
+        DebugLogger.log("Starting SXM metadata polling for '${channel.name}' → station='$stationId'", DebugLogger.Category.SXM)
         trackMetadataJob = scope.launch {
             while (true) {
-                val track = xmPlaylistApi.getRecentTrack(deeplink)
-                if (track != null) {
-                    DebugLogger.log("XM track: ${track.artist} - ${track.title}", DebugLogger.Category.SXM)
-                    _trackMetadata.value = _trackMetadata.value + (channel.name to track)
-                } else {
-                    DebugLogger.log("XM returned null for deeplink='$deeplink'", DebugLogger.Category.SXM)
+                sxmMetadataService.getRecentTrack(stationId).onSuccess { track ->
+                    when {
+                        track == null -> {
+                            // Non-displayable cut / empty response — the source
+                            // answered "nothing playing", so clear the display
+                            // (ad break) instead of pinning the last song.
+                            if (channel.name in _trackMetadata.value) {
+                                DebugLogger.log("Track cleared (commercial break?)", DebugLogger.Category.SXM)
+                                _trackMetadata.value = _trackMetadata.value - channel.name
+                            }
+                        }
+                        isStreamUrlFilename(track.title, channel.streamURL) -> {
+                            // beads_adagio-59p.3.5: never surface the stream
+                            // URL's filename (e.g. "20998.ts") as a track title.
+                            DebugLogger.log("Rejected stream-URL filename as title: '${track.title}'", DebugLogger.Category.SXM)
+                        }
+                        else -> {
+                            DebugLogger.log("SXM track: ${track.artist} - ${track.title}", DebugLogger.Category.SXM)
+                            _trackMetadata.value = _trackMetadata.value + (channel.name to track)
+                        }
+                    }
                 }
-                delay(15_000L)
+                // Fetch failure keeps the last shown track (network blip ≠ ad break).
+                delay(AppSettings.clampSxmPollInterval(sxmPollIntervalSeconds) * 1000L)
             }
         }
     }
@@ -518,17 +589,47 @@ class AccountManager @Inject constructor(
     fun stopTrackMetadataPolling() {
         trackMetadataJob?.cancel()
         trackMetadataJob = null
+        currentMetadataChannel = null
+    }
+
+    /**
+     * Restart the active now-playing poll so a changed interval applies
+     * immediately instead of after one more old-interval tick
+     * (beads_adagio-59p.3.2). No-op when nothing is being polled.
+     */
+    fun sxmPollIntervalChanged() {
+        if (trackMetadataJob?.isActive == true) {
+            currentMetadataChannel?.let { startTrackMetadataPolling(it) }
+        }
+    }
+
+    /**
+     * Called when the user changes the SXM metadata source in Settings
+     * (beads_adagio-59p.3.1): stop polling, drop stale-source metadata and
+     * history, re-match against the new source. The live channel resumes via
+     * the onMappingBuilt late-attach — currentMetadataChannel is intentionally
+     * kept across the switch for exactly that.
+     */
+    fun sxmSourceChanged(newSource: SXMMetadataSource) {
+        trackMetadataJob?.cancel()
+        trackMetadataJob = null
+        feedJob?.cancel()
+        feedJob = null
+        hasSxmChannels = false
+        _trackMetadata.value = emptyMap()
+        _feedMetadata.value = emptyMap()
+        sxmMetadataService.sourceChanged(newSource)
     }
 
     /**
      * The track that was playing on [channel] at [atEpochMillis] — used during
      * time-shift catch-up so the display track matches the buffered audio
-     * instead of the live now-playing track. Null if the channel has no XM
-     * deeplink or no history covers that moment.
+     * instead of the live now-playing track. Null if the channel has no
+     * station mapping or no history covers that moment.
      */
     fun historicalTrackMetadata(channel: Channel, atEpochMillis: Long): TrackMetadata? {
-        val deeplink = xmPlaylistApi.deeplinkForChannel(channel.id) ?: return null
-        return xmPlaylistApi.trackAt(deeplink, atEpochMillis)
+        val stationId = sxmMetadataService.stationIdForChannel(channel.id) ?: return null
+        return sxmMetadataService.trackAt(stationId, atEpochMillis)
     }
 
     private fun rebuildGroups() {

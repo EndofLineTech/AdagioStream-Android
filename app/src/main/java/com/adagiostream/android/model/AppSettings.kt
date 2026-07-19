@@ -1,8 +1,14 @@
 package com.adagiostream.android.model
 
 import com.adagiostream.android.service.player.RepeatMode
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 @Serializable
 data class AppSettings(
@@ -62,7 +68,68 @@ data class AppSettings(
      * (`"\u0000favorites"`) so a real M3U group named "Favorites" can't collide.
      */
     val expandedGroups: Set<String> = emptySet(),
-)
+    /**
+     * Which third-party API supplies SiriusXM now-playing metadata
+     * (beads_adagio-59p.3.1, iOS parity: `SXMMetadataSource`). Defaults to
+     * StellarTunerLog; a garbage stored value also falls back there (see
+     * [SXMMetadataSourceSerializer]).
+     */
+    val sxmMetadataSource: SXMMetadataSource = SXMMetadataSource.STELLARTUNERLOG,
+    /**
+     * Foreground tuned-channel now-playing poll interval in seconds
+     * (beads_adagio-59p.3.2, iOS parity: `SXMPollInterval`). One shared value
+     * across both metadata sources. Consumers clamp via
+     * [clampSxmPollInterval] so a hand-edited settings file can't produce a
+     * runaway timer.
+     */
+    val sxmPollIntervalSeconds: Int = SXM_POLL_INTERVAL_DEFAULT,
+    /**
+     * Whether a live ESPN game outranks SiriusXM track metadata on the
+     * now-playing display for a channel carrying that game
+     * (beads_adagio-59p.3.3, iOS parity: `SXMSportsPriority`). Default true so
+     * sports channels show scores out of the box.
+     */
+    val preferLiveScoresOverMetadata: Boolean = true,
+) {
+    companion object {
+        /** Poll interval choices surfaced in Settings (beads_adagio-59p.3.2). */
+        val SXM_POLL_INTERVAL_OPTIONS = listOf(10, 15, 20, 25, 30, 35, 40, 45)
+        const val SXM_POLL_INTERVAL_DEFAULT = 30
+
+        /** Clamp a stored poll interval into the allowed 10–45s range. */
+        fun clampSxmPollInterval(seconds: Int): Int =
+            seconds.coerceIn(SXM_POLL_INTERVAL_OPTIONS.first(), SXM_POLL_INTERVAL_OPTIONS.last())
+    }
+}
+
+/**
+ * SiriusXM metadata source (beads_adagio-59p.3.1). Serial names match the iOS
+ * raw values ("xmplaylist" / "stellartunerlog") so exports stay comparable.
+ */
+@Serializable(with = SXMMetadataSourceSerializer::class)
+enum class SXMMetadataSource(val serialName: String, val displayName: String) {
+    XMPLAYLIST("xmplaylist", "xmplaylist.com"),
+    STELLARTUNERLOG("stellartunerlog", "StellarTunerLog"),
+}
+
+/**
+ * Tolerant serializer: an unknown/garbage stored value decodes to the default
+ * (StellarTunerLog) instead of failing the whole [AppSettings] decode — which
+ * would silently reset every setting to defaults.
+ */
+object SXMMetadataSourceSerializer : KSerializer<SXMMetadataSource> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("SXMMetadataSource", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: SXMMetadataSource) =
+        encoder.encodeString(value.serialName)
+
+    override fun deserialize(decoder: Decoder): SXMMetadataSource {
+        val raw = decoder.decodeString()
+        return SXMMetadataSource.entries.firstOrNull { it.serialName == raw }
+            ?: SXMMetadataSource.STELLARTUNERLOG
+    }
+}
 
 @Serializable
 enum class ArtworkDisplayMode(val displayName: String) {

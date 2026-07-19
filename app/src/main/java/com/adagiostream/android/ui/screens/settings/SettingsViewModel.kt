@@ -10,6 +10,7 @@ import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.AutoSourceOrder
 import com.adagiostream.android.model.Channel
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.model.SXMMetadataSource
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.TextSizeMode
@@ -138,6 +139,30 @@ class SettingsViewModel @Inject constructor(
     fun updateSortPrefixes(prefixes: List<String>) {
         _settings.value = _settings.value.copy(sortPrefixes = prefixes)
         accountManager.updateSortPrefixes(prefixes)
+        save()
+    }
+
+    /** Switch SXM metadata source (beads_adagio-59p.3.1); re-matches and resumes the live channel. */
+    fun updateSxmMetadataSource(source: SXMMetadataSource) {
+        if (_settings.value.sxmMetadataSource == source) return
+        _settings.value = _settings.value.copy(sxmMetadataSource = source)
+        save()
+        // Pass the source directly — save() persists async, so reading it back
+        // from disk here could race and re-match against the old source.
+        accountManager.sxmSourceChanged(source)
+    }
+
+    /** SXM now-playing poll interval (beads_adagio-59p.3.2); restarts an active poll. */
+    fun updateSxmPollInterval(seconds: Int) {
+        _settings.value = _settings.value.copy(sxmPollIntervalSeconds = seconds)
+        accountManager.sxmPollIntervalSeconds = seconds
+        accountManager.sxmPollIntervalChanged()
+        save()
+    }
+
+    /** Whether a live ESPN game outranks SXM track metadata (beads_adagio-59p.3.3). */
+    fun updatePreferLiveScores(enabled: Boolean) {
+        _settings.value = _settings.value.copy(preferLiveScoresOverMetadata = enabled)
         save()
     }
 
