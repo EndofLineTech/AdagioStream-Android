@@ -40,11 +40,15 @@ import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.persistence.LastPlayed
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.account.AccountManager
+import com.adagiostream.android.service.audiobookshelf.AbsEpisode
 import com.adagiostream.android.service.audiobookshelf.AbsLibrary
 import com.adagiostream.android.service.audiobookshelf.AbsLibraryItem
 import com.adagiostream.android.service.audiobookshelf.AudiobookPlaybackCoordinator
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApi
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiProvider
+import com.adagiostream.android.service.audiobookshelf.PodcastPlaybackContext
+import com.adagiostream.android.service.audiobookshelf.PodcastShow
+import com.adagiostream.android.service.audiobookshelf.sortedEpisodes
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.DebugLogger.Category.AUTO
@@ -79,6 +83,7 @@ class AudioPlaybackService : MediaLibraryService() {
     @Inject lateinit var audiobookPlaybackCoordinator: AudiobookPlaybackCoordinator
     @Inject lateinit var audiobookshelfApiProvider: AudiobookshelfApiProvider
     @Inject lateinit var audiobookPlaybackLauncher: AudiobookPlaybackLauncher
+    @Inject lateinit var podcastPlaybackLauncher: PodcastPlaybackLauncher
 
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -140,6 +145,23 @@ class AudioPlaybackService : MediaLibraryService() {
 
     /** Per-library book cache keyed by ABS library ID (on-demand, baw.7.1 pattern). */
     private val cachedAbsBooks = mutableMapOf<String, List<AbsLibraryItem>>()
+
+    // ---- Podcast browse state (beads_adagio-59p.2.4) -----------------------
+
+    /**
+     * Podcast-type libraries, or null when not fetched yet. Also GATES the root
+     * "Podcasts" node: it's shown only when this resolves to >=1 library
+     * ([hasPodcastLibrary]). Prefetched on account change (so the node can
+     * appear) and populated on-demand from the first browse, following the same
+     * baw.7.1 cache + notifyChildrenChanged pattern as [cachedAbsLibraries].
+     */
+    private var cachedPodcastLibraries: List<AbsLibrary>? = null
+
+    /** Per-library show cache keyed by ABS library ID (on-demand). */
+    private val cachedPodcastShows = mutableMapOf<String, List<PodcastShow>>()
+
+    /** Per-show episode cache keyed by show library-item ID (on-demand). */
+    private val cachedPodcastEpisodes = mutableMapOf<String, List<AbsEpisode>>()
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback"
@@ -297,6 +319,16 @@ class AudioPlaybackService : MediaLibraryService() {
                 if (absChanged) {
                     cachedAbsLibraries = null
                     cachedAbsBooks.clear()
+                    cachedPodcastLibraries = null
+                    cachedPodcastShows.clear()
+                    cachedPodcastEpisodes.clear()
+                }
+                // Prefetch podcast libraries so the "Podcasts" root node can
+                // appear/disappear reactively (it's GATED on >=1 podcast
+                // library, unlike Audiobooks which shows on any ABS account).
+                // On success this fires notifyChildrenChanged(ROOT_ID) itself.
+                if (newAbsApi != null) {
+                    prefetchPodcastLibraries()
                 }
                 if (apiChanged || absChanged) {
                     // Notify Root children so the Music/Audiobooks nodes appear/disappear
@@ -548,8 +580,18 @@ class AudioPlaybackService : MediaLibraryService() {
         val nonEmptyPlaylistCount = customPlaylistManager.playlists.value
             .count { playlist -> playlist.groups.sumOf { it.entries.size } > 0 }
         val groupCount = accountManager.groups.value.size
-        return 1 + nonEmptyPlaylistCount + groupCount + (if (hasSubsonic) 1 else 0) + (if (hasAudiobookshelf) 1 else 0)
+        return 1 + nonEmptyPlaylistCount + groupCount + (if (hasSubsonic) 1 else 0) +
+            (if (hasAudiobookshelf) 1 else 0) + (if (hasPodcastLibrary()) 1 else 0)
     }
+
+    /**
+     * Whether the "Podcasts" root node should appear: an enabled Audiobookshelf
+     * account AND at least one KNOWN podcast library (beads_adagio-59p.2.4).
+     * Library membership is only known after [prefetchPodcastLibraries] lands,
+     * so the node materializes via the notifyChildrenChanged(ROOT_ID) that
+     * prefetch fires — the same reactive appearance as the audiobook node.
+     */
+    private fun hasPodcastLibrary(): Boolean = (cachedPodcastLibraries?.isNotEmpty() == true)
 
     private fun channelListForContext(channel: Channel): List<Channel> {
         val channels = accountManager.channels.value
@@ -775,6 +817,41 @@ class AudioPlaybackService : MediaLibraryService() {
                 return Futures.immediateFuture(listOf(tappedItem))
             }
 
+            // Podcast episode tap (beads_adagio-59p.2.4): play via the shared
+            // PodcastPlaybackLauncher, building the show's playback context from
+            // the episode list we already fetched to render this node — so the
+            // car gets the exact whole-show auto-play-next the phone gets. The
+            // media id carries BOTH show and episode id.
+            if (tappedItem != null && tappedItem.mediaId.startsWith(PodcastAutoMediaMapper.PODCAST_EPISODE_PREFIX)) {
+                val (showId, episodeId) = PodcastAutoMediaMapper.episodeIdsFrom(tappedItem.mediaId)
+                val account = accountManager.accounts.value
+                    .firstOrNull { it.isEnabled && it.type is AccountType.Audiobookshelf }
+                if (account != null) {
+                    serviceScope.launch {
+                        try {
+                            // Cached episodes were populated when the episode-list
+                            // node was browsed; a null context lets the coordinator
+                            // fetch the show itself (its own fetchPodcastContext) so
+                            // a cold tap still auto-plays-next.
+                            val context = cachedPodcastEpisodes[showId]?.let { episodes ->
+                                PodcastPlaybackContext(
+                                    libraryItemId = showId,
+                                    showTitle = cachedPodcastShows.values.flatten().firstOrNull { it.id == showId }?.title,
+                                    episodes = episodes,
+                                    order = persistenceService.loadSettings().podcastEpisodeSortOrder,
+                                )
+                            }
+                            podcastPlaybackLauncher.play(account, showId, episodeId, context)
+                        } catch (e: Exception) {
+                            DebugLogger.log("ABS Auto episode tap failed: ${e::class.simpleName}", AUTO)
+                        }
+                    }
+                } else {
+                    DebugLogger.log("ABS Auto episode tap: no enabled Audiobookshelf account", AUTO)
+                }
+                return Futures.immediateFuture(listOf(tappedItem))
+            }
+
             if (tappedItem != null && tappedItem.mediaId.startsWith(MusicAutoMediaMapper.MUSIC_TRACK_PREFIX)) {
                 val future = SettableFuture.create<List<MediaItem>>()
                 serviceScope.launch {
@@ -961,12 +1038,11 @@ class AudioPlaybackService : MediaLibraryService() {
                             emptyList()
                         }
                         // "Audiobooks" rides in the media section next to Music
-                        // (beads_adagio-59p.1.7).
-                        val mediaItems = musicItems + if (hasAudiobookshelf) {
-                            listOf(AudiobookAutoMediaMapper.audiobooksRootItem())
-                        } else {
-                            emptyList()
-                        }
+                        // (beads_adagio-59p.1.7). "Podcasts" follows it, but only
+                        // once a podcast library is known (beads_adagio-59p.2.4).
+                        val mediaItems = musicItems +
+                            (if (hasAudiobookshelf) listOf(AudiobookAutoMediaMapper.audiobooksRootItem()) else emptyList()) +
+                            (if (hasPodcastLibrary()) listOf(PodcastAutoMediaMapper.podcastsRootItem()) else emptyList())
 
                         val channelItems = mutableListOf<MediaItem>()
                         channelItems.add(
@@ -1038,6 +1114,12 @@ class AudioPlaybackService : MediaLibraryService() {
                         // through to the IPTV group-name lookup.
                         AudiobookAutoMediaMapper.isAudiobookId(parentId) ->
                             handleAudiobookChildren(parentId)
+
+                        // ---- Podcast browse tree (beads_adagio-59p.2.4) — all
+                        // podcasts* IDs handled here, never falling through to
+                        // the IPTV group-name lookup.
+                        PodcastAutoMediaMapper.isPodcastId(parentId) ->
+                            handlePodcastChildren(parentId)
 
                         parentId.startsWith(CUSTOM_PLAYLIST_PREFIX) -> {
                             val playlistId = parentId.removePrefix(CUSTOM_PLAYLIST_PREFIX)
@@ -1375,6 +1457,133 @@ class AudioPlaybackService : MediaLibraryService() {
                 notifyChildrenChangedAll(notifyParentId, bookLibraries.size)
             } catch (e: Exception) {
                 DebugLogger.log("ABS Auto library fetch failed: ${e::class.simpleName}", AUTO)
+            }
+        }
+    }
+
+    // =========================================================================
+    // Podcast browse helpers (beads_adagio-59p.2.4)
+    // =========================================================================
+
+    /**
+     * Routes a podcasts* [parentId] to cache-backed children — the same
+     * baw.7.1 pattern as [handleAudiobookChildren]: never blocks on the
+     * network, a cache miss fires a background fetch and returns an empty list
+     * now, and the fetch fires notifyChildrenChanged when data lands. Fetch
+     * failures are logged (never the tokened URLs) and leave the node empty.
+     */
+    private fun handlePodcastChildren(parentId: String): List<MediaItem> {
+        DebugLogger.log("handlePodcastChildren() parentId=$parentId", AUTO)
+        return when {
+            parentId == PodcastAutoMediaMapper.PODCASTS_ROOT_ID -> {
+                val libraries = cachedPodcastLibraries
+                if (libraries == null) {
+                    fetchPodcastLibraries(parentId)
+                    emptyList()
+                } else {
+                    PodcastAutoMediaMapper.podcastsRootChildren(
+                        podcastLibraries = libraries,
+                        showsFor = { libraryId -> podcastShowsOrFetch(libraryId, parentId) },
+                        coverArtUri = ::absCoverArtUri,
+                    )
+                }
+            }
+            parentId.startsWith(PodcastAutoMediaMapper.PODCAST_LIBRARY_PREFIX) -> {
+                val libraryId = PodcastAutoMediaMapper.libraryIdFrom(parentId)
+                PodcastAutoMediaMapper.showItems(
+                    podcastShowsOrFetch(libraryId, parentId) ?: emptyList(),
+                    ::absCoverArtUri,
+                )
+            }
+            parentId.startsWith(PodcastAutoMediaMapper.PODCAST_SHOW_PREFIX) -> {
+                val showId = PodcastAutoMediaMapper.showIdFrom(parentId)
+                val episodes = podcastEpisodesOrFetch(showId, parentId)
+                PodcastAutoMediaMapper.episodeItems(
+                    showId = showId,
+                    showTitle = cachedPodcastShows.values.flatten().firstOrNull { it.id == showId }?.title,
+                    episodes = episodes ?: emptyList(),
+                    coverArtUri = ::absCoverArtUri,
+                )
+            }
+            else -> emptyList()
+        }
+    }
+
+    /** The cached shows for [libraryId], or null after firing a background fetch. */
+    private fun podcastShowsOrFetch(libraryId: String, notifyParentId: String): List<PodcastShow>? {
+        cachedPodcastShows[libraryId]?.let { return it }
+        val api = resolveAbsApiNow() ?: return null
+        serviceScope.launch {
+            try {
+                val shows = api.getLibraryItems(libraryId)
+                    .mapNotNull { PodcastShow.from(it, libraryIdFallback = libraryId) }
+                cachedPodcastShows[libraryId] = shows
+                DebugLogger.log("Podcast Auto: ${shows.size} shows cached for library", AUTO)
+                notifyChildrenChangedAll(notifyParentId, shows.size)
+            } catch (e: Exception) {
+                DebugLogger.log("Podcast Auto show fetch failed: ${e::class.simpleName}", AUTO)
+            }
+        }
+        return null
+    }
+
+    /**
+     * The cached episodes for [showId] (sorted per the persisted display
+     * order), or null after firing a background fetch. The sorted list IS what
+     * the tap handler's [PodcastPlaybackContext] carries, so display order and
+     * auto-play direction stay in sync via the one [sortedEpisodes] seam.
+     */
+    private fun podcastEpisodesOrFetch(showId: String, notifyParentId: String): List<AbsEpisode>? {
+        cachedPodcastEpisodes[showId]?.let { return it }
+        val api = resolveAbsApiNow() ?: return null
+        serviceScope.launch {
+            try {
+                val order = persistenceService.loadSettings().podcastEpisodeSortOrder
+                val item = api.getItem(showId)
+                val episodes = sortedEpisodes(item.media?.episodes ?: emptyList(), order)
+                cachedPodcastEpisodes[showId] = episodes
+                // Record the show title so the tap handler / episode metadata
+                // resolve it even when the show list wasn't browsed first.
+                DebugLogger.log("Podcast Auto: ${episodes.size} episodes cached for show", AUTO)
+                notifyChildrenChangedAll(notifyParentId, episodes.size)
+            } catch (e: Exception) {
+                DebugLogger.log("Podcast Auto episode fetch failed: ${e::class.simpleName}", AUTO)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Prefetches the podcast-type libraries to GATE the root "Podcasts" node
+     * (beads_adagio-59p.2.4). Fired on account change: on success it refreshes
+     * ROOT_ID so the node appears/disappears reactively, exactly like the
+     * music-list prefetch refreshes its own nodes.
+     */
+    private fun prefetchPodcastLibraries() {
+        val api = resolveAbsApiNow() ?: return
+        serviceScope.launch {
+            try {
+                val libraries = api.getLibraries().filter { it.isPodcast }
+                cachedPodcastLibraries = libraries
+                DebugLogger.log("Podcast Auto: ${libraries.size} podcast libraries cached", AUTO)
+                notifyChildrenChangedAll(ROOT_ID, currentRootChildCount())
+            } catch (e: Exception) {
+                DebugLogger.log("Podcast Auto library prefetch failed: ${e::class.simpleName}", AUTO)
+            }
+        }
+    }
+
+    /** Background-fetches the podcast-type libraries, then refreshes [notifyParentId]. */
+    private fun fetchPodcastLibraries(notifyParentId: String) {
+        val api = resolveAbsApiNow() ?: return
+        serviceScope.launch {
+            try {
+                val libraries = api.getLibraries().filter { it.isPodcast }
+                cachedPodcastLibraries = libraries
+                DebugLogger.log("Podcast Auto: ${libraries.size} podcast libraries cached", AUTO)
+                notifyChildrenChangedAll(notifyParentId, libraries.size)
+            } catch (e: Exception) {
+                DebugLogger.log("Podcast Auto library fetch failed: ${e::class.simpleName}", AUTO)
             }
         }
     }
