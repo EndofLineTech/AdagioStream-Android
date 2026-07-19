@@ -28,6 +28,18 @@ publishes the signed AAB automatically when a `v*` tag is pushed.
   each book's author and progress ("Finished" / "N% listened") with cover
   art. (iOS parity: Audiobookshelf E1–E4.)
 
+- **Podcasts (Audiobookshelf)** — Browse your Audiobookshelf podcast libraries
+  by show or by recent episodes, with each episode's publish date, duration,
+  and an unplayed/in-progress/played badge hydrated from your server progress.
+  Play episodes with auto-play-next when one ends — choose Stop, Next Unplayed,
+  or Sort Order, plus a Newest/Oldest display order — with per-episode progress
+  synced back to the server (queued and flushed when offline). Download episodes
+  for offline listening, with optional auto-delete of finished downloads. Browse
+  and play podcasts from **Android Auto** — a "Podcasts" node (shown when you
+  have a podcast library) with per-library grouping, show list, and episode
+  list, where tapping an episode plays it with whole-show auto-play-next just
+  like on your phone. (iOS parity: Audiobookshelf podcasts E1–E5.)
+
 - **Consolidated Custom M3Us tab** — The My M3Us tab now matches iOS: an
   "M3U Accounts" section lists your M3U provider accounts above your custom
   playlists, with tap-to-edit and delete (with confirmation) right from the
