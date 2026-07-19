@@ -59,7 +59,9 @@ import com.adagiostream.android.model.AutoSourceOrder
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.ArtworkDisplayMode
 import com.adagiostream.android.model.Channel
+import com.adagiostream.android.model.AppSettings
 import com.adagiostream.android.model.PlaybackState
+import com.adagiostream.android.model.SXMMetadataSource
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.util.BitrateFormatter
@@ -512,6 +514,83 @@ fun SettingsScreen(
         }
 
         FooterText("How often to refresh live sports scores from ESPN.com API. Off disables score updates entirely. Lower values show scores sooner but use more data.")
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Prefer Live Scores",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = settings.preferLiveScoresOverMetadata,
+                    onCheckedChange = { viewModel.updatePreferLiveScores(it) },
+                )
+            }
+        }
+        FooterText("When a channel is carrying a live game, show the score instead of song metadata on the Now Playing screen and lock screen.")
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "SiriusXM Metadata Source",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SXMMetadataSource.entries.forEachIndexed { index, source ->
+                SegmentedButton(
+                    selected = settings.sxmMetadataSource == source,
+                    onClick = { viewModel.updateSxmMetadataSource(source) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = SXMMetadataSource.entries.size,
+                    ),
+                ) {
+                    Text(text = source.displayName)
+                }
+            }
+        }
+
+        FooterText("Which service supplies SiriusXM now-playing song info. Switching re-matches your channels and resumes the current one.")
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Now Playing Refresh Interval",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            AppSettings.SXM_POLL_INTERVAL_OPTIONS.forEachIndexed { index, seconds ->
+                SegmentedButton(
+                    selected = AppSettings.clampSxmPollInterval(settings.sxmPollIntervalSeconds) == seconds,
+                    onClick = { viewModel.updateSxmPollInterval(seconds) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = AppSettings.SXM_POLL_INTERVAL_OPTIONS.size,
+                    ),
+                ) {
+                    Text(text = "$seconds")
+                }
+            }
+        }
+
+        FooterText("Seconds between SiriusXM now-playing refreshes for the tuned channel. Lower values show new songs sooner but use more data.")
 
         // ── Downloaded Music (E6) ────────────────────────────
 

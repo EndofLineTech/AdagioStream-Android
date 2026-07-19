@@ -146,9 +146,21 @@ class NowPlayingViewModel @Inject constructor(
     val currentTrackMetadata: StateFlow<TrackMetadata?> = combine(
         vlcPlayer.currentChannel,
         accountManager.trackMetadata,
-    ) { channel, metadata ->
+        accountManager.espnGames,
+        accountManager.appSettings,
+    ) { channel, metadata, games, settings ->
         if (channel == null) return@combine null
-        metadata[channel.name]
+        val track = metadata[channel.name] ?: return@combine null
+        // beads_adagio-59p.3.3: with "prefer live scores" on, an in-progress
+        // ESPN game on this channel outranks the SXM track. Suppressing the
+        // track here lets every consumer (sheet, mini player) fall through to
+        // its existing ESPN branch.
+        val game = games[channel.id]
+        if (settings.preferLiveScoresOverMetadata && game?.state == ESPNGameInfo.GameState.LIVE) {
+            null
+        } else {
+            track
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val isTrackLoved: StateFlow<Boolean> = combine(
