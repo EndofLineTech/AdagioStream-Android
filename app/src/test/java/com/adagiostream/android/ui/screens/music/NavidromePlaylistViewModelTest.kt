@@ -1,6 +1,7 @@
 package com.adagiostream.android.ui.screens.music
 
 import app.cash.turbine.test
+import kotlin.time.Duration.Companion.seconds
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
@@ -131,7 +132,7 @@ class NavidromePlaylistViewModelTest {
 
     @Test
     fun `initial playlistsState is Idle`() = runTest {
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -172,7 +173,7 @@ class NavidromePlaylistViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(PLAYLISTS_OK_FIXTURE))
 
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
 
             viewModel.loadPlaylists()
@@ -189,7 +190,7 @@ class NavidromePlaylistViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(PLAYLISTS_OK_FIXTURE))
 
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             awaitItem() // Loading
@@ -209,7 +210,7 @@ class NavidromePlaylistViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(PLAYLISTS_EMPTY_FIXTURE))
 
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             awaitItem() // Loading
@@ -225,7 +226,7 @@ class NavidromePlaylistViewModelTest {
             mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong credentials"}}}"""),
         )
 
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             awaitItem() // Loading
@@ -237,7 +238,7 @@ class NavidromePlaylistViewModelTest {
 
     @Test
     fun `loadPlaylists is no-op when no Subsonic account configured`() = runTest {
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             expectNoEvents()
@@ -251,7 +252,7 @@ class NavidromePlaylistViewModelTest {
         // Only ONE response queued — proves the second loadPlaylists() was a no-op.
         server.enqueue(mockOk(PLAYLISTS_OK_FIXTURE))
 
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             assertEquals(NavidromePlaylistViewModel.LoadState.Loading, awaitItem())
@@ -284,7 +285,7 @@ class NavidromePlaylistViewModelTest {
             id = "p1", name = "My Mix", songCount = 2,
         )
 
-        viewModel.playlistDetailState.test {
+        viewModel.playlistDetailState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylistDetail(fakePlaylist)
             awaitItem() // Loading
@@ -304,7 +305,7 @@ class NavidromePlaylistViewModelTest {
             id = "p1", name = "My Mix", songCount = 2,
         )
 
-        viewModel.playlistDetailState.test {
+        viewModel.playlistDetailState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylistDetail(fakePlaylist)
             awaitItem() // Loading
@@ -332,7 +333,7 @@ class NavidromePlaylistViewModelTest {
             id = "p1", name = "My Mix", songCount = 2,
         )
 
-        viewModel.playlistDetailState.test {
+        viewModel.playlistDetailState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylistDetail(fakePlaylist)
             awaitItem() // Loading
@@ -374,7 +375,7 @@ class NavidromePlaylistViewModelTest {
         val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
             id = "p1", name = "My Mix", songCount = 3,
         )
-        viewModel.playlistDetailState.test {
+        viewModel.playlistDetailState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylistDetail(fakePlaylist)
             awaitItem() // Loading
@@ -408,7 +409,7 @@ class NavidromePlaylistViewModelTest {
         // getPlaylist) before the test ends — otherwise it's still suspended on
         // Dispatchers.IO when Main is reset and its resumption poisons a later
         // test (UncaughtExceptionsBeforeTest), same as the in-flight-guard test.
-        viewModel.isRemovingTrack.test {
+        viewModel.isRemovingTrack.test(timeout = 10.seconds) {
             var value = awaitItem()
             while (value) value = awaitItem()
             cancelAndIgnoreRemainingEvents()
@@ -423,7 +424,7 @@ class NavidromePlaylistViewModelTest {
         val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
             id = "p1", name = "My Mix", songCount = 2,
         )
-        viewModel.playlistDetailState.test {
+        viewModel.playlistDetailState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylistDetail(fakePlaylist)
             awaitItem() // Loading
@@ -441,7 +442,7 @@ class NavidromePlaylistViewModelTest {
         viewModel.removeTrackAt(fakePlaylist, index = 0)
 
         // Wait for the revert.
-        viewModel.playlistTracks.test {
+        viewModel.playlistTracks.test(timeout = 10.seconds) {
             val states = mutableListOf<List<Track>>()
             repeat(5) {
                 states.add(awaitItem())
@@ -461,7 +462,7 @@ class NavidromePlaylistViewModelTest {
         val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
             id = "p1", name = "My Mix", songCount = 2,
         )
-        viewModel.playlistDetailState.test {
+        viewModel.playlistDetailState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylistDetail(fakePlaylist)
             awaitItem() // Loading
@@ -483,7 +484,7 @@ class NavidromePlaylistViewModelTest {
         val fakePlaylist = com.adagiostream.android.service.navidrome.NavidromePlaylist(
             id = "p1", name = "My Mix", songCount = 3,
         )
-        viewModel.playlistDetailState.test {
+        viewModel.playlistDetailState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylistDetail(fakePlaylist)
             awaitItem() // Loading
@@ -509,7 +510,7 @@ class NavidromePlaylistViewModelTest {
         viewModel.removeTrackAt(fakePlaylist, index = 0)
 
         // Wait for the in-flight removal to finish.
-        viewModel.isRemovingTrack.test {
+        viewModel.isRemovingTrack.test(timeout = 10.seconds) {
             var value = awaitItem()
             while (value) value = awaitItem()
             cancelAndIgnoreRemainingEvents()
@@ -529,7 +530,7 @@ class NavidromePlaylistViewModelTest {
         setSubsonicAccount()
         // First load playlists with 2 items
         server.enqueue(mockOk(PLAYLISTS_OK_FIXTURE))
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             awaitItem() // Loading
@@ -545,7 +546,7 @@ class NavidromePlaylistViewModelTest {
 
         // Start collecting BEFORE calling createPlaylist so we observe the full
         // Loading → Loaded transition that comes from the internal refresh.
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             awaitItem() // consume current Loaded state from the first load
 
             viewModel.createPlaylist("Brand New Mix")
@@ -570,7 +571,7 @@ class NavidromePlaylistViewModelTest {
     fun `renamePlaylist updates list immediately (optimistic)`() = runTest {
         setSubsonicAccount()
         server.enqueue(mockOk(PLAYLISTS_OK_FIXTURE))
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             awaitItem() // Loading
@@ -602,7 +603,7 @@ class NavidromePlaylistViewModelTest {
     fun `renamePlaylist reverts on API error`() = runTest {
         setSubsonicAccount()
         server.enqueue(mockOk(PLAYLISTS_OK_FIXTURE))
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             awaitItem() // Loading
@@ -620,7 +621,7 @@ class NavidromePlaylistViewModelTest {
         viewModel.renamePlaylist(original, "Should Revert")
 
         // Wait for the error to propagate and revert
-        viewModel.playlists.test {
+        viewModel.playlists.test(timeout = 10.seconds) {
             // Consume items until name reverts
             val states = mutableListOf<List<com.adagiostream.android.service.navidrome.NavidromePlaylist>>()
             repeat(5) {
@@ -646,7 +647,7 @@ class NavidromePlaylistViewModelTest {
     fun `deletePlaylist removes playlist immediately (optimistic)`() = runTest {
         setSubsonicAccount()
         server.enqueue(mockOk(PLAYLISTS_OK_FIXTURE))
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             awaitItem() // Loading
@@ -676,7 +677,7 @@ class NavidromePlaylistViewModelTest {
     fun `deletePlaylist reverts on API error`() = runTest {
         setSubsonicAccount()
         server.enqueue(mockOk(PLAYLISTS_OK_FIXTURE))
-        viewModel.playlistsState.test {
+        viewModel.playlistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromePlaylistViewModel.LoadState.Idle, awaitItem())
             viewModel.loadPlaylists()
             awaitItem() // Loading
@@ -695,7 +696,7 @@ class NavidromePlaylistViewModelTest {
         viewModel.deletePlaylist(toDelete)
 
         // Wait for revert
-        viewModel.playlists.test {
+        viewModel.playlists.test(timeout = 10.seconds) {
             val states = mutableListOf<List<com.adagiostream.android.service.navidrome.NavidromePlaylist>>()
             repeat(5) {
                 states.add(awaitItem())

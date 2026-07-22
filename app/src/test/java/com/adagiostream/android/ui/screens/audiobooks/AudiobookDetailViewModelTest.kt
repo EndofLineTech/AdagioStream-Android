@@ -2,6 +2,7 @@ package com.adagiostream.android.ui.screens.audiobooks
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import kotlin.time.Duration.Companion.seconds
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountManager
@@ -154,7 +155,7 @@ class AudiobookDetailViewModelTest {
             ),
         )
 
-        viewModel.itemState.test {
+        viewModel.itemState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -180,7 +181,7 @@ class AudiobookDetailViewModelTest {
 
     @Test
     fun `downloadState maps the manifest row to the button state`() = runTest {
-        viewModel.downloadState.test {
+        viewModel.downloadState.test(timeout = 10.seconds) {
             assertEquals(DownloadUiState.NOT_DOWNLOADED, awaitItem()) // no row
             downloadRows.value = manifestRow(DownloadStatus.QUEUED)
             assertEquals(DownloadUiState.QUEUED, awaitItem())

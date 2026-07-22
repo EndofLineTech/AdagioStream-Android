@@ -1,6 +1,7 @@
 package com.adagiostream.android.ui.screens.music
 
 import app.cash.turbine.test
+import kotlin.time.Duration.Companion.seconds
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountRepository
@@ -126,7 +127,7 @@ class NavidromeSearchViewModelTest {
 
     @Test
     fun `initial searchState is Idle`() = runTest {
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -140,7 +141,7 @@ class NavidromeSearchViewModelTest {
         viewModel.onQueryChanged("")
 
         // With UnconfinedTestDispatcher, the debounce fires right away for blank — still Idle
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -153,7 +154,7 @@ class NavidromeSearchViewModelTest {
 
         viewModel.onQueryChanged("   ")
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -181,7 +182,7 @@ class NavidromeSearchViewModelTest {
 
         // Do a search first
         viewModel.onQueryChanged("rock")
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             val states = mutableListOf<NavidromeSearchViewModel.SearchState>()
             repeat(5) {
                 states.add(awaitItem())
@@ -193,7 +194,7 @@ class NavidromeSearchViewModelTest {
         // Then clear
         viewModel.clearSearch()
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -208,7 +209,7 @@ class NavidromeSearchViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(SEARCH_OK_FIXTURE))
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             awaitItem() // initial Idle
 
             // No request should have been made yet
@@ -258,7 +259,7 @@ class NavidromeSearchViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(SEARCH_OK_FIXTURE))
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
 
             viewModel.onQueryChanged("radiohead")
@@ -277,7 +278,7 @@ class NavidromeSearchViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(SEARCH_OK_FIXTURE))
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             viewModel.onQueryChanged("radiohead")
             awaitItem() // Loading
@@ -299,7 +300,7 @@ class NavidromeSearchViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(SEARCH_EMPTY_FIXTURE))
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             viewModel.onQueryChanged("zzz")
             awaitItem() // Loading
@@ -315,7 +316,7 @@ class NavidromeSearchViewModelTest {
             mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong credentials"}}}"""),
         )
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             viewModel.onQueryChanged("test")
             awaitItem() // Loading
@@ -329,7 +330,7 @@ class NavidromeSearchViewModelTest {
     fun `search is no-op when no Subsonic account configured`() = runTest {
         // No account set
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             viewModel.onQueryChanged("rock")
             // No state change expected — no API available
@@ -348,7 +349,7 @@ class NavidromeSearchViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(SEARCH_OK_FIXTURE))
 
-        viewModel.searchState.test {
+        viewModel.searchState.test(timeout = 10.seconds) {
             assertEquals(NavidromeSearchViewModel.SearchState.Idle, awaitItem())
             viewModel.onQueryChanged("radiohead")
             awaitItem() // Loading

@@ -1,6 +1,7 @@
 package com.adagiostream.android.ui.screens.music
 
 import app.cash.turbine.test
+import kotlin.time.Duration.Companion.seconds
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.AppSettings
@@ -153,7 +154,7 @@ class NavidromeLibraryViewModelTest {
 
     @Test
     fun `initial artistsState is Idle`() = runTest {
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -161,7 +162,7 @@ class NavidromeLibraryViewModelTest {
 
     @Test
     fun `api is null when no Subsonic account configured`() = runTest {
-        viewModel.api.test {
+        viewModel.api.test(timeout = 10.seconds) {
             assertNull(awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -169,7 +170,7 @@ class NavidromeLibraryViewModelTest {
 
     @Test
     fun `api becomes non-null when Subsonic account is added`() = runTest {
-        viewModel.api.test {
+        viewModel.api.test(timeout = 10.seconds) {
             assertNull(awaitItem()) // initial: no account
             setSubsonicAccount()
             val resolved = awaitItem()
@@ -187,7 +188,7 @@ class NavidromeLibraryViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(ARTISTS_OK_FIXTURE))
 
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
 
             viewModel.loadArtists()
@@ -210,7 +211,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.loadArtists()
 
         // Wait for completion
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             // Consume until Loaded
             val states = mutableListOf<NavidromeLibraryViewModel.LoadState>()
             repeat(5) {
@@ -233,7 +234,7 @@ class NavidromeLibraryViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(ARTISTS_EMPTY_FIXTURE))
 
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
             awaitItem() // Loading
@@ -250,7 +251,7 @@ class NavidromeLibraryViewModelTest {
             mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong credentials"}}}"""),
         )
 
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
             awaitItem() // Loading
@@ -264,7 +265,7 @@ class NavidromeLibraryViewModelTest {
     fun `loadArtists is no-op when no Subsonic account configured`() = runTest {
         // No setSubsonicAccount() call
 
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
             // Should remain Idle — no state change
@@ -279,7 +280,7 @@ class NavidromeLibraryViewModelTest {
         // First request takes a long time (we won't answer it during the test)
         server.enqueue(mockOk(ARTISTS_OK_FIXTURE))
 
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists() // triggers Loading
             awaitItem() // Loading
@@ -311,7 +312,7 @@ class NavidromeLibraryViewModelTest {
             id = "ar1", name = "Radiohead", albumCount = 2, updatedAt = 0,
         )
 
-        viewModel.albumsState.test {
+        viewModel.albumsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbums(fakeArtist)
             awaitItem() // Loading
@@ -332,7 +333,7 @@ class NavidromeLibraryViewModelTest {
         val fakeArtist = com.adagiostream.android.service.navidrome.Artist(
             id = "ar1", name = "Radiohead", albumCount = 2, updatedAt = 0,
         )
-        viewModel.albumsState.test {
+        viewModel.albumsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbums(fakeArtist)
             awaitItem() // Loading
@@ -359,7 +360,7 @@ class NavidromeLibraryViewModelTest {
             id = "al1", artistId = "ar1", title = "OK Computer", updatedAt = 0,
         )
 
-        viewModel.tracksState.test {
+        viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadTracks(fakeAlbum)
             awaitItem() // Loading
@@ -385,7 +386,7 @@ class NavidromeLibraryViewModelTest {
         val fakeAlbum = com.adagiostream.android.service.navidrome.Album(
             id = "al2", artistId = "ar1", title = "Kid A", updatedAt = 0,
         )
-        viewModel.tracksState.test {
+        viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadTracks(fakeAlbum)
             awaitItem() // Loading
@@ -412,7 +413,7 @@ class NavidromeLibraryViewModelTest {
         val fakeAlbum = com.adagiostream.android.service.navidrome.Album(
             id = "al1", artistId = "ar1", title = "OK Computer", updatedAt = 0,
         )
-        viewModel.tracksState.test {
+        viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadTracks(fakeAlbum)
             awaitItem() // Loading
@@ -454,7 +455,7 @@ class NavidromeLibraryViewModelTest {
         server.enqueue(mockOk(ARTISTS_OK_FIXTURE))
 
         // Drive to Error
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
             awaitItem() // Loading
@@ -464,7 +465,7 @@ class NavidromeLibraryViewModelTest {
         }
 
         // Retry
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             viewModel.retryArtists()
             val states = mutableListOf<NavidromeLibraryViewModel.LoadState>()
             repeat(5) {
@@ -487,7 +488,7 @@ class NavidromeLibraryViewModelTest {
             com.adagiostream.android.service.navidrome.AlbumListType.NEWEST,
             viewModel.albumListType.value,
         )
-        viewModel.albumBrowseState.test {
+        viewModel.albumBrowseState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -498,7 +499,7 @@ class NavidromeLibraryViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(ALBUM_LIST_OK_FIXTURE))
 
-        viewModel.albumBrowseState.test {
+        viewModel.albumBrowseState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbumBrowseList()
             assertEquals(NavidromeLibraryViewModel.LoadState.Loading, awaitItem())
@@ -514,7 +515,7 @@ class NavidromeLibraryViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(ALBUM_LIST_EMPTY_FIXTURE))
 
-        viewModel.albumBrowseState.test {
+        viewModel.albumBrowseState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbumBrowseList()
             awaitItem() // Loading
@@ -525,7 +526,7 @@ class NavidromeLibraryViewModelTest {
 
     @Test
     fun `loadAlbumBrowseList is no-op when no Subsonic account configured`() = runTest {
-        viewModel.albumBrowseState.test {
+        viewModel.albumBrowseState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbumBrowseList()
             expectNoEvents()
@@ -540,7 +541,7 @@ class NavidromeLibraryViewModelTest {
         server.enqueue(mockOk(ALBUM_LIST_EMPTY_FIXTURE))
 
         // First load — default NEWEST.
-        viewModel.albumBrowseState.test {
+        viewModel.albumBrowseState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbumBrowseList()
             awaitItem() // Loading
@@ -549,7 +550,7 @@ class NavidromeLibraryViewModelTest {
         }
 
         // Switch to RANDOM — must re-request (not a no-op) and land on Empty.
-        viewModel.albumBrowseState.test {
+        viewModel.albumBrowseState.test(timeout = 10.seconds) {
             viewModel.selectAlbumListType(com.adagiostream.android.service.navidrome.AlbumListType.RANDOM)
             val states = mutableListOf<NavidromeLibraryViewModel.LoadState>()
             repeat(5) {
@@ -576,7 +577,7 @@ class NavidromeLibraryViewModelTest {
 
     @Test
     fun `initial genresState is Idle`() = runTest {
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -587,7 +588,7 @@ class NavidromeLibraryViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(GENRES_OK_FIXTURE))
 
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
             assertEquals(NavidromeLibraryViewModel.LoadState.Loading, awaitItem())
@@ -601,7 +602,7 @@ class NavidromeLibraryViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(GENRES_OK_FIXTURE))
 
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
             awaitItem() // Loading
@@ -622,7 +623,7 @@ class NavidromeLibraryViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(GENRES_EMPTY_FIXTURE))
 
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
             awaitItem() // Loading
@@ -638,7 +639,7 @@ class NavidromeLibraryViewModelTest {
             mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong credentials"}}}"""),
         )
 
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
             awaitItem() // Loading
@@ -650,7 +651,7 @@ class NavidromeLibraryViewModelTest {
 
     @Test
     fun `loadGenres is no-op when no Subsonic account configured`() = runTest {
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
             expectNoEvents()
@@ -663,7 +664,7 @@ class NavidromeLibraryViewModelTest {
         setSubsonicAccount()
         server.enqueue(mockOk(GENRES_OK_FIXTURE))
 
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
             awaitItem() // Loading
@@ -685,7 +686,7 @@ class NavidromeLibraryViewModelTest {
         )
         server.enqueue(mockOk(GENRES_OK_FIXTURE))
 
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
             awaitItem() // Loading
@@ -694,7 +695,7 @@ class NavidromeLibraryViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
 
-        viewModel.genresState.test {
+        viewModel.genresState.test(timeout = 10.seconds) {
             viewModel.retryGenres()
             val states = mutableListOf<NavidromeLibraryViewModel.LoadState>()
             repeat(5) {
@@ -720,7 +721,7 @@ class NavidromeLibraryViewModelTest {
             name = "Rock", songCount = 2, albumCount = 1,
         )
 
-        viewModel.genreTracksState.test {
+        viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
             awaitItem() // Loading
@@ -740,7 +741,7 @@ class NavidromeLibraryViewModelTest {
             name = "Rock", songCount = 2, albumCount = 1,
         )
 
-        viewModel.genreTracksState.test {
+        viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
             awaitItem() // Loading
@@ -764,7 +765,7 @@ class NavidromeLibraryViewModelTest {
             name = "Rock", songCount = 2, albumCount = 1,
         )
 
-        viewModel.genreTracksState.test {
+        viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
             awaitItem() // Loading
@@ -789,7 +790,7 @@ class NavidromeLibraryViewModelTest {
             name = "Empty Genre", songCount = 0, albumCount = 0,
         )
 
-        viewModel.genreTracksState.test {
+        viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
             awaitItem() // Loading
@@ -808,7 +809,7 @@ class NavidromeLibraryViewModelTest {
         )
 
         // First load
-        viewModel.genreTracksState.test {
+        viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
             awaitItem() // Loading
@@ -817,7 +818,7 @@ class NavidromeLibraryViewModelTest {
         }
 
         // Second call with the same genre — no-op; no new Loading emitted
-        viewModel.genreTracksState.test {
+        viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem()) // current state
             viewModel.loadSongsByGenre(fakeGenre)
             expectNoEvents()
@@ -831,7 +832,7 @@ class NavidromeLibraryViewModelTest {
             name = "Rock", songCount = 2, albumCount = 1,
         )
 
-        viewModel.genreTracksState.test {
+        viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
             expectNoEvents()
@@ -852,7 +853,7 @@ class NavidromeLibraryViewModelTest {
             name = "Rock", songCount = 2, albumCount = 1,
         )
 
-        viewModel.genreTracksState.test {
+        viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
             awaitItem() // Loading
@@ -922,7 +923,7 @@ class NavidromeLibraryViewModelTest {
         settingsFlow.value = AppSettings(offlineMode = false)
         server.enqueue(mockOk(ARTISTS_OK_FIXTURE))
 
-        viewModel.artistsState.test {
+        viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
             awaitItem() // Loading

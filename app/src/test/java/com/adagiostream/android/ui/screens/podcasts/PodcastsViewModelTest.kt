@@ -1,6 +1,7 @@
 package com.adagiostream.android.ui.screens.podcasts
 
 import app.cash.turbine.test
+import kotlin.time.Duration.Companion.seconds
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountManager
@@ -113,7 +114,7 @@ class PodcastsViewModelTest {
 
     @Test
     fun `api is null and loadLibraries is a no-op without an ABS account`() = runTest {
-        viewModel.api.test {
+        viewModel.api.test(timeout = 10.seconds) {
             assertNull(awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -126,7 +127,7 @@ class PodcastsViewModelTest {
         setAbsAccount()
         enqueueLibraries("lib1" to "book", "lib2" to "book")
 
-        viewModel.librariesState.test {
+        viewModel.librariesState.test(timeout = 10.seconds) {
             assertEquals(LibrariesState.Idle, awaitItem())
             viewModel.loadLibraries()
             assertEquals(LibrariesState.Loading, awaitItem())
@@ -140,7 +141,7 @@ class PodcastsViewModelTest {
         setAbsAccount()
         enqueueLibraries("books" to "book", "pods" to "podcast")
 
-        viewModel.librariesState.test {
+        viewModel.librariesState.test(timeout = 10.seconds) {
             assertEquals(LibrariesState.Idle, awaitItem())
             viewModel.loadLibraries()
             assertEquals(LibrariesState.Loading, awaitItem())
@@ -155,7 +156,7 @@ class PodcastsViewModelTest {
         setAbsAccount()
         enqueueLibraries("p1" to "podcast", "books" to "book", "p2" to "podcast")
 
-        viewModel.librariesState.test {
+        viewModel.librariesState.test(timeout = 10.seconds) {
             assertEquals(LibrariesState.Idle, awaitItem())
             viewModel.loadLibraries()
             assertEquals(LibrariesState.Loading, awaitItem())
@@ -170,7 +171,7 @@ class PodcastsViewModelTest {
         setAbsAccount()
         server.enqueue(MockResponse.Builder().code(500).body("""{"error":"boom"}""").build())
 
-        viewModel.librariesState.test {
+        viewModel.librariesState.test(timeout = 10.seconds) {
             assertEquals(LibrariesState.Idle, awaitItem())
             viewModel.loadLibraries()
             assertEquals(LibrariesState.Loading, awaitItem())

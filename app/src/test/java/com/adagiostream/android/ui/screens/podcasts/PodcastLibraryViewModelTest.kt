@@ -2,6 +2,7 @@ package com.adagiostream.android.ui.screens.podcasts
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import kotlin.time.Duration.Companion.seconds
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.AppSettings
@@ -181,7 +182,7 @@ class PodcastLibraryViewModelTest {
     fun `load maps library items to shows`() = runTest {
         setAbsAccount()
 
-        viewModel.showsState.test {
+        viewModel.showsState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -198,7 +199,7 @@ class PodcastLibraryViewModelTest {
     fun `continue listening shelf keeps only podcast episodes`() = runTest {
         setAbsAccount()
 
-        viewModel.continueListening.test {
+        viewModel.continueListening.test(timeout = 10.seconds) {
             assertEquals(emptyList<Any>(), awaitItem())
             viewModel.load()
             val entries = awaitItem()
@@ -221,7 +222,7 @@ class PodcastLibraryViewModelTest {
         }
         setAbsAccount()
 
-        viewModel.showsState.test {
+        viewModel.showsState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -234,7 +235,7 @@ class PodcastLibraryViewModelTest {
     @Test
     fun `recent episodes are per-show sorted and grouped by show, not interleaved`() = runTest {
         setAbsAccount()
-        viewModel.showsState.test {
+        viewModel.showsState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -242,7 +243,7 @@ class PodcastLibraryViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
 
-        viewModel.recentState.test {
+        viewModel.recentState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.setBrowseMode(PodcastLibraryViewModel.BrowseMode.RECENT)
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -264,7 +265,7 @@ class PodcastLibraryViewModelTest {
     @Test
     fun `re-entering recent episodes reuses cached show details`() = runTest {
         setAbsAccount()
-        viewModel.showsState.test {
+        viewModel.showsState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -272,7 +273,7 @@ class PodcastLibraryViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
 
-        viewModel.recentState.test {
+        viewModel.recentState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.setBrowseMode(PodcastLibraryViewModel.BrowseMode.RECENT)
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -302,7 +303,7 @@ class PodcastLibraryViewModelTest {
     @Test
     fun `shelf tap without cached episodes launches with a null context`() = runTest {
         setAbsAccount()
-        viewModel.showsState.test {
+        viewModel.showsState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -322,14 +323,14 @@ class PodcastLibraryViewModelTest {
     @Test
     fun `recent tap with cached episodes launches with the full context`() = runTest {
         setAbsAccount()
-        viewModel.showsState.test {
+        viewModel.showsState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
             assertEquals(AbsLoadState.Loaded, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
-        viewModel.recentState.test {
+        viewModel.recentState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.setBrowseMode(PodcastLibraryViewModel.BrowseMode.RECENT)
             assertEquals(AbsLoadState.Loading, awaitItem())

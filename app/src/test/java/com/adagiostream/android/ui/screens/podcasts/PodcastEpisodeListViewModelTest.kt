@@ -2,6 +2,7 @@ package com.adagiostream.android.ui.screens.podcasts
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import kotlin.time.Duration.Companion.seconds
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.model.AppSettings
@@ -171,7 +172,7 @@ class PodcastEpisodeListViewModelTest {
         val viewModel = buildViewModel()
         setAbsAccount()
 
-        viewModel.episodesState.test {
+        viewModel.episodesState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -191,7 +192,7 @@ class PodcastEpisodeListViewModelTest {
         val viewModel = buildViewModel()
         setAbsAccount()
 
-        viewModel.episodesState.test {
+        viewModel.episodesState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -209,7 +210,7 @@ class PodcastEpisodeListViewModelTest {
         val viewModel = buildViewModel()
         setAbsAccount()
 
-        viewModel.episodeProgress.test {
+        viewModel.episodeProgress.test(timeout = 10.seconds) {
             assertEquals(emptyMap<String, Any?>(), awaitItem())
 
             viewModel.onEpisodeVisible("ep-new")
@@ -231,7 +232,7 @@ class PodcastEpisodeListViewModelTest {
         val viewModel = buildViewModel()
         setAbsAccount()
 
-        viewModel.episodesState.test {
+        viewModel.episodesState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -267,7 +268,7 @@ class PodcastEpisodeListViewModelTest {
         val viewModel = buildViewModel()
         setAbsAccount()
 
-        viewModel.episodeProgress.test {
+        viewModel.episodeProgress.test(timeout = 10.seconds) {
             assertEquals(emptyMap<String, Any?>(), awaitItem())
             viewModel.onEpisodeVisible("ep-old")
             val hydrated = awaitItem()

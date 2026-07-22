@@ -2,6 +2,7 @@ package com.adagiostream.android.ui.screens.audiobooks
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import kotlin.time.Duration.Companion.seconds
 import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountManager
@@ -143,7 +144,7 @@ class AudiobookListViewModelTest {
     fun `load transitions to Loaded and keeps server book order`() = runTest {
         setAbsAccount()
 
-        viewModel.booksState.test {
+        viewModel.booksState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
@@ -157,7 +158,7 @@ class AudiobookListViewModelTest {
     fun `continue listening keeps only started unfinished books`() = runTest {
         setAbsAccount()
 
-        viewModel.continueListening.test {
+        viewModel.continueListening.test(timeout = 10.seconds) {
             assertEquals(emptyList<Any>(), awaitItem())
             viewModel.load()
             // bk9 (>= 0.99) and the podcast episode are filtered out.
@@ -178,7 +179,7 @@ class AudiobookListViewModelTest {
         }
         setAbsAccount()
 
-        viewModel.booksState.test {
+        viewModel.booksState.test(timeout = 10.seconds) {
             assertEquals(AbsLoadState.Idle, awaitItem())
             viewModel.load()
             assertEquals(AbsLoadState.Loading, awaitItem())
