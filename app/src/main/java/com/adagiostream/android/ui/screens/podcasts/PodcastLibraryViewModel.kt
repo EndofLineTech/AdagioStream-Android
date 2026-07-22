@@ -114,8 +114,9 @@ class PodcastLibraryViewModel @Inject constructor(
     val episodeProgress: StateFlow<Map<String, AbsMediaProgress?>> = hydrator.progress
 
     /** Expanded show details fetched for Recent Episodes, cached per show id
-     *  so re-entering the mode doesn't refetch. */
-    private val showEpisodesCache = mutableMapOf<String, List<AbsEpisode>>()
+     *  so re-entering the mode doesn't refetch. Concurrent: detail fetches
+     *  resume on IO threads under tests' unconfined dispatcher. */
+    private val showEpisodesCache = java.util.concurrent.ConcurrentHashMap<String, List<AbsEpisode>>()
 
     /** The account behind [api] — the launcher plays through it. */
     private var absAccount: Account? = null
