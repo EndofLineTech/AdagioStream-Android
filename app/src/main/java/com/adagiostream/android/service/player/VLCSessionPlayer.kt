@@ -192,10 +192,17 @@ class VLCSessionPlayer(
             .setPlayWhenReady(currentPlayWhenReady, PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             .setPlaybackState(currentPlaybackState)
 
-        when (source) {
+        val hasPlaylist = when (source) {
             is PlaybackSource.Library -> buildLibraryState(builder, source)
             is PlaybackSource.Audiobook -> buildAudiobookState(builder, source)
             else -> buildRadioState(builder)
+        }
+        // SimpleBasePlayer forbids an empty playlist outside IDLE/ENDED. A
+        // session command (e.g. media-button pause) can arrive while the
+        // source has no content but VLC still reports READY/BUFFERING —
+        // coerce to IDLE instead of crashing.
+        if (!hasPlaylist && currentPlaybackState != STATE_IDLE && currentPlaybackState != STATE_ENDED) {
+            builder.setPlaybackState(STATE_IDLE)
         }
         return builder.build()
     }
@@ -249,7 +256,7 @@ class VLCSessionPlayer(
      * back to the author) — with the WHOLE BOOK's duration and the global
      * timeline position from the coordinator, plus the active playback speed.
      */
-    private fun buildAudiobookState(builder: State.Builder, source: PlaybackSource.Audiobook) {
+    private fun buildAudiobookState(builder: State.Builder, source: PlaybackSource.Audiobook): Boolean {
         val artworkUri = source.coverUrl?.let { android.net.Uri.parse(it) }
         val metadata = MediaMetadata.Builder()
             .setTitle(source.bookTitle)
@@ -282,6 +289,7 @@ class VLCSessionPlayer(
         builder.setContentPositionMs(audiobookCoordinator?.globalPositionMs() ?: 0L)
         builder.setPlaybackParameters(PlaybackParameters(audiobookCoordinator?.speed ?: 1.0f))
         builder.setIsLoading(currentPlaybackState == STATE_BUFFERING)
+        return true
     }
 
     /**
@@ -290,9 +298,9 @@ class VLCSessionPlayer(
      * position, and shuffle/repeat state — all sourced from [PlaybackContract] and
      * the [coordinator] so the live contract stays untouched.
      */
-    private fun buildLibraryState(builder: State.Builder, source: PlaybackSource.Library) {
+    private fun buildLibraryState(builder: State.Builder, source: PlaybackSource.Library): Boolean {
         val tracks = source.queue
-        if (tracks.isEmpty()) return
+        if (tracks.isEmpty()) return false
         val currentIndex = source.index.coerceIn(0, tracks.lastIndex)
         val artworkUri = coordinator?.nowPlayingArtworkUrl?.value?.let { android.net.Uri.parse(it) }
         val albumTitle = coordinator?.nowPlayingAlbumTitle?.value
@@ -335,10 +343,11 @@ class VLCSessionPlayer(
         builder.setRepeatMode(
             Media3RepeatMapping.toMedia3(coordinator?.repeatMode ?: RepeatMode.Off),
         )
+        return true
     }
 
     /** Builds session state for the live radio path — unchanged live behaviour. */
-    private fun buildRadioState(builder: State.Builder) {
+    private fun buildRadioState(builder: State.Builder): Boolean {
         val item = currentMediaItem
         val currentChannel = vlcWrapper.currentChannel.value
         if (item != null && currentChannel != null) {
@@ -424,8 +433,10 @@ class VLCSessionPlayer(
             val elapsedMs = if (playbackStartTimeMs > 0) System.currentTimeMillis() - playbackStartTimeMs else 0L
             builder.setContentPositionMs(elapsedMs)
             builder.setIsLoading(currentPlaybackState == STATE_BUFFERING)
+            return true
         } else {
             DebugLogger.log("getState() - no current media item, state=$currentPlaybackState", AUTO)
+            return false
         }
     }
 
