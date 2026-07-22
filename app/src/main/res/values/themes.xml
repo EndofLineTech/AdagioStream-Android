@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Bar colors come from enableEdgeToEdge(); the XML attrs are deprecated on API 35+. -->
     <style name="Theme.AdagioStream" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="mediaRouteButtonStyle">@style/AdagioCastButton</item>
     </style>
 
