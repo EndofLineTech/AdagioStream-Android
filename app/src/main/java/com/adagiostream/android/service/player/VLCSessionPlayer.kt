@@ -185,6 +185,16 @@ class VLCSessionPlayer(
         }
     }
 
+    /**
+     * SimpleBasePlayer requires every MediaItemData UID in a playlist to be
+     * unique, but Channel/Track ids can collide (GH#9: two channels sharing a
+     * tvg-id crash with "Duplicate MediaItemData UID"). Mixing the slot index
+     * into the high bits guarantees uniqueness; seeks are index-based, so UIDs
+     * are only used internally by Media3 for item identity.
+     */
+    private fun slotUid(index: Int, id: String): Long =
+        (index.toLong() shl 32) or (id.hashCode().toLong() and 0xFFFFFFFFL)
+
     override fun getState(): State {
         val source = vlcWrapper.playbackSource.value
         val builder = State.Builder()
@@ -323,7 +333,7 @@ class VLCSessionPlayer(
             // Only the active track carries the real source so duration resolves;
             // others are placeholders so Media3 exposes next/prev without prefetch.
             val itemSource = if (isCurrent) source else null
-            SimpleBasePlayer.MediaItemData.Builder(track.id.hashCode().toLong())
+            SimpleBasePlayer.MediaItemData.Builder(slotUid(index, track.id))
                 .setMediaItem(mediaItem)
                 .setMediaMetadata(mediaItem.mediaMetadata)
                 .setIsPlaceholder(!isCurrent)
@@ -404,7 +414,7 @@ class VLCSessionPlayer(
                             )
                             .build()
                     }
-                    SimpleBasePlayer.MediaItemData.Builder(ch.id.hashCode().toLong())
+                    SimpleBasePlayer.MediaItemData.Builder(slotUid(index, ch.id))
                         .setMediaItem(mediaItem)
                         .setMediaMetadata(mediaItem.mediaMetadata)
                         .setIsPlaceholder(index != currentIndex)

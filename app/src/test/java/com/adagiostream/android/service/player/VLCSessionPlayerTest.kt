@@ -41,4 +41,28 @@ class VLCSessionPlayerTest {
         // pre-fix this threw IllegalArgumentException.
         assertEquals(Player.STATE_IDLE, player.playbackState)
     }
+
+    /**
+     * Regression guard for GH#9 (beads_adagio-268): two channels sharing an id
+     * (same tvg-id via SXM matching) used to produce duplicate MediaItemData
+     * UIDs — "Duplicate MediaItemData UID in playlist".
+     */
+    @Test
+    fun `duplicate channel ids build a valid playlist instead of crashing`() {
+        val dupA = Channel(id = "sxm-1", name = "The Highway", streamURL = "http://a", group = "SXM")
+        val dupB = Channel(id = "sxm-1", name = "The Highway", streamURL = "http://b", group = "SXM")
+        val wrapper = mockk<VLCPlayerWrapper>(relaxed = true) {
+            every { playbackSource } returns MutableStateFlow(null)
+            every { playbackState } returns MutableStateFlow<PlaybackState>(PlaybackState.Playing)
+            every { currentChannel } returns MutableStateFlow<Channel?>(dupA)
+            every { channelList } returns listOf(dupA, dupB)
+        }
+
+        val player = VLCSessionPlayer(wrapper)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // Forcing state build used to throw IllegalArgumentException.
+        assertEquals(Player.STATE_READY, player.playbackState)
+        assertEquals(2, player.mediaItemCount)
+    }
 }
