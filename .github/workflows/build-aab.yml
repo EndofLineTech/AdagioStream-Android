@@ -1,0 +1,49 @@
+name: Build signed AAB (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > $GITHUB_WORKSPACE/release.jks
+
+      - name: Write local.properties
+        shell: bash
+        run: |
+          printf 'release.storeFile=%s\n' "${{ github.workspace }}/release.jks" > local.properties
+          printf 'release.storePassword=%s\n' '${{ secrets.KEYSTORE_PASSWORD }}' >> local.properties
+          printf 'release.keyAlias=%s\n' '${{ secrets.KEY_ALIAS }}' >> local.properties
+          printf 'release.keyPassword=%s\n' '${{ secrets.KEY_PASSWORD }}' >> local.properties
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build release AAB
+        run: ./gradlew bundleRelease
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdagioStream-release-aab
+          path: app/build/outputs/bundle/release/*.aab
+          retention-days: 7
+          if-no-files-found: error
