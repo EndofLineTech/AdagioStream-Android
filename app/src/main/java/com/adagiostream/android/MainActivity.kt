@@ -1,9 +1,13 @@
 package com.adagiostream.android
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.adagiostream.android.service.audiobookshelf.AudiobookPlaybackCoordinator
@@ -23,9 +27,20 @@ class MainActivity : AppCompatActivity() {
     @Inject
     lateinit var audiobookPlaybackCoordinator: AudiobookPlaybackCoordinator
 
+    // Media notification (lock screen / QS controls) is invisible until the
+    // user grants POST_NOTIFICATIONS on Android 13+ (beads_adagio-2kd).
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         ContextCompat.startForegroundService(
             this, Intent(this, AudioPlaybackService::class.java)
         )
