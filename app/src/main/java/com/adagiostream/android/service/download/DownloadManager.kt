@@ -12,6 +12,7 @@ import com.adagiostream.android.service.library.db.DownloadDao
 import com.adagiostream.android.service.library.db.DownloadEntity
 import com.adagiostream.android.service.library.db.DownloadStatus
 import com.adagiostream.android.service.navidrome.Track
+import com.adagiostream.android.util.DebugLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -104,8 +105,13 @@ class DownloadManager @Inject constructor(
      * so a spurious kick is a fast no-op pass.
      */
     suspend fun resumePendingOnStartup() {
+        // FAILED counts as pending: rows the pre-drainer build's workers left
+        // FAILED have no retry scheduled anywhere — the drainer re-queues them
+        // for one fresh attempt per kick.
         val pending = downloadDao.getByStatus(DownloadStatus.QUEUED) +
-            downloadDao.getByStatus(DownloadStatus.DOWNLOADING)
+            downloadDao.getByStatus(DownloadStatus.DOWNLOADING) +
+            downloadDao.getByStatus(DownloadStatus.FAILED)
+        DebugLogger.log("Startup: ${pending.size} pending download rows", DebugLogger.Category.DOWNLOAD)
         if (pending.isNotEmpty()) kickWorker()
     }
 

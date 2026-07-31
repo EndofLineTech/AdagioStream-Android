@@ -148,5 +148,6 @@ object DebugLogger {
         SXM("SXM"),
         ESPN("ESPN"),
         IMGCACHE("IMGCACHE"),
+        DOWNLOAD("DOWNLOAD"),
     }
 }

@@ -17,6 +17,7 @@ import com.adagiostream.android.service.library.db.DownloadDao
 import com.adagiostream.android.service.library.db.DownloadStatus
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.util.DebugLogger
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -108,6 +109,11 @@ class DownloadWorker(
             // still downloads, just without the notification.
         }
 
+        run {
+            val byStatus = dao.getAll().groupingBy { it.status }.eachCount()
+            DebugLogger.log("Drainer start (attempt=$runAttemptCount): rows by status = $byStatus", DebugLogger.Category.DOWNLOAD)
+        }
+
         // Re-queue rows a previous run left mid-transfer (process death, network
         // loss, reboot) — only one drainer chain ever runs, so any DOWNLOADING
         // row at start is stale and would otherwise be stuck in the UI forever
@@ -115,16 +121,21 @@ class DownloadWorker(
         // ABS rows belong to other workers.
         dao.getByStatus(DownloadStatus.DOWNLOADING).forEach { row ->
             if (repo.cachedTrack(row.id) != null) {
+                DebugLogger.log("Re-queueing stale DOWNLOADING row ${row.id}", DebugLogger.Category.DOWNLOAD)
                 dao.updateStatus(row.id, DownloadStatus.QUEUED, System.currentTimeMillis())
+            } else {
+                DebugLogger.log("NOT re-queueing DOWNLOADING row ${row.id} — no cached track", DebugLogger.Category.DOWNLOAD)
             }
         }
 
-        // On a retry attempt, re-queue our tracks that failed in earlier passes.
-        if (runAttemptCount > 0) {
-            dao.getByStatus(DownloadStatus.FAILED).forEach { row ->
-                if (repo.cachedTrack(row.id) != null) {
-                    dao.updateStatus(row.id, DownloadStatus.QUEUED, System.currentTimeMillis())
-                }
+        // Re-queue FAILED tracks unconditionally — a kick only happens when
+        // something is pending, so this gives failed rows one fresh attempt per
+        // drain pass (bounded by MAX_ATTEMPTS within a chain) and heals rows
+        // the pre-drainer build's workers left FAILED with no retry scheduled.
+        dao.getByStatus(DownloadStatus.FAILED).forEach { row ->
+            if (repo.cachedTrack(row.id) != null) {
+                DebugLogger.log("Re-queueing FAILED row ${row.id}", DebugLogger.Category.DOWNLOAD)
+                dao.updateStatus(row.id, DownloadStatus.QUEUED, System.currentTimeMillis())
             }
         }
 
@@ -142,12 +153,14 @@ class DownloadWorker(
             val track = repo.cachedTrack(trackId)
             if (track == null) {
                 // Not a Navidrome track (ABS book/episode row) — leave for its own worker.
+                DebugLogger.log("Skipping row $trackId — no cached track", DebugLogger.Category.DOWNLOAD)
                 skipped += trackId
                 continue
             }
 
             val url = api.downloadUrl(trackId)?.toString()
             if (url == null) {
+                DebugLogger.log("No download URL for $trackId — marking failed", DebugLogger.Category.DOWNLOAD)
                 dao.updateStatus(trackId, DownloadStatus.FAILED, System.currentTimeMillis())
                 anyFailed = true
                 continue
@@ -189,8 +202,14 @@ class DownloadWorker(
                             completed++
                         }
                     }
-                    is DownloadOutcome.AlreadyComplete -> completed++
-                    is DownloadOutcome.Failed -> anyFailed = true
+                    is DownloadOutcome.AlreadyComplete -> {
+                        DebugLogger.log("Already complete: ${track.title}", DebugLogger.Category.DOWNLOAD)
+                        completed++
+                    }
+                    is DownloadOutcome.Failed -> {
+                        DebugLogger.log("Failed: ${track.title} — ${outcome.cause.message}", DebugLogger.Category.DOWNLOAD)
+                        anyFailed = true
+                    }
                 }
             } catch (e: CancelledMidTransfer) {
                 // Row deleted mid-transfer — remove the partial file the
@@ -207,11 +226,13 @@ class DownloadWorker(
             }
         }
 
-        return when {
+        val result = when {
             !anyFailed -> Result.success()
             runAttemptCount + 1 < MAX_ATTEMPTS -> Result.retry()
             else -> Result.failure()
         }
+        DebugLogger.log("Drainer done: completed=$completed skipped=${skipped.size} anyFailed=$anyFailed result=$result", DebugLogger.Category.DOWNLOAD)
+        return result
     }
 
     private fun progressLine(written: Long, total: Long?): String =
