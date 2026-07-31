@@ -12,7 +12,9 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.adagiostream.android.R
 import com.adagiostream.android.model.AccountType
+import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.library.db.DownloadDao
+import com.adagiostream.android.service.library.db.DownloadStatus
 import com.adagiostream.android.service.navidrome.NavidromeApiFactory
 import com.adagiostream.android.service.persistence.PersistenceService
 import dagger.hilt.EntryPoint
@@ -22,17 +24,33 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 
 /**
- * Background download worker (baw.6.1).
+ * Queue-draining download worker (baw.6.1, rearchitected in beads_adagio-acq).
  *
- * WorkManager survives process death and re-runs queued/retrying work, so the
- * download resumes from the on-disk offset on a fresh process. Dependencies are
- * resolved via a Hilt [DownloadWorkerEntryPoint] (no hilt-work / custom
- * WorkerFactory needed). Account credentials are read from [PersistenceService]
- * (disk) rather than an in-memory flow, so a process-death resume still has auth.
+ * ONE instance drains every `queued` row in the downloads table sequentially,
+ * holding a single foreground-service notification for the whole batch. The
+ * previous worker-per-track design broke the notification the moment the app
+ * left the foreground: when the first workers finished, WorkManager's foreground
+ * service stopped, and each later worker's `setForeground` threw
+ * ForegroundServiceStartNotAllowedException (FGS start from background,
+ * Android 12+) — silently degrading Download All to invisible background jobs.
+ * The drainer calls `setForeground` once, while the enqueueing tap still has
+ * the app foregrounded, and the notification survives until the queue is empty.
  *
- * Runs as a `dataSync` foreground service while downloading. Real foreground-service
- * rendering and OkHttp byte transfer are device-only; the transfer/resume/state
- * logic lives in the unit-tested [TrackDownloader].
+ * The downloads table is shared with Audiobookshelf books/episodes (their own
+ * workers): rows without a cached Navidrome track are skipped, not failed.
+ *
+ * Cancellation contract: deleting a row (DownloadManager.delete) cancels that
+ * track — mid-transfer, the drainer notices the missing row at the next
+ * progress checkpoint, aborts the transfer, and removes the re-created partial
+ * file. WorkManager survives process death and re-runs the drainer, which
+ * re-queues stale DOWNLOADING rows and resumes from on-disk offsets.
+ * Credentials are read from [PersistenceService] (disk) so a process-death
+ * resume still has auth.
+ *
+ * ponytail: tracks download sequentially (the old design ran N workers in
+ * parallel) — the deliberate trade for one coherent foreground notification;
+ * revisit with a multi-download progress notification if throughput complaints
+ * show up.
  */
 class DownloadWorker(
     appContext: Context,
@@ -47,6 +65,7 @@ class DownloadWorker(
         fun okHttpClient(): OkHttpClient
         fun downloadDao(): DownloadDao
         fun fileStore(): DownloadFileStore
+        fun libraryRepository(): MusicLibraryRepository
     }
 
     companion object {
@@ -56,48 +75,142 @@ class DownloadWorker(
         private const val PROGRESS_UPDATE_BYTES = 1_048_576L // ~1 MB
     }
 
+    /** Thrown from the progress callback when the track's row was deleted mid-transfer. */
+    private class CancelledMidTransfer : RuntimeException()
+
     override suspend fun doWork(): Result {
-        val trackId = inputData.getString(DownloadManager.KEY_TRACK_ID) ?: return Result.failure()
-        val suffix = inputData.getString(DownloadManager.KEY_SUFFIX)
+        // Legacy per-track requests (pre-drainer, named "download:<id>") can
+        // survive an app update in WorkManager's queue. Running them as extra
+        // drainers would race this one on the same rows/files — no-op them;
+        // their rows drain on the next real kick (beads_adagio-acq review F3).
+        if (inputData.getString("trackId") != null) return Result.success()
 
         val deps = EntryPointAccessors.fromApplication(
             applicationContext,
             DownloadWorkerEntryPoint::class.java,
         )
+        val dao = deps.downloadDao()
+        val files = deps.fileStore()
+        val repo = deps.libraryRepository()
 
         // Resolve the active Subsonic account from disk (survives process death).
         val subsonic = deps.persistenceService().loadAccounts()
             .filter { it.isEnabled }
             .firstNotNullOfOrNull { it.type as? AccountType.Subsonic }
             ?: return Result.failure()
-
         val api = deps.navidromeApiFactory().create(subsonic.host, subsonic.username, subsonic.password)
-        val url = api.downloadUrl(trackId)?.toString() ?: return Result.failure()
 
         try {
             setForeground(foregroundInfo(progressText = "Starting…"))
         } catch (_: Exception) {
-            // setForeground can fail if the app is backgrounded without the right
-            // window; the download still proceeds.
+            // Only reachable when WorkManager (re)starts the drainer while the
+            // app is backgrounded (e.g. a retry after network loss) — the batch
+            // still downloads, just without the notification.
         }
 
-        var lastNotifiedAt = 0L
-        val downloader = TrackDownloader(
-            dao = deps.downloadDao(),
-            source = OkHttpByteRangeDownloader(deps.okHttpClient()),
-            files = deps.fileStore(),
-            onBytes = { _, written, total ->
-                if (written - lastNotifiedAt >= PROGRESS_UPDATE_BYTES) {
-                    lastNotifiedAt = written
-                    runCatching { setForeground(foregroundInfo(progressLine(written, total))) }
-                }
-            },
-        )
+        // Re-queue rows a previous run left mid-transfer (process death, network
+        // loss, reboot) — only one drainer chain ever runs, so any DOWNLOADING
+        // row at start is stale and would otherwise be stuck in the UI forever
+        // (beads_adagio-acq review F1). Filtered to cached Navidrome tracks —
+        // ABS rows belong to other workers.
+        dao.getByStatus(DownloadStatus.DOWNLOADING).forEach { row ->
+            if (repo.cachedTrack(row.id) != null) {
+                dao.updateStatus(row.id, DownloadStatus.QUEUED, System.currentTimeMillis())
+            }
+        }
 
-        return when (downloader.download(trackId, url, suffix)) {
-            is DownloadOutcome.Completed, is DownloadOutcome.AlreadyComplete -> Result.success()
-            is DownloadOutcome.Failed ->
-                if (runAttemptCount + 1 < MAX_ATTEMPTS) Result.retry() else Result.failure()
+        // On a retry attempt, re-queue our tracks that failed in earlier passes.
+        if (runAttemptCount > 0) {
+            dao.getByStatus(DownloadStatus.FAILED).forEach { row ->
+                if (repo.cachedTrack(row.id) != null) {
+                    dao.updateStatus(row.id, DownloadStatus.QUEUED, System.currentTimeMillis())
+                }
+            }
+        }
+
+        val skipped = mutableSetOf<String>()
+        var completed = 0
+        var anyFailed = false
+
+        while (true) {
+            val queued = dao.getByStatus(DownloadStatus.QUEUED)
+                .filterNot { it.id in skipped }
+                .sortedBy { it.createdAt }
+            val next = queued.firstOrNull() ?: break
+            val trackId = next.id
+
+            val track = repo.cachedTrack(trackId)
+            if (track == null) {
+                // Not a Navidrome track (ABS book/episode row) — leave for its own worker.
+                skipped += trackId
+                continue
+            }
+
+            val url = api.downloadUrl(trackId)?.toString()
+            if (url == null) {
+                dao.updateStatus(trackId, DownloadStatus.FAILED, System.currentTimeMillis())
+                anyFailed = true
+                continue
+            }
+
+            val position = completed + 1
+            val batchTotal = completed + queued.size
+            val label = "${track.title} ($position of $batchTotal)"
+            runCatching { setForeground(foregroundInfo(label)) }
+
+            var lastCheckAt = 0L
+            val downloader = TrackDownloader(
+                dao = dao,
+                source = OkHttpByteRangeDownloader(deps.okHttpClient()),
+                files = files,
+                onBytes = { id, written, total ->
+                    if (written - lastCheckAt >= PROGRESS_UPDATE_BYTES) {
+                        lastCheckAt = written
+                        if (dao.getById(id) == null) throw CancelledMidTransfer()
+                        runCatching { setForeground(foregroundInfo("$label · ${progressLine(written, total)}")) }
+                    }
+                },
+            )
+
+            try {
+                when (val outcome = downloader.download(trackId, url, track.suffix)) {
+                    is DownloadOutcome.Completed -> {
+                        // A file smaller than the declared total means it was
+                        // deleted underneath us (user cancel between ~1MB
+                        // checkpoints) and rebuilt from tail appends — drop it
+                        // rather than surface a corrupt "completed" download
+                        // (beads_adagio-acq review F2). The narrower IOException
+                        // variant of this race resurrects a FAILED row instead,
+                        // which at worst re-downloads once on a retry pass.
+                        if (outcome.totalBytes != null && outcome.bytesWritten < outcome.totalBytes) {
+                            files.delete(outcome.localPath)
+                            dao.deleteById(trackId)
+                        } else {
+                            completed++
+                        }
+                    }
+                    is DownloadOutcome.AlreadyComplete -> completed++
+                    is DownloadOutcome.Failed -> anyFailed = true
+                }
+            } catch (e: CancelledMidTransfer) {
+                // Row deleted mid-transfer — remove the partial file the
+                // in-flight append re-created after DownloadManager.delete.
+                files.delete(next.localPath ?: files.fileFor(trackId, track.suffix))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // TrackDownloader only maps IOException to FAILED itself; make
+                // sure an unexpected error can't strand the row in DOWNLOADING
+                // (which would loop forever as it never returns to QUEUED).
+                dao.updateStatus(trackId, DownloadStatus.FAILED, System.currentTimeMillis())
+                anyFailed = true
+            }
+        }
+
+        return when {
+            !anyFailed -> Result.success()
+            runAttemptCount + 1 < MAX_ATTEMPTS -> Result.retry()
+            else -> Result.failure()
         }
     }
 

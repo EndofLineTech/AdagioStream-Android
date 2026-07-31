@@ -7,7 +7,6 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.workDataOf
 import com.adagiostream.android.service.library.MusicLibraryRepository
 import com.adagiostream.android.service.library.db.DownloadDao
 import com.adagiostream.android.service.library.db.DownloadEntity
@@ -19,15 +18,19 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Public entry point for offline downloads (baw.6.1).
+ * Public entry point for offline downloads (baw.6.1, beads_adagio-acq).
  *
- * Enqueues a [DownloadWorker] per track (unique work keyed by the **track id**,
- * never the auth URL), tracks state in the `downloads` table, and owns the
- * delete/cancel ordering (file THEN row). Bulk enqueue backs the album/playlist
- * "Download All" actions.
+ * Writes `queued` rows to the `downloads` table and kicks ONE unique
+ * queue-draining [DownloadWorker] (`APPEND_OR_REPLACE` — a running drainer
+ * gets a follow-up pass appended, so a row enqueued in the race window where
+ * the drainer just saw an empty queue is never stranded). The drainer holds a
+ * single foreground notification for the whole batch; a worker per track lost
+ * the notification once the app was backgrounded.
  *
- * The worker resolves the authenticated `download.view` URL itself at run time, so
- * a rotated auth token never strands queued work.
+ * Owns the delete/cancel ordering (file THEN row). Cancelling in-flight work is
+ * row-driven: the drainer aborts the current transfer when it notices the row
+ * is gone. The worker resolves the authenticated `download.view` URL itself at
+ * run time, so a rotated auth token never strands queued work.
  */
 @Singleton
 class DownloadManager @Inject constructor(
@@ -41,20 +44,33 @@ class DownloadManager @Inject constructor(
     private val workManager: WorkManager get() = WorkManager.getInstance(context)
 
     companion object {
-        const val KEY_TRACK_ID = "trackId"
-        const val KEY_SUFFIX = "suffix"
-        private const val WORK_PREFIX = "download:"
-
-        /** Unique work name derived from the track id (stable across auth rotation). */
-        fun workName(trackId: String): String = "$WORK_PREFIX$trackId"
+        /** Single unique work name for the queue-draining worker (beads_adagio-acq). */
+        const val QUEUE_WORK_NAME = "downloads-queue"
     }
 
     /**
      * Queues [track] for download. Caches the track for offline browse, writes the
-     * `queued` row, and enqueues unique work (KEEP — a second tap won't duplicate
-     * an in-flight download).
+     * `queued` row, and kicks the drainer. A second tap just rewrites the row —
+     * the drainer is idempotent.
      */
     suspend fun enqueue(track: Track) {
+        upsertQueuedRow(track)
+        kickWorker()
+    }
+
+    /** Bulk enqueue for album/playlist "Download All" — one drainer kick for the batch. */
+    suspend fun enqueueAll(tracks: List<Track>) {
+        tracks.forEach { upsertQueuedRow(it) }
+        kickWorker()
+    }
+
+    /** Retries a failed/paused download — the drainer resumes from the stored offset. */
+    suspend fun retry(track: Track) {
+        downloadDao.updateStatus(track.id, DownloadStatus.QUEUED, now())
+        kickWorker()
+    }
+
+    private suspend fun upsertQueuedRow(track: Track) {
         libraryRepository.cacheTrackForDownload(track)
         val existing = downloadDao.getById(track.id)
         downloadDao.upsert(
@@ -68,43 +84,29 @@ class DownloadManager @Inject constructor(
                 updatedAt = now(),
             ),
         )
+    }
+
+    private fun kickWorker() {
         workManager.enqueueUniqueWork(
-            workName(track.id),
-            ExistingWorkPolicy.KEEP,
-            buildRequest(track),
+            QUEUE_WORK_NAME,
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            buildRequest(),
         )
     }
 
-    /** Bulk enqueue for album/playlist "Download All". */
-    suspend fun enqueueAll(tracks: List<Track>) {
-        tracks.forEach { enqueue(it) }
-    }
-
-    /**
-     * Retries a failed/paused download — REPLACE so a fresh worker resumes from the
-     * stored offset.
-     */
-    suspend fun retry(track: Track) {
-        downloadDao.updateStatus(track.id, DownloadStatus.QUEUED, now())
-        workManager.enqueueUniqueWork(
-            workName(track.id),
-            ExistingWorkPolicy.REPLACE,
-            buildRequest(track),
-        )
-    }
-
-    /** Cancels in-flight work and removes the partial file + row (file THEN row). */
+    /** Cancels an in-flight/queued download and removes the partial file + row (file THEN row). */
     suspend fun cancel(trackId: String) = delete(trackId)
 
     /**
-     * Deletes a download: cancels work, removes the file FIRST, then the row.
+     * Deletes a download: removes the file FIRST, then the row.
      *
      * Ordering matters — deleting the row first then crashing would orphan the file
      * with nothing pointing at it. File-then-row leaves at worst a row whose file is
-     * already gone, which the next access cleans up.
+     * already gone, which the next access cleans up. If the drainer is mid-transfer
+     * on this track it notices the missing row at its next progress checkpoint,
+     * aborts, and deletes the re-created partial file.
      */
     suspend fun delete(trackId: String) {
-        workManager.cancelUniqueWork(workName(trackId))
         val row = downloadDao.getById(trackId)
         row?.localPath?.let { fileStore.delete(it) }
         downloadDao.deleteById(trackId)
@@ -112,21 +114,15 @@ class DownloadManager @Inject constructor(
 
     /** Deletes every download (storage screen "Delete All"). */
     suspend fun deleteAll() {
+        workManager.cancelUniqueWork(QUEUE_WORK_NAME)
         downloadDao.getAll().forEach { row ->
-            workManager.cancelUniqueWork(workName(row.id))
             row.localPath?.let { fileStore.delete(it) }
         }
         downloadDao.deleteAll()
     }
 
-    private fun buildRequest(track: Track) =
+    private fun buildRequest() =
         OneTimeWorkRequestBuilder<DownloadWorker>()
-            .setInputData(
-                workDataOf(
-                    KEY_TRACK_ID to track.id,
-                    KEY_SUFFIX to track.suffix,
-                ),
-            )
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
