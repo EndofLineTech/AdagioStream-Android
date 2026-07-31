@@ -94,6 +94,21 @@ class DownloadManager @Inject constructor(
         )
     }
 
+    /**
+     * Kicks the drainer if any download rows are still pending (beads_adagio-0wj).
+     *
+     * Called once at app startup. Heals rows stranded when nothing else will
+     * kick the drainer: legacy per-track works no-op'd across the
+     * beads_adagio-acq update, or a process killed before WorkManager's retry
+     * fired. Rows that aren't music tracks are skipped by the drainer itself,
+     * so a spurious kick is a fast no-op pass.
+     */
+    suspend fun resumePendingOnStartup() {
+        val pending = downloadDao.getByStatus(DownloadStatus.QUEUED) +
+            downloadDao.getByStatus(DownloadStatus.DOWNLOADING)
+        if (pending.isNotEmpty()) kickWorker()
+    }
+
     /** Cancels an in-flight/queued download and removes the partial file + row (file THEN row). */
     suspend fun cancel(trackId: String) = delete(trackId)
 
