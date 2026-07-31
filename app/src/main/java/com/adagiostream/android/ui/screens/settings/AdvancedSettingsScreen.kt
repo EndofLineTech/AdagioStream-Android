@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.model.SortMode
+import com.adagiostream.android.ui.components.SegmentLabel
 import com.adagiostream.android.util.DebugLogger
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,8 +92,9 @@ fun AdvancedSettingsScreen(
                             index = index,
                             count = SortMode.entries.size,
                         ),
+                        icon = {},
                     ) {
-                        Text(text = mode.displayName)
+                        SegmentLabel(mode.displayName)
                     }
                 }
             }
@@ -112,8 +114,9 @@ fun AdvancedSettingsScreen(
                             index = index,
                             count = SortMode.entries.size,
                         ),
+                        icon = {},
                     ) {
-                        Text(text = mode.displayName)
+                        SegmentLabel(mode.displayName)
                     }
                 }
             }

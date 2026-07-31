@@ -43,6 +43,7 @@ import coil3.request.ImageRequest
 import androidx.compose.ui.platform.LocalContext
 import com.adagiostream.android.service.navidrome.Album
 import com.adagiostream.android.service.navidrome.AlbumListType
+import com.adagiostream.android.ui.components.SegmentLabel
 import com.adagiostream.android.service.navidrome.NavidromeCoverArtRequest
 
 /**
@@ -180,8 +181,11 @@ private fun AlbumListTypePicker(
                 selected = selected == type,
                 onClick = { onSelect(type) },
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = albumListTypeLabels.size),
+                // Five segments don't fit the checkmark + labels on phone
+                // widths (beads_adagio-bzx).
+                icon = {},
             ) {
-                Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                SegmentLabel(label)
             }
         }
     }

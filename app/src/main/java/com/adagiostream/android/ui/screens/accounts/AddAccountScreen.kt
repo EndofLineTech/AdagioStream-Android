@@ -52,6 +52,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.adagiostream.android.ui.components.SegmentLabel
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -144,29 +145,35 @@ fun AddAccountScreen(
                             viewModel.setIsAudiobookshelf(false)
                         },
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 4),
+                        // Four segments don't fit the checkmark + full labels on
+                        // phone widths — selection is shown by container color alone.
+                        icon = {},
                     ) {
-                        Text("M3U")
+                        SegmentLabel("M3U")
                     }
                     SegmentedButton(
                         selected = isXtream,
                         onClick = { viewModel.setIsXtream(true) },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 4),
+                        icon = {},
                     ) {
-                        Text("Xtream")
+                        SegmentLabel("Xtream")
                     }
                     SegmentedButton(
                         selected = isSubsonic,
                         onClick = { viewModel.setIsSubsonic(true) },
                         shape = SegmentedButtonDefaults.itemShape(index = 2, count = 4),
+                        icon = {},
                     ) {
-                        Text("Navidrome")
+                        SegmentLabel("Navidrome")
                     }
                     SegmentedButton(
                         selected = isAudiobookshelf,
                         onClick = { viewModel.setIsAudiobookshelf(true) },
                         shape = SegmentedButtonDefaults.itemShape(index = 3, count = 4),
+                        icon = {},
                     ) {
-                        Text("Audiobooks")
+                        SegmentLabel("Audiobooks")
                     }
                 }
 

@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -154,6 +155,10 @@ private fun AccountCard(
                 Text(
                     text = account.name,
                     style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    // Middle ellipsis keeps both ends of hostname-style names
+                    // readable, e.g. "navidrome.end…line.tech" (beads_adagio-bzx).
+                    overflow = TextOverflow.MiddleEllipsis,
                 )
                 Text(
                     text = when (account.type) {

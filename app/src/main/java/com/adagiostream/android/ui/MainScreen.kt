@@ -1,6 +1,7 @@
 package com.adagiostream.android.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -18,6 +19,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -130,7 +133,20 @@ fun MainScreen(
                             bottomNavItems.forEach { screen ->
                                 NavigationBarItem(
                                     icon = { Icon(screen.icon, contentDescription = screen.label) },
-                                    label = { Text(screen.label) },
+                                    label = {
+                                        // Auto-shrink so "Custom M3Us" stays on one
+                                        // line with five tabs (beads_adagio-bzx).
+                                        Text(
+                                            text = screen.label,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            autoSize = TextAutoSize.StepBased(
+                                                minFontSize = 9.sp,
+                                                maxFontSize = 12.sp,
+                                                stepSize = 0.5.sp,
+                                            ),
+                                        )
+                                    },
                                     selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
                                     onClick = {
                                         navController.navigate(screen.route) {

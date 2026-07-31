@@ -221,7 +221,9 @@ private fun M3UAccountRow(
                     text = account.name,
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    // MiddleEllipsis matches AccountsScreen — keeps both ends of
+                    // hostname-style names readable (beads_adagio-bzx).
+                    overflow = TextOverflow.MiddleEllipsis,
                 )
                 Text(
                     text = "M3U Playlist",
