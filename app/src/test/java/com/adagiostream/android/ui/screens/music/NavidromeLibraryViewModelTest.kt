@@ -22,6 +22,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -131,7 +132,7 @@ class NavidromeLibraryViewModelTest {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private fun setSubsonicAccount() {
+    private suspend fun setSubsonicAccount() {
         fakeAccountsFlow.value = listOf(
             Account(
                 id = "test-subsonic",
@@ -143,6 +144,10 @@ class NavidromeLibraryViewModelTest {
                 ),
             ),
         )
+        // The VM's init collector builds the API asynchronously — without this,
+        // a load*() call racing ahead of it no-ops on a null api and the test
+        // times out waiting for a state that never comes (beads_adagio-k77).
+        viewModel.api.first { it != null }
     }
 
     private fun mockOk(body: String): MockResponse =
