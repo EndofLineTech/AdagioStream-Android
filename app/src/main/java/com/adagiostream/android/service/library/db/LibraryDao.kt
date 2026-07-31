@@ -1,9 +1,8 @@
 package com.adagiostream.android.service.library.db
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 
 /**
  * DAO for the cached music-library tables (artists/albums/tracks) that back
@@ -15,16 +14,20 @@ interface LibraryDao {
 
     // ---- writes ----------------------------------------------------------
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // @Upsert, NEVER @Insert(onConflict = REPLACE): REPLACE is DELETE+INSERT at
+    // the SQLite level, which fires the ON DELETE CASCADE on albums/tracks —
+    // every artist/album re-cache silently wiped the cached tracks beneath it,
+    // orphaning download rows (beads_adagio-6q3).
+    @Upsert
     suspend fun upsertArtist(artist: ArtistEntity)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAlbum(album: AlbumEntity)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertTracks(tracks: List<TrackEntity>)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertTrack(track: TrackEntity)
 
     // ---- reads -----------------------------------------------------------

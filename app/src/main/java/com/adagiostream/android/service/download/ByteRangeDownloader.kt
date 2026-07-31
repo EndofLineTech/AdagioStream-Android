@@ -12,11 +12,20 @@ interface ByteRangeDownloader {
     /**
      * Opens a streaming GET for [url] requesting bytes from [offset] onward.
      *
+     * @throws RangeNotSatisfiableException when the server rejects the offset (HTTP 416).
      * @throws IOException on connect/transport failure.
      */
     @Throws(IOException::class)
     suspend fun open(url: String, offset: Long): RangeResponse
 }
+
+/**
+ * The server rejected the resume offset (HTTP 416) — the on-disk partial is at
+ * or past the server's size, e.g. a fully-downloaded file whose row never got
+ * marked completed. [TrackDownloader] restarts such downloads from byte 0
+ * (beads_adagio-6q3); without this the row failed forever on every retry.
+ */
+class RangeNotSatisfiableException : IOException("HTTP 416 for download")
 
 /**
  * A draining handle over a range response. Callers [read] until -1, then [close].

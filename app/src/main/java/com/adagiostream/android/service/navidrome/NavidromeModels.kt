@@ -382,6 +382,19 @@ data class GetSongsByGenrePayload(
     )
 }
 
+/** Envelope for `getSong.view` (beads_adagio-6q3 — single-track metadata refetch). */
+@Serializable
+data class GetSongPayload(
+    @SerialName("subsonic-response") val response: Body,
+) {
+    @Serializable
+    data class Body(
+        val status: String = "",
+        val error: SubsonicErrorBody? = null,
+        val song: SubsonicTrackDto? = null,
+    )
+}
+
 /** Envelope for `getRandomSongs.view` (baw.7.1 Auto "Songs" root category). */
 @Serializable
 data class GetRandomSongsPayload(

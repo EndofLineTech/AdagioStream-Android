@@ -204,6 +204,26 @@ class TrackDownloaderTest {
     }
 
     @Test
+    fun `http 416 on resume truncates and restarts from zero`() = runTest {
+        val payload = ByteArray(8) { (it + 1).toByte() }
+        // Pre-seed a partial file at/past the server's size — the server
+        // rejects the range with 416 (beads_adagio-6q3).
+        files.data["/dl/t1"] = ByteArray(8) { 99 }
+
+        val source = FakeDownloader(payload) { attempt, offset ->
+            if (attempt == 0) throw RangeNotSatisfiableException()
+            FakeResponse(payload, offset, totalBytes = 8, partial = false)
+        }
+        val outcome = TrackDownloader(dao, source, files, now = { clock }).download("t1", "http://x")
+
+        assertTrue(outcome is DownloadOutcome.Completed)
+        // Second open must be from byte 0 with the stale file truncated first.
+        assertEquals(listOf(8L, 0L), source.offsets)
+        assertTrue(files.data["/dl/t1"]!!.contentEquals(payload))
+        assertEquals(DownloadStatus.COMPLETED, dao.getById("t1")!!.status)
+    }
+
+    @Test
     fun `already-completed download short-circuits without opening the network`() = runTest {
         val payload = ByteArray(5) { 7 }
         files.data["/dl/t1"] = payload

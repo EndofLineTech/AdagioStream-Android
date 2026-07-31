@@ -199,6 +199,24 @@ class NavidromeApi(
     }
 
     /**
+     * Fetches a single song's metadata from `getSong.view` (beads_adagio-6q3).
+     *
+     * Used by the download drainer to re-cache track metadata for download rows
+     * whose library-cache entry was lost. Throws for non-song ids (e.g.
+     * Audiobookshelf record ids that share the downloads table).
+     */
+    suspend fun getSong(id: String): Track {
+        val url = buildUrl("getSong", mapOf("id" to id))
+            ?: throw NavidromeApiException.InvalidUrl("$host/rest/getSong.view")
+        val now = nowEpochSeconds()
+        val payload = fetchAndDecode(url, GetSongPayload.serializer())
+        return payload.response.song?.toRecord(updatedAt = now)
+            ?: throw NavidromeApiException.DecodingError(
+                IllegalStateException("getSong returned no song for id"),
+            )
+    }
+
+    /**
      * Fetches a random sample of songs from `getRandomSongs.view` (baw.7.1 Auto
      * "Songs" root category — iOS parity: random 100).
      *

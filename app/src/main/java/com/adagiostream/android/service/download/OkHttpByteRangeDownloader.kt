@@ -22,6 +22,7 @@ class OkHttpByteRangeDownloader(private val client: OkHttpClient) : ByteRangeDow
         if (!response.isSuccessful) {
             val code = response.code
             response.close()
+            if (code == 416) throw RangeNotSatisfiableException()
             throw IOException("HTTP $code for download")
         }
 

@@ -60,7 +60,16 @@ class TrackDownloader(
 
         var total: Long? = existing?.bytesTotal?.takeIf { it > 0 }
         return try {
-            val response = source.open(url, offset)
+            val response = try {
+                source.open(url, offset)
+            } catch (e: RangeNotSatisfiableException) {
+                // On-disk bytes at/past the server's size — the local partial
+                // can't be trusted (ponytail: could be a complete file whose row
+                // lost its status, but integrity is unverifiable) — restart clean.
+                files.truncate(path)
+                offset = 0
+                source.open(url, 0)
+            }
             try {
                 // Server ignored the Range request — restart from byte 0.
                 if (offset > 0 && !response.partial) {

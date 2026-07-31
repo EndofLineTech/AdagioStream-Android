@@ -120,11 +120,11 @@ class DownloadWorker(
         // (beads_adagio-acq review F1). Filtered to cached Navidrome tracks —
         // ABS rows belong to other workers.
         dao.getByStatus(DownloadStatus.DOWNLOADING).forEach { row ->
-            if (repo.cachedTrack(row.id) != null) {
+            if (resolveTrack(row.id, repo, api) != null) {
                 DebugLogger.log("Re-queueing stale DOWNLOADING row ${row.id}", DebugLogger.Category.DOWNLOAD)
                 dao.updateStatus(row.id, DownloadStatus.QUEUED, System.currentTimeMillis())
             } else {
-                DebugLogger.log("NOT re-queueing DOWNLOADING row ${row.id} — no cached track", DebugLogger.Category.DOWNLOAD)
+                DebugLogger.log("NOT re-queueing DOWNLOADING row ${row.id} — not a music track", DebugLogger.Category.DOWNLOAD)
             }
         }
 
@@ -133,7 +133,7 @@ class DownloadWorker(
         // drain pass (bounded by MAX_ATTEMPTS within a chain) and heals rows
         // the pre-drainer build's workers left FAILED with no retry scheduled.
         dao.getByStatus(DownloadStatus.FAILED).forEach { row ->
-            if (repo.cachedTrack(row.id) != null) {
+            if (resolveTrack(row.id, repo, api) != null) {
                 DebugLogger.log("Re-queueing FAILED row ${row.id}", DebugLogger.Category.DOWNLOAD)
                 dao.updateStatus(row.id, DownloadStatus.QUEUED, System.currentTimeMillis())
             }
@@ -150,10 +150,10 @@ class DownloadWorker(
             val next = queued.firstOrNull() ?: break
             val trackId = next.id
 
-            val track = repo.cachedTrack(trackId)
+            val track = resolveTrack(trackId, repo, api)
             if (track == null) {
                 // Not a Navidrome track (ABS book/episode row) — leave for its own worker.
-                DebugLogger.log("Skipping row $trackId — no cached track", DebugLogger.Category.DOWNLOAD)
+                DebugLogger.log("Skipping row $trackId — not a music track", DebugLogger.Category.DOWNLOAD)
                 skipped += trackId
                 continue
             }
@@ -233,6 +233,36 @@ class DownloadWorker(
         }
         DebugLogger.log("Drainer done: completed=$completed skipped=${skipped.size} anyFailed=$anyFailed result=$result", DebugLogger.Category.DOWNLOAD)
         return result
+    }
+
+    /**
+     * Resolves track metadata for a download row: the library cache first, then
+     * a `getSong` refetch that re-populates the cache (beads_adagio-6q3 — the
+     * pre-@Upsert REPLACE+CASCADE bug orphaned download rows by wiping their
+     * cached tracks). A fetch failure means the row isn't a Navidrome song
+     * (ABS book/episode sharing the downloads table) or the server is
+     * unreachable — either way the caller skips it this pass.
+     */
+    private suspend fun resolveTrack(
+        trackId: String,
+        repo: MusicLibraryRepository,
+        api: com.adagiostream.android.service.navidrome.NavidromeApi,
+    ): com.adagiostream.android.service.navidrome.Track? {
+        repo.cachedTrack(trackId)?.let { return it }
+        return try {
+            val fetched = api.getSong(trackId)
+            repo.cacheTrackForDownload(fetched)
+            DebugLogger.log("Recovered track metadata via getSong for $trackId", DebugLogger.Category.DOWNLOAD)
+            fetched
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Distinguishes "Subsonic error 70: not found" (ABS row) from a
+            // network failure in the exported log — this ticket was diagnosed
+            // entirely from these lines.
+            DebugLogger.log("getSong failed for $trackId: ${e.message}", DebugLogger.Category.DOWNLOAD)
+            null
+        }
     }
 
     private fun progressLine(written: Long, total: Long?): String =
