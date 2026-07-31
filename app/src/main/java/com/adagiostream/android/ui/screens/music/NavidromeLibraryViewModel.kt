@@ -235,24 +235,33 @@ class NavidromeLibraryViewModel @Inject constructor(
     private val _albumsState = MutableStateFlow<LoadState>(LoadState.Idle)
     val albumsState: StateFlow<LoadState> = _albumsState.asStateFlow()
 
+    /** Last artistId passed to [loadAlbums] — retained so [retryAlbums] works even when the fetch failed before [selectedArtist] was populated. */
+    private var requestedArtistId: String? = null
+
     /**
-     * Loads albums for [artist] from `getArtist`.
+     * Loads albums for [artistId] from `getArtist`.
      *
-     * No-ops when [artist] is the same as the currently loaded artist (avoids
-     * redundant reloads during recomposition).  Guards against concurrent loads.
+     * Takes the ID (not an [Artist]) because each nav destination gets its own
+     * ViewModel instance — the artists list from the previous screen is NOT in
+     * memory here (beads_adagio-bkd).  `getArtist` returns the artist object too,
+     * which populates [selectedArtist] for the title bar.
+     *
+     * No-ops when [artistId] is already loaded (avoids redundant reloads during
+     * recomposition).  Guards against concurrent loads.
      */
-    fun loadAlbums(artist: Artist) {
+    fun loadAlbums(artistId: String) {
         // Skip if already loaded for this artist
-        if (_selectedArtist.value?.id == artist.id && _albumsState.value == LoadState.Loaded) return
+        if (_selectedArtist.value?.id == artistId && _albumsState.value == LoadState.Loaded) return
         val api = browseApi() ?: return
         if (_albumsState.value is LoadState.Loading) return
+        requestedArtistId = artistId
 
         viewModelScope.launch {
-            _selectedArtist.value = artist
             _artistAlbums.value = emptyList()
             _albumsState.value = LoadState.Loading
             try {
-                val (_, albums) = api.getArtist(artist.id)
+                val (artist, albums) = api.getArtist(artistId)
+                _selectedArtist.value = artist
                 val sorted = albums.sortedWith(
                     compareBy({ it.year ?: Int.MAX_VALUE }, { it.title.lowercase() }),
                 )
@@ -267,9 +276,9 @@ class NavidromeLibraryViewModel @Inject constructor(
     }
 
     fun retryAlbums() {
-        val artist = _selectedArtist.value ?: return
+        val artistId = requestedArtistId ?: return
         _albumsState.value = LoadState.Idle
-        loadAlbums(artist)
+        loadAlbums(artistId)
     }
 
     // -------------------------------------------------------------------------
@@ -295,23 +304,32 @@ class NavidromeLibraryViewModel @Inject constructor(
     private val _tracksState = MutableStateFlow<LoadState>(LoadState.Idle)
     val tracksState: StateFlow<LoadState> = _tracksState.asStateFlow()
 
+    /** Last albumId passed to [loadTracks] — retained so [retryTracks] works even when the fetch failed before [selectedAlbum] was populated. */
+    private var requestedAlbumId: String? = null
+
     /**
-     * Loads tracks for [album] from `getAlbum`.
+     * Loads tracks for [albumId] from `getAlbum`.
+     *
+     * Takes the ID (not an [Album]) because each nav destination gets its own
+     * ViewModel instance — the albums list from the previous screen is NOT in
+     * memory here (beads_adagio-bkd).  `getAlbum` returns the album object too,
+     * which populates [selectedAlbum] for the header.
      *
      * No-ops if this album is already loaded.  Guards against concurrent loads.
      */
-    fun loadTracks(album: Album) {
-        if (_selectedAlbum.value?.id == album.id && _tracksState.value == LoadState.Loaded) return
+    fun loadTracks(albumId: String) {
+        if (_selectedAlbum.value?.id == albumId && _tracksState.value == LoadState.Loaded) return
         val api = browseApi() ?: return
         if (_tracksState.value is LoadState.Loading) return
+        requestedAlbumId = albumId
 
         viewModelScope.launch {
-            _selectedAlbum.value = album
             _albumTracks.value = emptyList()
             _selectedAlbumArtistName.value = null
             _tracksState.value = LoadState.Loading
             try {
-                val (_, artistName, tracks) = api.getAlbum(album.id)
+                val (album, artistName, tracks) = api.getAlbum(albumId)
+                _selectedAlbum.value = album
                 _selectedAlbumArtistName.value = artistName
                 _albumTracks.value = tracks.sortedWith(
                     compareBy({ it.discNumber }, { it.trackNumber ?: Int.MAX_VALUE }),
@@ -326,9 +344,9 @@ class NavidromeLibraryViewModel @Inject constructor(
     }
 
     fun retryTracks() {
-        val album = _selectedAlbum.value ?: return
+        val albumId = requestedAlbumId ?: return
         _tracksState.value = LoadState.Idle
-        loadTracks(album)
+        loadTracks(albumId)
     }
 
     // -------------------------------------------------------------------------

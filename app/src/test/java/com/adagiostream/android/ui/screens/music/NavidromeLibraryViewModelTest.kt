@@ -314,7 +314,7 @@ class NavidromeLibraryViewModelTest {
 
         viewModel.albumsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
-            viewModel.loadAlbums(fakeArtist)
+            viewModel.loadAlbums(fakeArtist.id)
             awaitItem() // Loading
             val result = awaitItem()
             assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, result)
@@ -335,7 +335,7 @@ class NavidromeLibraryViewModelTest {
         )
         viewModel.albumsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
-            viewModel.loadAlbums(fakeArtist)
+            viewModel.loadAlbums(fakeArtist.id)
             awaitItem() // Loading
             assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
             cancelAndIgnoreRemainingEvents()
@@ -362,7 +362,7 @@ class NavidromeLibraryViewModelTest {
 
         viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
-            viewModel.loadTracks(fakeAlbum)
+            viewModel.loadTracks(fakeAlbum.id)
             awaitItem() // Loading
             val result = awaitItem()
             assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, result)
@@ -388,7 +388,7 @@ class NavidromeLibraryViewModelTest {
         )
         viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
-            viewModel.loadTracks(fakeAlbum)
+            viewModel.loadTracks(fakeAlbum.id)
             awaitItem() // Loading
             assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitItem())
             cancelAndIgnoreRemainingEvents()
@@ -415,7 +415,7 @@ class NavidromeLibraryViewModelTest {
         )
         viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
-            viewModel.loadTracks(fakeAlbum)
+            viewModel.loadTracks(fakeAlbum.id)
             awaitItem() // Loading
             assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
             cancelAndIgnoreRemainingEvents()
@@ -476,6 +476,78 @@ class NavidromeLibraryViewModelTest {
         }
 
         assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, viewModel.artistsState.value)
+    }
+
+    // -------------------------------------------------------------------------
+    // retryAlbums / retryTracks after a failed first fetch (beads_adagio-bkd)
+    // — the failed fetch never populated selectedArtist/selectedAlbum, so retry
+    // must fall back to the stored requested ID.
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `retryAlbums works when the first fetch failed before selectedArtist was set`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(
+            mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":0,"message":"boom"}}}"""),
+        )
+        server.enqueue(mockOk(ARTIST_DETAIL_FIXTURE))
+
+        viewModel.albumsState.test(timeout = 10.seconds) {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadAlbums("ar1")
+            awaitItem() // Loading
+            assertTrue(awaitItem() is NavidromeLibraryViewModel.LoadState.Error)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertNull(viewModel.selectedArtist.value)
+
+        viewModel.albumsState.test(timeout = 10.seconds) {
+            viewModel.retryAlbums()
+            val states = mutableListOf<NavidromeLibraryViewModel.LoadState>()
+            repeat(5) {
+                states.add(awaitItem())
+                if (states.last() == NavidromeLibraryViewModel.LoadState.Loaded) return@test
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, viewModel.albumsState.value)
+        // selectedArtist is populated from the getArtist response for the title bar.
+        assertEquals("ar1", viewModel.selectedArtist.value?.id)
+        assertEquals(2, viewModel.artistAlbums.value.size)
+    }
+
+    @Test
+    fun `retryTracks works when the first fetch failed before selectedAlbum was set`() = runTest {
+        setSubsonicAccount()
+        server.enqueue(
+            mockOk("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":0,"message":"boom"}}}"""),
+        )
+        server.enqueue(mockOk(ALBUM_DETAIL_FIXTURE))
+
+        viewModel.tracksState.test(timeout = 10.seconds) {
+            assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
+            viewModel.loadTracks("al1")
+            awaitItem() // Loading
+            assertTrue(awaitItem() is NavidromeLibraryViewModel.LoadState.Error)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertNull(viewModel.selectedAlbum.value)
+
+        viewModel.tracksState.test(timeout = 10.seconds) {
+            viewModel.retryTracks()
+            val states = mutableListOf<NavidromeLibraryViewModel.LoadState>()
+            repeat(5) {
+                states.add(awaitItem())
+                if (states.last() == NavidromeLibraryViewModel.LoadState.Loaded) return@test
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, viewModel.tracksState.value)
+        // selectedAlbum is populated from the getAlbum response for the header.
+        assertEquals("al1", viewModel.selectedAlbum.value?.id)
+        assertEquals(3, viewModel.albumTracks.value.size)
     }
 
     // -------------------------------------------------------------------------
@@ -893,12 +965,8 @@ class NavidromeLibraryViewModelTest {
         viewModel.loadArtists()
         viewModel.loadGenres()
         viewModel.loadAlbumBrowseList()
-        viewModel.loadAlbums(
-            com.adagiostream.android.service.navidrome.Artist(id = "ar1", name = "X", albumCount = 1, updatedAt = 0),
-        )
-        viewModel.loadTracks(
-            com.adagiostream.android.service.navidrome.Album(id = "al1", artistId = "ar1", title = "Y", updatedAt = 0),
-        )
+        viewModel.loadAlbums("ar1")
+        viewModel.loadTracks("al1")
         viewModel.loadSongsByGenre(
             com.adagiostream.android.service.navidrome.SubsonicGenre(name = "Rock", songCount = 1, albumCount = 1),
         )

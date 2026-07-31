@@ -335,6 +335,7 @@ fun MainScreen(
                             navController.navigate(Screen.AlbumDetail.createRoute(albumId))
                         },
                         onBack = { navController.popBackStack() },
+                        backStackEntry = it,
                     )
                 }
                 composable(
@@ -345,6 +346,7 @@ fun MainScreen(
                 ) {
                     AlbumDetailScreen(
                         onBack = { navController.popBackStack() },
+                        backStackEntry = it,
                     )
                 }
                 // Album browse route (baw.9.1)

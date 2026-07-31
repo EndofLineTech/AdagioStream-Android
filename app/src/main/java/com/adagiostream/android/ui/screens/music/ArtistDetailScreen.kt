@@ -60,22 +60,14 @@ fun ArtistDetailScreen(
     val albumsState by viewModel.albumsState.collectAsStateWithLifecycle()
     val artistAlbums by viewModel.artistAlbums.collectAsStateWithLifecycle()
 
-    // The artistId is passed via nav argument; look it up from artists list
-    // once the VM is ready (the artist object is already in memory from MusicLibraryScreen).
+    // The artistId comes from nav args. loadAlbums fetches by ID — this screen's
+    // ViewModel is nav-scoped and fresh, so the previous screen's artists list is
+    // NOT available here (beads_adagio-bkd).
     val artistIdArg = backStackEntry?.arguments?.getString("artistId")
 
     LaunchedEffect(api, artistIdArg) {
-        if (api == null) return@LaunchedEffect
-        // Re-resolve the artist from the artists StateFlow if not already loaded
-        val artists = viewModel.artists.value
-        val artist = artists.firstOrNull { it.id == artistIdArg }
-            ?: selectedArtist
-            ?: return@LaunchedEffect
-        if (albumsState == NavidromeLibraryViewModel.LoadState.Idle ||
-            selectedArtist?.id != artist.id
-        ) {
-            viewModel.loadAlbums(artist)
-        }
+        if (api == null || artistIdArg == null) return@LaunchedEffect
+        viewModel.loadAlbums(artistIdArg)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

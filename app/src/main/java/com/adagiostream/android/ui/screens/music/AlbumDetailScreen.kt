@@ -74,18 +74,14 @@ fun AlbumDetailScreen(
 
     var addToPlaylistTrackId by remember { mutableStateOf<String?>(null) }
 
+    // The albumId comes from nav args. loadTracks fetches by ID — this screen's
+    // ViewModel is nav-scoped and fresh, so the previous screen's album list is
+    // NOT available here (beads_adagio-bkd).
     val albumIdArg = backStackEntry?.arguments?.getString("albumId")
 
     LaunchedEffect(api, albumIdArg) {
-        if (api == null) return@LaunchedEffect
-        val album = viewModel.artistAlbums.value.firstOrNull { it.id == albumIdArg }
-            ?: selectedAlbum
-            ?: return@LaunchedEffect
-        if (tracksState == NavidromeLibraryViewModel.LoadState.Idle ||
-            selectedAlbum?.id != album.id
-        ) {
-            viewModel.loadTracks(album)
-        }
+        if (api == null || albumIdArg == null) return@LaunchedEffect
+        viewModel.loadTracks(albumIdArg)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
