@@ -55,9 +55,22 @@ sealed class Screen(
     data object Setup : Screen("setup", "Setup", Icons.Default.Settings)
     data object Licenses : Screen("licenses", "Licenses", Icons.Default.Gavel)
     data object PrivacyPolicy : Screen("privacy_policy", "Privacy Policy", Icons.Default.Gavel)
-    data object AddAccount : Screen("add_account?accountId={accountId}", "Add Account", Icons.Default.Storage) {
-        fun createRoute(accountId: String? = null): String {
-            return if (accountId != null) "add_account?accountId=$accountId" else "add_account"
+    data object AddAccount : Screen("add_account?accountId={accountId}&type={type}", "Add Account", Icons.Default.Storage) {
+        /** Values for the `type` nav arg (beads_adagio-2gn). */
+        const val TYPE_NAVIDROME = "navidrome"
+        const val TYPE_AUDIOBOOKSHELF = "audiobookshelf"
+
+        /**
+         * [type] pre-selects the account-type segment for a NEW account:
+         * [TYPE_NAVIDROME] or [TYPE_AUDIOBOOKSHELF] (beads_adagio-2gn).
+         * Ignored when [accountId] is set (editing).
+         */
+        fun createRoute(accountId: String? = null, type: String? = null): String {
+            val params = listOfNotNull(
+                accountId?.let { "accountId=$it" },
+                type?.let { "type=$it" },
+            )
+            return if (params.isEmpty()) "add_account" else "add_account?" + params.joinToString("&")
         }
     }
 

@@ -28,6 +28,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -47,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,19 +64,31 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.adagiostream.android.ui.navigation.Screen
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun SetupScreen(
     onSetupComplete: () -> Unit,
+    onAddServerAccount: (type: String) -> Unit,
     viewModel: SetupViewModel = hiltViewModel(),
 ) {
     val currentStep by viewModel.currentStep.collectAsStateWithLifecycle()
     val setupComplete by viewModel.setupComplete.collectAsStateWithLifecycle()
 
-    if (setupComplete) {
-        onSetupComplete()
-        return
+    // Navigate only while RESUMED: during the hand-off to Add Account the flag
+    // is already true while this screen exits (STARTED) — firing then would pop
+    // the Add Account screen we just pushed. Suspending until RESUMED defers
+    // the navigation to when the user comes Back (beads_adagio-2gn review F1).
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(setupComplete) {
+        if (setupComplete) {
+            lifecycle.currentStateFlow.first { it == Lifecycle.State.RESUMED }
+            onSetupComplete()
+        }
     }
 
     BackHandler(enabled = currentStep != SetupStep.WELCOME) {
@@ -100,6 +115,15 @@ fun SetupScreen(
             SetupStep.CONNECTION_TYPE -> ConnectionTypeStep(
                 onSelectM3U = { viewModel.selectConnectionTypeAndAdvance(false) },
                 onSelectXtream = { viewModel.selectConnectionTypeAndAdvance(true) },
+                // Navidrome/Audiobookshelf use the full Add Account screen —
+                // mark setup done first so Back lands in the main app
+                // (beads_adagio-2gn). The RESUMED gate above keeps the
+                // wizard's own completion navigation from firing until the
+                // user comes Back from Add Account.
+                onSelectServer = { type ->
+                    viewModel.finishSetup()
+                    onAddServerAccount(type)
+                },
                 onBack = { viewModel.goBack() },
             )
             SetupStep.ACCOUNT_DETAILS -> AccountDetailsStep(
@@ -147,7 +171,7 @@ private fun WelcomeStep(
                 val noun = if (existingAccountCount == 1) "account" else "accounts"
                 "You already have $existingAccountCount $noun configured. You can add a new account or skip this setup."
             } else {
-                "Stream your favorite audio channels from M3U playlists or Xtream Codes providers."
+                "Stream audio channels from M3U or Xtream Codes providers, music from Navidrome, and audiobooks from Audiobookshelf."
             },
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
@@ -183,6 +207,7 @@ private fun WelcomeStep(
 private fun ConnectionTypeStep(
     onSelectM3U: () -> Unit,
     onSelectXtream: () -> Unit,
+    onSelectServer: (type: String) -> Unit,
     onBack: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -204,10 +229,11 @@ private fun ConnectionTypeStep(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(24.dp))
 
             Text(
                 text = "Choose Your Source",
@@ -235,8 +261,22 @@ private fun ConnectionTypeStep(
                 icon = Icons.Default.Dns,
                 onClick = onSelectXtream,
             )
+            Spacer(modifier = Modifier.height(16.dp))
+            SourceCard(
+                title = "Navidrome",
+                description = "Music library on a Navidrome or Subsonic server",
+                icon = Icons.Default.LibraryMusic,
+                onClick = { onSelectServer(Screen.AddAccount.TYPE_NAVIDROME) },
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            SourceCard(
+                title = "Audiobookshelf",
+                description = "Audiobooks and podcasts from your server",
+                icon = Icons.Default.Headphones,
+                onClick = { onSelectServer(Screen.AddAccount.TYPE_AUDIOBOOKSHELF) },
+            )
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

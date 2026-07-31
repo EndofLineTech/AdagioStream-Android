@@ -105,7 +105,12 @@ fun MainScreen(
         val currentDestination = navBackStackEntry?.destination
         val showMiniPlayer = currentChannel != null && playbackState !is PlaybackState.Idle
         val isOnSetup = currentDestination?.route == Screen.Setup.route
-        val startDestination = if (settings.setupCompleted) Screen.Channels.route else Screen.Setup.route
+        // Pinned at first composition (settings load synchronously): a reactive
+        // startDestination would rebuild the nav graph and clear the back stack
+        // the moment setupCompleted flips mid-flow (beads_adagio-2gn review F1).
+        val startDestination = remember {
+            if (settings.setupCompleted) Screen.Channels.route else Screen.Setup.route
+        }
 
         Scaffold(
             bottomBar = {
@@ -178,6 +183,15 @@ fun MainScreen(
                             navController.navigate(Screen.Channels.route) {
                                 popUpTo(Screen.Setup.route) { inclusive = true }
                             }
+                        },
+                        // Navidrome/Audiobookshelf hand off to the full Add
+                        // Account screen (its forms + ABS SSO can't live in the
+                        // wizard) — setup is marked complete first, so Back
+                        // lands in the main app either way. No reloadSettings()
+                        // here: settings refresh on the Back-through-Setup path
+                        // via onSetupComplete (beads_adagio-2gn review F2).
+                        onAddServerAccount = { type ->
+                            navController.navigate(Screen.AddAccount.createRoute(type = type))
                         },
                     )
                 }
@@ -475,6 +489,11 @@ fun MainScreen(
                     route = Screen.AddAccount.route,
                     arguments = listOf(
                         navArgument("accountId") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                        navArgument("type") {
                             type = NavType.StringType
                             nullable = true
                             defaultValue = null

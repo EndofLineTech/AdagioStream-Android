@@ -7,6 +7,7 @@ import com.adagiostream.android.model.Account
 import com.adagiostream.android.model.AccountType
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiException
+import com.adagiostream.android.ui.navigation.Screen
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfApiFactory
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfAuth
 import com.adagiostream.android.service.audiobookshelf.AudiobookshelfOidc
@@ -34,6 +35,9 @@ class AddAccountViewModel @Inject constructor(
 
     private val editAccountId: String? = savedStateHandle.get<String>("accountId")
     val isEditing: Boolean = editAccountId != null
+
+    /** Optional preset account type for a new account: "navidrome" or "audiobookshelf" — used by the setup wizard hand-off (beads_adagio-2gn). */
+    private val presetType: String? = savedStateHandle.get<String>("type")
 
     private val _isXtream = MutableStateFlow(false)
     val isXtream: StateFlow<Boolean> = _isXtream.asStateFlow()
@@ -127,6 +131,13 @@ class AddAccountViewModel @Inject constructor(
                     oidcCallbacks.consume()
                     completeSso(url)
                 }
+            }
+        }
+
+        if (editAccountId == null) {
+            when (presetType) {
+                Screen.AddAccount.TYPE_NAVIDROME -> _isSubsonic.value = true
+                Screen.AddAccount.TYPE_AUDIOBOOKSHELF -> _isAudiobookshelf.value = true
             }
         }
 
