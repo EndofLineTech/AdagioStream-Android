@@ -153,6 +153,29 @@ class NavidromeLibraryViewModelTest {
     private fun mockOk(body: String): MockResponse =
         MockResponse.Builder().code(200).body(body).build()
 
+    /**
+     * Response with delayed headers, for tests that must reliably observe the
+     * in-flight Loading state (strict transition tests, no-op-while-Loading
+     * tests). Without the delay, MockWebServer can answer before Turbine's
+     * collector runs — see [awaitTerminal].
+     */
+    private fun mockSlow(body: String): MockResponse =
+        MockResponse.Builder().code(200).body(body).headersDelay(1, TimeUnit.SECONDS).build()
+
+    /**
+     * Awaits the terminal state of a load (Loaded/Empty/Error), tolerating a
+     * conflated-away Loading: the LoadState flows are StateFlows, so when
+     * MockWebServer answers before Turbine's collector runs, the terminal
+     * value overwrites Loading and only one emission arrives (beads_adagio-k77,
+     * CI run 30729788362).
+     */
+    private suspend fun app.cash.turbine.ReceiveTurbine<NavidromeLibraryViewModel.LoadState>.awaitTerminal(): NavidromeLibraryViewModel.LoadState {
+        while (true) {
+            val state = awaitItem()
+            if (state != NavidromeLibraryViewModel.LoadState.Loading) return state
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Initial state
     // -------------------------------------------------------------------------
@@ -191,7 +214,7 @@ class NavidromeLibraryViewModelTest {
     @Test
     fun `loadArtists transitions Idle then Loading then Loaded on success`() = runTest {
         setSubsonicAccount()
-        server.enqueue(mockOk(ARTISTS_OK_FIXTURE))
+        server.enqueue(mockSlow(ARTISTS_OK_FIXTURE))
 
         viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
@@ -242,8 +265,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
-            awaitItem() // Loading
-            val result = awaitItem()
+            val result = awaitTerminal()
             assertEquals(NavidromeLibraryViewModel.LoadState.Empty, result)
             cancelAndIgnoreRemainingEvents()
         }
@@ -259,8 +281,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
-            awaitItem() // Loading
-            val result = awaitItem()
+            val result = awaitTerminal()
             assertTrue("Expected Error state", result is NavidromeLibraryViewModel.LoadState.Error)
             cancelAndIgnoreRemainingEvents()
         }
@@ -282,8 +303,9 @@ class NavidromeLibraryViewModelTest {
     @Test
     fun `loadArtists is no-op while already Loading`() = runTest {
         setSubsonicAccount()
-        // First request takes a long time (we won't answer it during the test)
-        server.enqueue(mockOk(ARTISTS_OK_FIXTURE))
+        // Delayed response holds the Loading window open so the second call
+        // reliably lands while the first is still in flight.
+        server.enqueue(mockSlow(ARTISTS_OK_FIXTURE))
 
         viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
@@ -320,8 +342,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.albumsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbums(fakeArtist.id)
-            awaitItem() // Loading
-            val result = awaitItem()
+            val result = awaitTerminal()
             assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, result)
             cancelAndIgnoreRemainingEvents()
         }
@@ -341,8 +362,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.albumsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbums(fakeArtist.id)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -368,8 +388,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadTracks(fakeAlbum.id)
-            awaitItem() // Loading
-            val result = awaitItem()
+            val result = awaitTerminal()
             assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, result)
             cancelAndIgnoreRemainingEvents()
         }
@@ -394,8 +413,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadTracks(fakeAlbum.id)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -421,8 +439,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadTracks(fakeAlbum.id)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -463,8 +480,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
-            awaitItem() // Loading
-            val errorState = awaitItem()
+            val errorState = awaitTerminal()
             assertTrue("Should be Error state", errorState is NavidromeLibraryViewModel.LoadState.Error)
             cancelAndIgnoreRemainingEvents()
         }
@@ -500,8 +516,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.albumsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbums("ar1")
-            awaitItem() // Loading
-            assertTrue(awaitItem() is NavidromeLibraryViewModel.LoadState.Error)
+            assertTrue(awaitTerminal() is NavidromeLibraryViewModel.LoadState.Error)
             cancelAndIgnoreRemainingEvents()
         }
         assertNull(viewModel.selectedArtist.value)
@@ -533,8 +548,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.tracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadTracks("al1")
-            awaitItem() // Loading
-            assertTrue(awaitItem() is NavidromeLibraryViewModel.LoadState.Error)
+            assertTrue(awaitTerminal() is NavidromeLibraryViewModel.LoadState.Error)
             cancelAndIgnoreRemainingEvents()
         }
         assertNull(viewModel.selectedAlbum.value)
@@ -574,7 +588,7 @@ class NavidromeLibraryViewModelTest {
     @Test
     fun `loadAlbumBrowseList transitions Idle then Loading then Loaded on success`() = runTest {
         setSubsonicAccount()
-        server.enqueue(mockOk(ALBUM_LIST_OK_FIXTURE))
+        server.enqueue(mockSlow(ALBUM_LIST_OK_FIXTURE))
 
         viewModel.albumBrowseState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
@@ -595,8 +609,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.albumBrowseState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbumBrowseList()
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -621,8 +634,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.albumBrowseState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadAlbumBrowseList()
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -663,7 +675,7 @@ class NavidromeLibraryViewModelTest {
     @Test
     fun `loadGenres transitions Idle then Loading then Loaded on success`() = runTest {
         setSubsonicAccount()
-        server.enqueue(mockOk(GENRES_OK_FIXTURE))
+        server.enqueue(mockSlow(GENRES_OK_FIXTURE))
 
         viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
@@ -682,8 +694,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -703,8 +714,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -719,8 +729,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
-            awaitItem() // Loading
-            val result = awaitItem()
+            val result = awaitTerminal()
             assertTrue("Expected Error state", result is NavidromeLibraryViewModel.LoadState.Error)
             cancelAndIgnoreRemainingEvents()
         }
@@ -739,7 +748,8 @@ class NavidromeLibraryViewModelTest {
     @Test
     fun `loadGenres is no-op while already Loading`() = runTest {
         setSubsonicAccount()
-        server.enqueue(mockOk(GENRES_OK_FIXTURE))
+        // Delayed response holds the Loading window open for the second call.
+        server.enqueue(mockSlow(GENRES_OK_FIXTURE))
 
         viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
@@ -766,8 +776,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genresState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadGenres()
-            awaitItem() // Loading
-            val errorState = awaitItem()
+            val errorState = awaitTerminal()
             assertTrue("Should be Error state", errorState is NavidromeLibraryViewModel.LoadState.Error)
             cancelAndIgnoreRemainingEvents()
         }
@@ -801,8 +810,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -821,8 +829,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -845,8 +852,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -870,8 +876,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Empty, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -889,8 +894,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -933,8 +937,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.genreTracksState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadSongsByGenre(fakeGenre)
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -999,8 +1002,7 @@ class NavidromeLibraryViewModelTest {
         viewModel.artistsState.test(timeout = 10.seconds) {
             assertEquals(NavidromeLibraryViewModel.LoadState.Idle, awaitItem())
             viewModel.loadArtists()
-            awaitItem() // Loading
-            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitItem())
+            assertEquals(NavidromeLibraryViewModel.LoadState.Loaded, awaitTerminal())
             cancelAndIgnoreRemainingEvents()
         }
     }
