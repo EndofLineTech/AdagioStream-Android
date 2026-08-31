@@ -969,6 +969,34 @@ fun SettingsScreen(
 }
 
 @Composable
+internal fun SxmChannelGroupsSettingsCard(selection: Set<String>?, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("SiriusXM Channel Groups", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    sxmSelectionSummary(selection),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Edit SiriusXM Channel Groups",
+            )
+        }
+    }
+}
+
+@Composable
 internal fun SectionHeader(title: String) {
     Text(
         text = title,

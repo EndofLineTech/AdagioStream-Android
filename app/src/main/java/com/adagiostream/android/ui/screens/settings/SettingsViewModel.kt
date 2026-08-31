@@ -171,9 +171,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun toggleSxmChannelGroup(groupName: String) {
-        viewModelScope.launch {
-            accountManager.toggleSxmChannelGroup(groupName)
-        }
+        accountManager.requestToggleSxmChannelGroup(groupName)
     }
 
     fun clearSxmSelectionSaveError() {
@@ -326,7 +324,10 @@ class SettingsViewModel @Inject constructor(
         _isExporting.value = true
         viewModelScope.launch {
             try {
-                val prettyJson = Json { prettyPrint = true }
+                val prettyJson = Json {
+                    prettyPrint = true
+                    encodeDefaults = true
+                }
                 val accounts = accountManager.accounts.value
                 val favorites = accountManager.channels.value.filter { it.isFavorite }.map { it.id }
                 val lovedTracks = persistenceService.loadLovedTracks()

@@ -39,6 +39,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -135,6 +137,32 @@ fun SxmChannelGroupsScreen(
     var query by rememberSaveable { mutableStateOf("") }
     val state = buildSxmGroupEditorState(inventory, selection, query, saveError)
 
+    SxmChannelGroupsContent(
+        state = state,
+        query = query,
+        migrationPending = selection == null,
+        onQueryChange = { query = it },
+        onToggle = viewModel::toggleSxmChannelGroup,
+        onRetryInventory = viewModel::retrySxmChannelGroupInventory,
+        onRetryMigration = viewModel::retrySxmSelectionMigration,
+        onDismissSaveError = viewModel::clearSxmSelectionSaveError,
+        onBack = onBack,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SxmChannelGroupsContent(
+    state: SxmGroupEditorState,
+    query: String = "",
+    migrationPending: Boolean = false,
+    onQueryChange: (String) -> Unit = {},
+    onToggle: (String) -> Unit = {},
+    onRetryInventory: () -> Unit = {},
+    onRetryMigration: () -> Unit = {},
+    onDismissSaveError: () -> Unit = {},
+    onBack: () -> Unit = {},
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -169,7 +197,7 @@ fun SxmChannelGroupsScreen(
                 item {
                     OutlinedTextField(
                         value = query,
-                        onValueChange = { query = it },
+                        onValueChange = onQueryChange,
                         label = { Text("Search channel groups") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -177,12 +205,11 @@ fun SxmChannelGroupsScreen(
                 }
                 state.saveError?.let { message ->
                     item {
-                        val migrationFailed = selection == null
-                        ErrorCard(message, actionLabel = if (migrationFailed) "Retry" else "Dismiss") {
-                            if (migrationFailed) {
-                                viewModel.retrySxmSelectionMigration()
+                        ErrorCard(message, actionLabel = if (migrationPending) "Retry" else "Dismiss") {
+                            if (migrationPending) {
+                                onRetryMigration()
                             } else {
-                                viewModel.clearSxmSelectionSaveError()
+                                onDismissSaveError()
                             }
                         }
                     }
@@ -190,7 +217,7 @@ fun SxmChannelGroupsScreen(
                 state.inventoryWarning?.let { message ->
                     item {
                         ErrorCard(message, actionLabel = "Retry") {
-                            viewModel.retrySxmChannelGroupInventory()
+                            onRetryInventory()
                         }
                     }
                 }
@@ -198,7 +225,7 @@ fun SxmChannelGroupsScreen(
                     item { Text("Available Groups", style = MaterialTheme.typography.titleMedium) }
                     items(state.available, key = { "available:${it.name}" }) { option ->
                         SxmGroupRow(option, enabled = state.editable) {
-                            viewModel.toggleSxmChannelGroup(option.name)
+                            onToggle(option.name)
                         }
                     }
                 }
@@ -215,7 +242,7 @@ fun SxmChannelGroupsScreen(
                     }
                     items(state.unavailable, key = { "unavailable:${it.name}" }) { option ->
                         SxmGroupRow(option, enabled = state.editable) {
-                            viewModel.toggleSxmChannelGroup(option.name)
+                            onToggle(option.name)
                         }
                     }
                 }
@@ -234,13 +261,13 @@ fun SxmChannelGroupsScreen(
                         }
                         SxmGroupEditorState.NoAccounts -> EmptyInventory(
                             "No channel accounts",
-                            "Add or enable an M3U or Xtream Codes account to load channel groups.",
-                            viewModel::retrySxmChannelGroupInventory,
+                            "Add an M3U or Xtream Codes account to load channel groups.",
+                            onRetryInventory,
                         )
                         SxmGroupEditorState.NoGroups -> EmptyInventory(
                             "No channel groups",
                             "The complete inventory loaded, but it contains no groups.",
-                            viewModel::retrySxmChannelGroupInventory,
+                            onRetryInventory,
                         )
                         is SxmGroupEditorState.Groups -> Unit
                     }
@@ -261,6 +288,7 @@ private fun SxmGroupRow(option: SxmGroupOption, enabled: Boolean, onToggle: () -
                 role = Role.Checkbox
                 contentDescription = "${option.name}, $countText"
                 stateDescription = if (option.selected) "Selected" else "Not selected"
+                toggleableState = if (option.selected) ToggleableState.On else ToggleableState.Off
             }
             .clickable(enabled = enabled, role = Role.Checkbox, onClick = onToggle),
     ) {

@@ -211,7 +211,7 @@ class SettingsViewModelTest {
         vm.toggleSxmChannelGroup("Arbitrary Group")
         advanceUntilIdle()
 
-        coVerify { accountManager.toggleSxmChannelGroup("Arbitrary Group") }
+        verify { accountManager.requestToggleSxmChannelGroup("Arbitrary Group") }
     }
 
     @Test
@@ -247,5 +247,26 @@ class SettingsViewModelTest {
             .map { it.jsonPrimitive.content }
             .toSet()
         assertEquals(selected, exported)
+    }
+
+    @Test
+    fun `data export includes explicit empty SXM group selection`() = runTest {
+        val persisted = AppSettings(sxmChannelGroups = emptySet())
+        every { persistenceService.loadSettingsSync() } returns persisted
+        coEvery { persistenceService.loadSettings() } returns persisted
+        coEvery { persistenceService.loadLovedTracks() } returns emptyList()
+        coEvery { persistenceService.loadCustomPlaylists() } returns emptyList()
+        every { accountManager.accounts } returns MutableStateFlow(emptyList())
+        every { accountManager.channels } returns MutableStateFlow(emptyList())
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.exportMyData()
+        advanceUntilIdle()
+
+        val settings = Json.parseToJsonElement(requireNotNull(vm.exportJson.value))
+            .jsonObject.getValue("settings").jsonObject
+        assertTrue(settings.containsKey("sxmChannelGroups"))
+        assertTrue(settings.getValue("sxmChannelGroups").jsonArray.isEmpty())
     }
 }

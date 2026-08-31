@@ -20,6 +20,7 @@ android {
         applicationId = "com.adagiostream.android"
         minSdk = 26
         targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 129
         versionName = "1.0(129)"
         ndk {
@@ -96,6 +97,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.extended)
     debugImplementation(libs.compose.ui.tooling)
+    debugImplementation(libs.compose.ui.test.manifest)
 
     // AndroidX
     implementation(libs.core.ktx)
@@ -156,4 +158,9 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.mockwebserver)
     testImplementation(libs.room.testing)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.espresso.core)
 }

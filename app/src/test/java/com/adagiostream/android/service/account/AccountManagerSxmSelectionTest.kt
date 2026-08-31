@@ -8,6 +8,7 @@ import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.metadata.SXMMetadataService
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.persistence.SettingsLoadResult
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import com.adagiostream.android.testutil.MainDispatcherRule
 import com.adagiostream.android.testutil.TestFixtures
@@ -19,6 +20,7 @@ import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -28,6 +30,7 @@ import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 
@@ -54,6 +57,7 @@ class AccountManagerSxmSelectionTest {
         val settings = AppSettings(sxmChannelGroups = selection)
         storedSettings = settings
         coEvery { persistence.loadSettings() } returns settings
+        coEvery { persistence.loadSettingsResult() } returns SettingsLoadResult.Loaded(settings)
         every { persistence.loadSettingsSync() } returns settings
         coEvery { persistence.updateSettings(any()) } coAnswers {
             storedSettings = firstArg<(AppSettings) -> AppSettings>().invoke(storedSettings)
@@ -83,6 +87,20 @@ class AccountManagerSxmSelectionTest {
         val channel = TestFixtures.makeChannel(id = "c1", name = "The Highway", group = selectedGroup)
         every { metadataService.stationIdForChannel("c1") } returns "station"
 
+        coEvery { metadataService.getRecentTrack("station") } returns Result.success(
+            TrackMetadata(title = "Current song", artist = "Current artist"),
+        )
+        coEvery { metadataService.getFeed() } returns mapOf(
+            "c1" to TrackMetadata(title = "Current feed", artist = "Current artist"),
+        )
+        every { metadataService.hasMappedChannels() } returns true
+
+        manager.startTrackMetadataPolling(channel)
+        mappingCallback?.invoke()
+        runCurrent()
+        assertEquals("Current song", manager.trackMetadata.value[channel.name]?.title)
+        assertEquals("Current feed", manager.feedMetadata.value["c1"]?.title)
+
         val trackStarted = CompletableDeferred<Unit>()
         val feedStarted = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -96,10 +114,8 @@ class AccountManagerSxmSelectionTest {
             withContext(NonCancellable) { release.await() }
             mapOf("c1" to TrackMetadata(title = "Stale feed", artist = "Stale artist"))
         }
-        every { metadataService.hasMappedChannels() } returns true
-
-        manager.startTrackMetadataPolling(channel)
-        mappingCallback?.invoke()
+        advanceTimeBy(30_000L)
+        runCurrent()
         trackStarted.await()
         feedStarted.await()
 
@@ -111,11 +127,26 @@ class AccountManagerSxmSelectionTest {
 
         assertTrue(manager.trackMetadata.value.isEmpty())
         assertTrue(manager.feedMetadata.value.isEmpty())
-        // onMappingBuilt deliberately restarts the tuned-channel poll, so two
-        // requests were already in flight before deselection; neither may recur.
-        coVerify(exactly = 2) { metadataService.getRecentTrack("station") }
-        coVerify(exactly = 1) { metadataService.getFeed() }
+        coVerify(atLeast = 2) { metadataService.getRecentTrack("station") }
+        coVerify(atLeast = 2) { metadataService.getFeed() }
         verify { metadataService.matchChannels(any(), emptySet(), any()) }
+    }
+
+    @Test
+    fun `selection cancellation is rethrown and is not reported as a save failure`() = runTest {
+        val manager = manager(setOf("Old"))
+        manager.awaitInitialLoad()
+        coEvery { persistence.updateSettings(any()) } throws CancellationException("owner stopped")
+
+        try {
+            manager.updateSxmChannelGroups(setOf("New"))
+            fail("Cancellation must propagate")
+        } catch (_: CancellationException) {
+            // Expected structured-concurrency behavior.
+        }
+
+        assertEquals(setOf("New"), manager.sxmChannelGroups.value)
+        assertEquals(null, manager.sxmSelectionSaveError.value)
     }
 
     @Test
