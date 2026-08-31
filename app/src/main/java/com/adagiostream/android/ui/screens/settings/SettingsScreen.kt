@@ -79,6 +79,7 @@ fun SettingsScreen(
     onNavigateToLicenses: (() -> Unit)? = null,
     onNavigateToPrivacyPolicy: (() -> Unit)? = null,
     onNavigateToDownloads: (() -> Unit)? = null,
+    onNavigateToSxmChannelGroups: (() -> Unit)? = null,
     onDataDeleted: (() -> Unit)? = null,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -89,6 +90,7 @@ fun SettingsScreen(
     val bitrateKbps by viewModel.bitrateKbps.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val favoriteChannels by viewModel.favoriteChannels.collectAsStateWithLifecycle()
+    val sxmChannelGroups by viewModel.sxmChannelGroups.collectAsStateWithLifecycle()
     var showClearFavoritesDialog by remember { mutableStateOf(false) }
     var showDeleteStep1 by remember { mutableStateOf(false) }
     var showDeleteStep2 by remember { mutableStateOf(false) }
@@ -493,6 +495,43 @@ fun SettingsScreen(
         )
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Live Data",
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (onNavigateToSxmChannelGroups != null) {
+            Card(
+                onClick = onNavigateToSxmChannelGroups,
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("SiriusXM Channel Groups", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            sxmSelectionSummary(sxmChannelGroups),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Edit SiriusXM Channel Groups",
+                    )
+                }
+            }
+            FooterText("Choose which raw channel groups can use SiriusXM now-playing data.")
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         Text(
             text = "Live Sports Score Updates",

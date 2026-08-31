@@ -381,7 +381,10 @@ class MusicPlaybackCoordinatorTest {
         every { ps.loadSettingsSync() } answers { stored }
         every { ps.settings } returns kotlinx.coroutines.flow.MutableStateFlow(initial)
         coEvery { ps.loadSettings() } coAnswers { stored }
-        coEvery { ps.saveSettings(any()) } coAnswers { stored = firstArg(); Unit }
+        coEvery { ps.updateSettings(any()) } coAnswers {
+            stored = firstArg<(AppSettings) -> AppSettings>().invoke(stored)
+            stored
+        }
         return ps
     }
 

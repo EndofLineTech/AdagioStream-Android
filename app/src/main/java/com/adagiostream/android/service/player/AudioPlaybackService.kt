@@ -602,7 +602,7 @@ class AudioPlaybackService : MediaLibraryService() {
                 val playlistId = lastBrowsedParentId!!.removePrefix(CUSTOM_PLAYLIST_PREFIX)
                 customPlaylistManager.playlists.value
                     .find { it.id == playlistId }
-                    ?.groups?.flatMap { g -> g.entries.map { it.asChannel() } }
+                    ?.groups?.flatMap { g -> g.entries.map { it.asChannel(g.name) } }
                     ?: listOf(channel)
             }
             lastBrowsedParentId!!.startsWith(CUSTOM_GROUP_PREFIX) -> {
@@ -610,7 +610,7 @@ class AudioPlaybackService : MediaLibraryService() {
                 customPlaylistManager.playlists.value
                     .flatMap { it.groups }
                     .find { it.id == groupId }
-                    ?.entries?.map { it.asChannel() }
+                    ?.let { group -> group.entries.map { it.asChannel(group.name) } }
                     ?: listOf(channel)
             }
             else -> {
@@ -629,7 +629,7 @@ class AudioPlaybackService : MediaLibraryService() {
                         playlist.groups.any { g -> g.entries.any { it.id == channel.id } }
                     }
                     if (customPlaylist != null) {
-                        customPlaylist.groups.flatMap { g -> g.entries.map { it.asChannel() } }
+                        customPlaylist.groups.flatMap { g -> g.entries.map { it.asChannel(g.name) } }
                     } else {
                         channels.filter { it.group == channel.group }
                     }
@@ -867,9 +867,9 @@ class AudioPlaybackService : MediaLibraryService() {
                 val allChannels = accountManager.channels.value
                 DebugLogger.log("  Channel pool: ${allChannels.size} channels loaded", AUTO)
                 val customChannels = customPlaylistManager.playlists.value
-                    .flatMap { it.groups }
-                    .flatMap { it.entries }
-                    .map { it.asChannel() }
+                    .flatMap { playlist ->
+                        playlist.groups.flatMap { group -> group.entries.map { it.asChannel(group.name) } }
+                    }
                 val allSearchable = allChannels + customChannels
                 val resolved = mediaItems.map { item ->
                     val byId = allSearchable.find { it.id == item.mediaId }
@@ -1126,7 +1126,8 @@ class AudioPlaybackService : MediaLibraryService() {
                             val playlist = customPlaylistManager.playlists.value.find { it.id == playlistId }
                             if (playlist != null && playlist.groups.size == 1) {
                                 // Single group: show entries directly
-                                playlist.groups.first().entries.map { buildPlayableItem(it.asChannel()) }
+                                val group = playlist.groups.first()
+                                group.entries.map { buildPlayableItem(it.asChannel(group.name)) }
                             } else {
                                 playlist?.groups?.filter { it.entries.isNotEmpty() }?.map { group ->
                                     buildBrowsableItem(
@@ -1142,8 +1143,9 @@ class AudioPlaybackService : MediaLibraryService() {
                             customPlaylistManager.playlists.value
                                 .flatMap { it.groups }
                                 .find { it.id == groupId }
-                                ?.entries
-                                ?.map { buildPlayableItem(it.asChannel()) }
+                                ?.let { group ->
+                                    group.entries.map { buildPlayableItem(it.asChannel(group.name)) }
+                                }
                                 ?: emptyList()
                         }
                         else -> {
@@ -1169,9 +1171,9 @@ class AudioPlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<Void>> {
             DebugLogger.log("onSearch() - query='$query' from ${browser.packageName}", AUTO)
             val customChannels = customPlaylistManager.playlists.value
-                .flatMap { it.groups }
-                .flatMap { it.entries }
-                .map { it.asChannel() }
+                .flatMap { playlist ->
+                    playlist.groups.flatMap { group -> group.entries.map { it.asChannel(group.name) } }
+                }
             val results = (accountManager.channels.value + customChannels)
                 .filter { it.name.contains(query, ignoreCase = true) }
                 .map { buildPlayableItem(it) }
@@ -1193,9 +1195,9 @@ class AudioPlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             DebugLogger.log("onGetSearchResult() - query='$query', page=$page, pageSize=$pageSize from ${browser.packageName}", AUTO)
             val customChannels = customPlaylistManager.playlists.value
-                .flatMap { it.groups }
-                .flatMap { it.entries }
-                .map { it.asChannel() }
+                .flatMap { playlist ->
+                    playlist.groups.flatMap { group -> group.entries.map { it.asChannel(group.name) } }
+                }
             val results = (accountManager.channels.value + customChannels)
                 .filter { it.name.contains(query, ignoreCase = true) }
                 .map { buildPlayableItem(it) }

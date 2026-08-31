@@ -39,7 +39,7 @@ class FavoritesViewModel @Inject constructor(
         val customFavs = playlists.flatMap { playlist ->
             playlist.groups.flatMap { group ->
                 group.entries.map { entry ->
-                    val ch = entry.asChannel().copy(group = group.name)
+                    val ch = entry.asChannel(group.name)
                     ch.copy(isFavorite = true)
                 }.filter { accountManager.favoriteKey(it) in favKeys }
             }

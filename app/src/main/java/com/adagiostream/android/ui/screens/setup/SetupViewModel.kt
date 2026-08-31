@@ -133,8 +133,7 @@ class SetupViewModel @Inject constructor(
 
     fun skip() {
         viewModelScope.launch {
-            val settings = persistenceService.loadSettings()
-            persistenceService.saveSettings(settings.copy(setupCompleted = true))
+            persistenceService.updateSettings { it.copy(setupCompleted = true) }
             _setupComplete.value = true
         }
     }
@@ -180,8 +179,7 @@ class SetupViewModel @Inject constructor(
                     _currentStep.value = SetupStep.GROUP_SELECTION
                 } else {
                     // No groups found, skip to finish
-                    val settings = persistenceService.loadSettings()
-                    persistenceService.saveSettings(settings.copy(setupCompleted = true))
+                    persistenceService.updateSettings { it.copy(setupCompleted = true) }
                     _setupComplete.value = true
                 }
             } catch (e: Exception) {
@@ -206,8 +204,7 @@ class SetupViewModel @Inject constructor(
 
     fun finishSetup() {
         viewModelScope.launch {
-            val settings = persistenceService.loadSettings()
-            persistenceService.saveSettings(settings.copy(setupCompleted = true))
+            persistenceService.updateSettings { it.copy(setupCompleted = true) }
             _setupComplete.value = true
         }
     }

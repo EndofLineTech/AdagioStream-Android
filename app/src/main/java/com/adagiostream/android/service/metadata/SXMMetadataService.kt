@@ -47,6 +47,7 @@ class SXMMetadataService(
 
     /** Channels from the last matchChannels() call, retained so sourceChanged() can re-match. */
     private var lastMatchedChannels: List<Channel> = emptyList()
+    private var lastSelectedGroups: Set<String> = emptySet()
     private var lastSortPrefixes: List<String> = listOf("Radio: ", "TV: ")
 
     /**
@@ -95,19 +96,21 @@ class SXMMetadataService(
      */
     fun matchChannels(
         channels: List<Channel>,
+        selectedGroups: Set<String>,
         sortPrefixes: List<String> = listOf("Radio: ", "TV: "),
     ) {
         matchGeneration += 1
+        matchJob?.cancel()
+        matchJob = null
+        channelStationMap = emptyMap()
+        stationToChannelIds = emptyMap()
         lastMatchedChannels = channels
+        lastSelectedGroups = selectedGroups
         lastSortPrefixes = sortPrefixes
 
-        val sxmPattern = Regex("(?i)\\b(siriusxm|sirius\\s*xm|sxm|sirius|xm)\\b")
-        val sxmChannels = channels.filter { sxmPattern.containsMatchIn(it.group) }
+        val sxmChannels = channels.filter { it.group in selectedGroups }
         if (sxmChannels.isEmpty()) {
-            DebugLogger.log("No SXM channels found in ${channels.size} channels", DebugLogger.Category.SXM)
-            // The generation bump above already superseded any in-flight loop;
-            // don't leave matchJob pointing at it.
-            matchJob = null
+            DebugLogger.log("No channels are in selected SXM groups", DebugLogger.Category.SXM)
             return
         }
         DebugLogger.log("Found ${sxmChannels.size} SXM channels, fetching ${source.serialName} station list...", DebugLogger.Category.SXM)
@@ -171,7 +174,7 @@ class SXMMetadataService(
         stationToChannelIds = emptyMap()
         xmPlaylistApi.clearHistory()
         stellarTunerLogApi.clearHistory()
-        matchChannels(lastMatchedChannels, lastSortPrefixes)
+        matchChannels(lastMatchedChannels, lastSelectedGroups, lastSortPrefixes)
     }
 
     // MARK: - Lookups & Metadata

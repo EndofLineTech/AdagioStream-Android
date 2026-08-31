@@ -67,6 +67,7 @@ import com.adagiostream.android.ui.screens.nowplaying.NowPlayingSheet
 import com.adagiostream.android.ui.screens.nowplaying.NowPlayingViewModel
 import com.adagiostream.android.ui.screens.settings.SettingsScreen
 import com.adagiostream.android.ui.screens.settings.SettingsViewModel
+import com.adagiostream.android.ui.screens.settings.SxmChannelGroupsScreen
 import com.adagiostream.android.ui.screens.setup.SetupScreen
 import com.adagiostream.android.ui.theme.AdagioStreamTheme
 
@@ -453,6 +454,9 @@ fun MainScreen(
                         onNavigateToDownloads = {
                             navController.navigate(Screen.DownloadedMusic.route)
                         },
+                        onNavigateToSxmChannelGroups = {
+                            navController.navigate(Screen.SxmChannelGroups.route)
+                        },
                         onNavigateToGroups = {
                             navController.navigate(Screen.Groups.route)
                         },
@@ -468,6 +472,11 @@ fun MainScreen(
                                 popUpTo(0) { inclusive = true }
                             }
                         },
+                    )
+                }
+                composable(Screen.SxmChannelGroups.route) {
+                    SxmChannelGroupsScreen(
+                        onBack = { navController.popBackStack() },
                     )
                 }
                 composable(Screen.Groups.route) {

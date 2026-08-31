@@ -86,6 +86,12 @@ data class AppSettings(
      */
     val sxmPollIntervalSeconds: Int = SXM_POLL_INTERVAL_DEFAULT,
     /**
+     * Exact raw channel-group names eligible for SiriusXM metadata. `null` is
+     * reserved for an upgraded install waiting for its one-time migration;
+     * an empty set is an initialized choice that disables all SXM requests.
+     */
+    val sxmChannelGroups: Set<String>? = emptySet(),
+    /**
      * Whether a live ESPN game outranks SiriusXM track metadata on the
      * now-playing display for a channel carrying that game
      * (beads_adagio-59p.3.3, iOS parity: `SXMSportsPriority`). Default true so
@@ -131,6 +137,23 @@ data class AppSettings(
         /** Clamp a stored poll interval into the allowed 10–45s range. */
         fun clampSxmPollInterval(seconds: Int): Int =
             seconds.coerceIn(SXM_POLL_INTERVAL_OPTIONS.first(), SXM_POLL_INTERVAL_OPTIONS.last())
+    }
+}
+
+object SxmChannelGroupPolicy {
+    private val legacyMatcher = Regex("(?i)\\b(siriusxm|sirius\\s*xm|sxm|sirius|xm)\\b")
+
+    fun legacySelection(rawGroupNames: Set<String>): Set<String> =
+        rawGroupNames.filterTo(linkedSetOf()) { legacyMatcher.containsMatchIn(it) }
+
+    /** A null inventory means loading was absent, failed, or partial. */
+    fun migrateIfNeeded(
+        currentSelection: Set<String>?,
+        completeRawGroupNames: Set<String>?,
+    ): Set<String>? = when {
+        currentSelection != null -> currentSelection
+        completeRawGroupNames == null -> null
+        else -> legacySelection(completeRawGroupNames)
     }
 }
 

@@ -201,10 +201,9 @@ class MusicPlaybackCoordinator @Inject constructor(
     private fun persistPlaybackSettings() {
         val ps = persistenceService ?: return
         scope.launch {
-            val current = ps.loadSettings()
-            ps.saveSettings(
-                current.copy(shuffleEnabled = queue.shuffleEnabled, repeatMode = queue.repeatMode),
-            )
+            ps.updateSettings { current ->
+                current.copy(shuffleEnabled = queue.shuffleEnabled, repeatMode = queue.repeatMode)
+            }
         }
     }
 

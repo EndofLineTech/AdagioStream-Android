@@ -23,11 +23,32 @@ class CustomPlaylistManager @Inject constructor(
 
     private val _playlists = MutableStateFlow<List<CustomPlaylist>>(emptyList())
     val playlists: StateFlow<List<CustomPlaylist>> = _playlists.asStateFlow()
+    private val _isLoaded = MutableStateFlow(false)
+    val isLoaded: StateFlow<Boolean> = _isLoaded.asStateFlow()
+    private val _loadError = MutableStateFlow<String?>(null)
+    val loadError: StateFlow<String?> = _loadError.asStateFlow()
 
     init {
+        loadPlaylists()
+    }
+
+    private fun loadPlaylists() {
+        _isLoaded.value = false
+        _loadError.value = null
         scope.launch {
-            _playlists.value = persistenceService.loadCustomPlaylists()
+            try {
+                persistenceService.loadCustomPlaylistsResult()
+                    .onSuccess { _playlists.value = it }
+                    .onFailure { _loadError.value = "Custom channel groups could not be loaded." }
+            } finally {
+                _isLoaded.value = true
+            }
         }
+    }
+
+    fun retryLoad() {
+        if (!_isLoaded.value) return
+        loadPlaylists()
     }
 
     private fun persist() {
@@ -68,6 +89,11 @@ class CustomPlaylistManager @Inject constructor(
             val item = removeAt(fromIndex)
             add(toIndex, item)
         }
+    }
+
+    fun resetAll() {
+        _playlists.value = emptyList()
+        _loadError.value = null
     }
 
     // Group operations

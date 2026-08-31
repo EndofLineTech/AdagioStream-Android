@@ -46,6 +46,7 @@ sealed class Screen(
     data object Loved : Screen("loved", "Loved", Icons.Default.MusicNote)
     data object Accounts : Screen("accounts", "Accounts", Icons.Default.Storage)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+    data object SxmChannelGroups : Screen("settings/sxm-channel-groups", "SiriusXM Channel Groups", Icons.Default.Radio)
     data object Groups : Screen("groups", "Groups", Icons.Default.Folder)
     /** Custom M3U playlists. Route stays "my_m3us" (beads_adagio-15x.2 renames the label only). */
     data object MyM3Us : Screen("my_m3us", "Custom M3Us", Icons.AutoMirrored.Filled.PlaylistPlay)

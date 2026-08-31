@@ -17,6 +17,13 @@ publishes the signed AAB automatically when a `v*` tag is pushed.
 
 ### Added
 
+- **Explicit SiriusXM channel groups** — Choose exact raw channel-group names
+  under Settings → Playback → Live Data to control which channels may use
+  SiriusXM now-playing services. Selection is device-local, searchable, and
+  independent of group visibility or display grouping; unavailable selected
+  names remain removable. Existing installs migrate the legacy SiriusXM group
+  matches once after a complete inventory, while new installs start with none.
+
 - **Audiobookshelf support** — Connect an Audiobookshelf server as a new
   account type, with username/password or OpenID (SSO) sign-in. Browse your
   book libraries with a Continue Listening shelf, and play with full

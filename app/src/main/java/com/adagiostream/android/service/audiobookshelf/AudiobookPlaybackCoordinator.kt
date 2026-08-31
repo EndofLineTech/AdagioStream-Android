@@ -757,8 +757,7 @@ class AudiobookPlaybackCoordinator(
     private fun persistSpeed(value: Float) {
         val ps = persistenceService ?: return
         scope.launch {
-            val current = ps.loadSettings()
-            ps.saveSettings(current.copy(audiobookSpeed = value))
+            ps.updateSettings { it.copy(audiobookSpeed = value) }
         }
     }
 

@@ -15,6 +15,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -25,6 +26,12 @@ import javax.crypto.spec.GCMParameterSpec
 class PersistenceService(
     private val context: Context,
     private val json: Json,
+    private val isUpgradeInstall: () -> Boolean = {
+        runCatching {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.lastUpdateTime > packageInfo.firstInstallTime
+        }.getOrDefault(false)
+    },
 ) {
     private val mutex = Mutex()
 
@@ -180,12 +187,32 @@ class PersistenceService(
     fun loadSettingsSync(): AppSettings {
         return try {
             if (settingsFile.exists()) {
-                json.decodeFromString<AppSettings>(settingsFile.readText())
+                val raw = settingsFile.readText()
+                val decoded = json.decodeFromString<AppSettings>(raw)
+                if ("sxmChannelGroups" in json.parseToJsonElement(raw).jsonObject) {
+                    decoded
+                } else {
+                    // Existing settings predate explicit group selection.
+                    decoded.copy(sxmChannelGroups = null)
+                }
             } else {
-                AppSettings()
+                val upgraded = isUpgradeInstall() || listOf(
+                    encryptedAccountsFile,
+                    favoritesFile,
+                    lovedTracksFile,
+                    lastPlayedFile,
+                    customPlaylistsFile,
+                ).any { it.exists() }
+                val initial = AppSettings(
+                    sxmChannelGroups = if (upgraded) null else emptySet(),
+                )
+                // Persist install classification before account/setup writes can
+                // make a fresh install look like an upgrade on the next launch.
+                settingsFile.writeText(json.encodeToString(initial))
+                initial
             }
         } catch (_: Exception) {
-            AppSettings()
+            AppSettings(sxmChannelGroups = null)
         }
     }
 
@@ -196,6 +223,13 @@ class PersistenceService(
     suspend fun saveSettings(settings: AppSettings) = mutex.withLock {
         settingsFile.writeText(json.encodeToString(settings))
         _settings.value = settings
+    }
+
+    suspend fun updateSettings(transform: (AppSettings) -> AppSettings): AppSettings = mutex.withLock {
+        val updated = transform(loadSettingsSync())
+        settingsFile.writeText(json.encodeToString(updated))
+        _settings.value = updated
+        updated
     }
 
     suspend fun clearAllFavorites() = mutex.withLock {
@@ -305,16 +339,20 @@ class PersistenceService(
     private val customPlaylistsFile: File
         get() = File(context.filesDir, "custom_playlists.json")
 
-    suspend fun loadCustomPlaylists(): List<CustomPlaylist> = mutex.withLock {
-        try {
-            if (customPlaylistsFile.exists()) {
-                json.decodeFromString<List<CustomPlaylist>>(customPlaylistsFile.readText())
-            } else {
-                emptyList()
-            }
-        } catch (_: Exception) {
+    private fun readCustomPlaylists(): List<CustomPlaylist> =
+        if (customPlaylistsFile.exists()) {
+            json.decodeFromString<List<CustomPlaylist>>(customPlaylistsFile.readText())
+        } else {
             emptyList()
         }
+
+    suspend fun loadCustomPlaylists(): List<CustomPlaylist> = mutex.withLock {
+        runCatching { readCustomPlaylists() }.getOrDefault(emptyList())
+    }
+
+    /** Preserves load failure so complete-inventory migration cannot consume partial local data. */
+    suspend fun loadCustomPlaylistsResult(): Result<List<CustomPlaylist>> = mutex.withLock {
+        runCatching { readCustomPlaylists() }
     }
 
     suspend fun saveCustomPlaylists(playlists: List<CustomPlaylist>) = mutex.withLock {
@@ -355,5 +393,11 @@ class PersistenceService(
         context.filesDir.listFiles()?.forEach { file ->
             if (file.name.endsWith(".tmp")) file.delete()
         }
+
+        // A user-requested reset is a fresh start even when PackageManager still
+        // reports that this package was upgraded in the past.
+        val resetSettings = AppSettings(sxmChannelGroups = emptySet())
+        settingsFile.writeText(json.encodeToString(resetSettings))
+        _settings.value = resetSettings
     }
 }

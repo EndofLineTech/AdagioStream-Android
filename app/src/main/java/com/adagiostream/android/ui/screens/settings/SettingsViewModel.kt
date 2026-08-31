@@ -76,6 +76,10 @@ class SettingsViewModel @Inject constructor(
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    val rawChannelGroupInventory = accountManager.rawChannelGroupInventory
+    val sxmChannelGroups = accountManager.sxmChannelGroups
+    val sxmSelectionSaveError = accountManager.sxmSelectionSaveError
+
     val favoritesCount: StateFlow<Int> = accountManager.channels
         .map { channels -> channels.count { it.isFavorite } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
@@ -158,6 +162,32 @@ class SettingsViewModel @Inject constructor(
         // Pass the source directly — save() persists async, so reading it back
         // from disk here could race and re-match against the old source.
         accountManager.sxmSourceChanged(source)
+    }
+
+    fun updateSxmChannelGroups(groupNames: Set<String>) {
+        viewModelScope.launch {
+            accountManager.updateSxmChannelGroups(groupNames)
+        }
+    }
+
+    fun toggleSxmChannelGroup(groupName: String) {
+        viewModelScope.launch {
+            accountManager.toggleSxmChannelGroup(groupName)
+        }
+    }
+
+    fun clearSxmSelectionSaveError() {
+        accountManager.clearSxmSelectionSaveError()
+    }
+
+    fun retrySxmSelectionMigration() {
+        accountManager.retrySxmSelectionMigration()
+    }
+
+    fun retrySxmChannelGroupInventory() {
+        viewModelScope.launch {
+            accountManager.retrySxmChannelGroupInventory()
+        }
     }
 
     /** SXM now-playing poll interval (beads_adagio-59p.3.2); restarts an active poll. */
@@ -395,13 +425,13 @@ class SettingsViewModel @Inject constructor(
             // is a snapshot from construction time, so whole-object saving it
             // would clobber playback state persisted since. Preserve the
             // coordinator-owned fields from disk; save everything else from here.
-            val persisted = persistenceService.loadSettings()
-            persistenceService.saveSettings(
+            persistenceService.updateSettings { persisted ->
                 _settings.value.copy(
                     shuffleEnabled = persisted.shuffleEnabled,
                     repeatMode = persisted.repeatMode,
-                ),
-            )
+                    sxmChannelGroups = persisted.sxmChannelGroups,
+                )
+            }
         }
     }
 }

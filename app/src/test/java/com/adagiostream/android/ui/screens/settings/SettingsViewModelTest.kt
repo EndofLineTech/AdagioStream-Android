@@ -11,12 +11,19 @@ import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.testutil.MainDispatcherRule
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -26,8 +33,12 @@ class SettingsViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
 
+    private val updatedSettings = mutableListOf<AppSettings>()
     private val persistenceService = mockk<PersistenceService>(relaxed = true) {
         coEvery { loadSettings() } returns AppSettings()
+        coEvery { updateSettings(any()) } coAnswers {
+            firstArg<(AppSettings) -> AppSettings>().invoke(AppSettings()).also(updatedSettings::add)
+        }
     }
     private val accountManager = mockk<AccountManager>(relaxed = true)
     private val vlcPlayerWrapper = mockk<VLCPlayerWrapper>(relaxed = true)
@@ -87,7 +98,7 @@ class SettingsViewModelTest {
         advanceUntilIdle()
         vm.updateBufferDuration(10)
         advanceUntilIdle()
-        coVerify { persistenceService.saveSettings(match { it.bufferDurationSeconds == 10 }) }
+        assertTrue(updatedSettings.any { it.bufferDurationSeconds == 10 })
     }
 
     // --- Appearance Mode ---
@@ -106,7 +117,7 @@ class SettingsViewModelTest {
         advanceUntilIdle()
         vm.updateAppearanceMode(AppearanceMode.LIGHT)
         advanceUntilIdle()
-        coVerify { persistenceService.saveSettings(match { it.appearanceMode == AppearanceMode.LIGHT }) }
+        assertTrue(updatedSettings.any { it.appearanceMode == AppearanceMode.LIGHT })
     }
 
     // --- Offline Mode (baw.12) ---
@@ -118,12 +129,12 @@ class SettingsViewModelTest {
         vm.updateOfflineMode(true)
         advanceUntilIdle()
         assertEquals(true, vm.settings.value.offlineMode)
-        coVerify { persistenceService.saveSettings(match { it.offlineMode }) }
+        assertTrue(updatedSettings.any { it.offlineMode })
 
         vm.updateOfflineMode(false)
         advanceUntilIdle()
         assertEquals(false, vm.settings.value.offlineMode)
-        coVerify { persistenceService.saveSettings(match { !it.offlineMode }) }
+        assertTrue(updatedSettings.any { !it.offlineMode })
     }
 
     // --- Tab reorg tip (beads_adagio-15x.4) ---
@@ -138,7 +149,7 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         assertEquals(true, vm.settings.value.hasSeenTabReorgTip)
-        coVerify { persistenceService.saveSettings(match { it.hasSeenTabReorgTip }) }
+        assertTrue(updatedSettings.any { it.hasSeenTabReorgTip })
     }
 
     // --- Text Size ---
@@ -190,5 +201,51 @@ class SettingsViewModelTest {
         val vm = createViewModel()
         advanceUntilIdle()
         assertEquals(12, vm.settings.value.bufferDurationSeconds)
+    }
+
+    @Test
+    fun `SXM group toggle delegates immediate save to account manager`() = runTest {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.toggleSxmChannelGroup("Arbitrary Group")
+        advanceUntilIdle()
+
+        coVerify { accountManager.toggleSxmChannelGroup("Arbitrary Group") }
+    }
+
+    @Test
+    fun `SXM inventory retry delegates provider and custom reload`() = runTest {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.retrySxmChannelGroupInventory()
+        advanceUntilIdle()
+
+        coVerify { accountManager.retrySxmChannelGroupInventory() }
+    }
+
+    @Test
+    fun `data export includes exact SXM group selection in settings`() = runTest {
+        val selected = setOf("SiriusXM", "Arbitrary Group")
+        val persisted = AppSettings(sxmChannelGroups = selected)
+        every { persistenceService.loadSettingsSync() } returns persisted
+        coEvery { persistenceService.loadSettings() } returns persisted
+        coEvery { persistenceService.loadLovedTracks() } returns emptyList()
+        coEvery { persistenceService.loadCustomPlaylists() } returns emptyList()
+        every { accountManager.accounts } returns MutableStateFlow(emptyList())
+        every { accountManager.channels } returns MutableStateFlow(emptyList())
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.exportMyData()
+        advanceUntilIdle()
+
+        val root = Json.parseToJsonElement(requireNotNull(vm.exportJson.value)).jsonObject
+        val exported = root.getValue("settings").jsonObject
+            .getValue("sxmChannelGroups").jsonArray
+            .map { it.jsonPrimitive.content }
+            .toSet()
+        assertEquals(selected, exported)
     }
 }

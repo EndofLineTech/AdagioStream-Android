@@ -47,9 +47,10 @@ class PlaylistDetailViewModel @Inject constructor(
     fun removeEntry(entryId: String, groupId: String) = playlistManager.removeEntry(entryId, groupId, playlistId)
 
     fun playEntry(entry: CustomPlaylistEntry) {
-        val channel = entry.asChannel()
+        val groupName = playlist.value?.groups?.find { group -> group.entries.any { it.id == entry.id } }?.name ?: "Custom"
+        val channel = entry.asChannel(groupName)
         // Build channel list from all entries in the playlist for next/prev
-        val allChannels = playlist.value?.groups?.flatMap { g -> g.entries.map { it.asChannel() } } ?: listOf(channel)
+        val allChannels = playlist.value?.groups?.flatMap { g -> g.entries.map { it.asChannel(g.name) } } ?: listOf(channel)
         vlcPlayer.setChannelList(allChannels)
         vlcPlayer.play(channel)
     }

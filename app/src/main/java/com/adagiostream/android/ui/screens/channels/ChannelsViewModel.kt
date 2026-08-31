@@ -77,7 +77,7 @@ class ChannelsViewModel @Inject constructor(
         val customGroups = playlists.flatMap { playlist ->
             playlist.groups.mapNotNull { group ->
                 val channels = group.entries.map { entry ->
-                    val ch = entry.asChannel().copy(group = group.name)
+                    val ch = entry.asChannel(group.name)
                     ch.copy(isFavorite = accountManager.favoriteKey(ch) in favKeys)
                 }
                 if (channels.isNotEmpty()) ChannelGroup(name = group.name, channels = channels) else null
@@ -132,8 +132,7 @@ class ChannelsViewModel @Inject constructor(
         if (_searchQuery.value.isNotBlank()) return
         _expandedGroups.value = keys
         viewModelScope.launch {
-            val settings = persistenceService.loadSettings()
-            persistenceService.saveSettings(settings.copy(expandedGroups = keys))
+            persistenceService.updateSettings { it.copy(expandedGroups = keys) }
         }
     }
 
@@ -155,7 +154,7 @@ class ChannelsViewModel @Inject constructor(
                 .flatMap { it.groups }
                 .find { it.name == channel.group }
                 ?.entries
-                ?.map { it.asChannel().copy(group = channel.group) }
+                ?.map { it.asChannel(channel.group) }
             ?: emptyList()
         vlcPlayer.setChannelList(groupChannels)
         vlcPlayer.play(channel)
