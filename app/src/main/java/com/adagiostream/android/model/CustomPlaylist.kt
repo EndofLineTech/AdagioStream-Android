@@ -17,12 +17,12 @@ data class CustomPlaylistEntry(
         sourceChannelID = channel.id,
     )
 
-    fun asChannel(): Channel = Channel(
+    fun asChannel(groupName: String): Channel = Channel(
         id = id,
         name = name,
         streamURL = streamURL,
         logoURL = logoURL,
-        group = "Custom",
+        group = groupName,
     )
 }
 

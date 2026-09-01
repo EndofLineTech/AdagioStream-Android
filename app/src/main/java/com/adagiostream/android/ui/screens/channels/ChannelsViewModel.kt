@@ -12,7 +12,9 @@ import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
+import com.adagiostream.android.util.DebugLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -77,7 +79,7 @@ class ChannelsViewModel @Inject constructor(
         val customGroups = playlists.flatMap { playlist ->
             playlist.groups.mapNotNull { group ->
                 val channels = group.entries.map { entry ->
-                    val ch = entry.asChannel().copy(group = group.name)
+                    val ch = entry.asChannel(group.name)
                     ch.copy(isFavorite = accountManager.favoriteKey(ch) in favKeys)
                 }
                 if (channels.isNotEmpty()) ChannelGroup(name = group.name, channels = channels) else null
@@ -132,8 +134,13 @@ class ChannelsViewModel @Inject constructor(
         if (_searchQuery.value.isNotBlank()) return
         _expandedGroups.value = keys
         viewModelScope.launch {
-            val settings = persistenceService.loadSettings()
-            persistenceService.saveSettings(settings.copy(expandedGroups = keys))
+            try {
+                persistenceService.updateSettings { it.copy(expandedGroups = keys) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                DebugLogger.log("Could not persist expanded channel groups", DebugLogger.Category.GENERAL)
+            }
         }
     }
 
@@ -155,7 +162,7 @@ class ChannelsViewModel @Inject constructor(
                 .flatMap { it.groups }
                 .find { it.name == channel.group }
                 ?.entries
-                ?.map { it.asChannel().copy(group = channel.group) }
+                ?.map { it.asChannel(channel.group) }
             ?: emptyList()
         vlcPlayer.setChannelList(groupChannels)
         vlcPlayer.play(channel)

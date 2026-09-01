@@ -56,7 +56,9 @@ class ChannelsViewModelTest {
         }
         val persistenceService = mockk<PersistenceService> {
             coEvery { loadSettings() } returns AppSettings()
-            coEvery { saveSettings(capture(savedSettings)) } returns Unit
+            coEvery { updateSettings(any()) } coAnswers {
+                firstArg<(AppSettings) -> AppSettings>().invoke(AppSettings()).also(savedSettings::add)
+            }
         }
         return ChannelsViewModel(
             accountManager = accountManager,

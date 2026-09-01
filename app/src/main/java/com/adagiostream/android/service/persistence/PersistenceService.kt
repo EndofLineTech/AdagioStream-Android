@@ -15,6 +15,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -22,9 +23,33 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+sealed interface SettingsLoadResult {
+    val settings: AppSettings?
+
+    data class Loaded(override val settings: AppSettings) : SettingsLoadResult
+    data class MigrationUninitialized(override val settings: AppSettings) : SettingsLoadResult
+    data class FreshInstall(override val settings: AppSettings) : SettingsLoadResult
+    data class ExistingInstallWithoutSettings(override val settings: AppSettings) : SettingsLoadResult
+    data class Failure(val cause: Throwable) : SettingsLoadResult {
+        override val settings: AppSettings? = null
+    }
+
+    fun settingsOrThrow(): AppSettings = settings ?: throw SettingsLoadException(
+        (this as Failure).cause,
+    )
+}
+
+class SettingsLoadException(cause: Throwable) : IllegalStateException("Settings could not be loaded", cause)
+
 class PersistenceService(
     private val context: Context,
     private val json: Json,
+    private val isUpgradeInstall: () -> Boolean = {
+        runCatching {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.lastUpdateTime > packageInfo.firstInstallTime
+        }.getOrDefault(false)
+    },
 ) {
     private val mutex = Mutex()
 
@@ -174,28 +199,70 @@ class PersistenceService(
      * changed elsewhere (e.g. the offline-mode toggle in Settings) without
      * re-reading the file.
      */
-    private val _settings by lazy { MutableStateFlow(loadSettingsSync()) }
+    private val _settings by lazy {
+        MutableStateFlow(
+            loadSettingsResultSync().settings ?: AppSettings(sxmChannelGroups = null),
+        )
+    }
     val settings: StateFlow<AppSettings> get() = _settings
 
-    fun loadSettingsSync(): AppSettings {
+    fun loadSettingsResultSync(): SettingsLoadResult {
         return try {
             if (settingsFile.exists()) {
-                json.decodeFromString<AppSettings>(settingsFile.readText())
+                val raw = settingsFile.readText()
+                val decoded = json.decodeFromString<AppSettings>(raw)
+                if ("sxmChannelGroups" in json.parseToJsonElement(raw).jsonObject) {
+                    SettingsLoadResult.Loaded(decoded)
+                } else {
+                    // Existing settings predate explicit group selection.
+                    SettingsLoadResult.MigrationUninitialized(decoded.copy(sxmChannelGroups = null))
+                }
             } else {
-                AppSettings()
+                val existingInstall = isUpgradeInstall() || listOf(
+                    encryptedAccountsFile,
+                    favoritesFile,
+                    lovedTracksFile,
+                    lastPlayedFile,
+                    customPlaylistsFile,
+                ).any { it.exists() }
+                val initial = AppSettings(
+                    sxmChannelGroups = if (existingInstall) null else emptySet(),
+                )
+                // Persist install classification before account/setup writes can
+                // make a fresh install look like an upgrade on the next launch.
+                settingsFile.writeText(json.encodeToString(initial))
+                if (existingInstall) {
+                    SettingsLoadResult.ExistingInstallWithoutSettings(initial)
+                } else {
+                    SettingsLoadResult.FreshInstall(initial)
+                }
             }
-        } catch (_: Exception) {
-            AppSettings()
+        } catch (error: Exception) {
+            SettingsLoadResult.Failure(error)
         }
     }
+
+    fun loadSettingsSync(): AppSettings =
+        loadSettingsResultSync().settings ?: AppSettings(sxmChannelGroups = null)
 
     suspend fun loadSettings(): AppSettings = mutex.withLock {
         loadSettingsSync()
     }
 
+    suspend fun loadSettingsResult(): SettingsLoadResult = mutex.withLock {
+        loadSettingsResultSync()
+    }
+
     suspend fun saveSettings(settings: AppSettings) = mutex.withLock {
         settingsFile.writeText(json.encodeToString(settings))
         _settings.value = settings
+    }
+
+    suspend fun updateSettings(transform: (AppSettings) -> AppSettings): AppSettings = mutex.withLock {
+        val updated = transform(loadSettingsResultSync().settingsOrThrow())
+        settingsFile.writeText(json.encodeToString(updated))
+        _settings.value = updated
+        updated
     }
 
     suspend fun clearAllFavorites() = mutex.withLock {
@@ -305,16 +372,20 @@ class PersistenceService(
     private val customPlaylistsFile: File
         get() = File(context.filesDir, "custom_playlists.json")
 
-    suspend fun loadCustomPlaylists(): List<CustomPlaylist> = mutex.withLock {
-        try {
-            if (customPlaylistsFile.exists()) {
-                json.decodeFromString<List<CustomPlaylist>>(customPlaylistsFile.readText())
-            } else {
-                emptyList()
-            }
-        } catch (_: Exception) {
+    private fun readCustomPlaylists(): List<CustomPlaylist> =
+        if (customPlaylistsFile.exists()) {
+            json.decodeFromString<List<CustomPlaylist>>(customPlaylistsFile.readText())
+        } else {
             emptyList()
         }
+
+    suspend fun loadCustomPlaylists(): List<CustomPlaylist> = mutex.withLock {
+        runCatching { readCustomPlaylists() }.getOrDefault(emptyList())
+    }
+
+    /** Preserves load failure so complete-inventory migration cannot consume partial local data. */
+    suspend fun loadCustomPlaylistsResult(): Result<List<CustomPlaylist>> = mutex.withLock {
+        runCatching { readCustomPlaylists() }
     }
 
     suspend fun saveCustomPlaylists(playlists: List<CustomPlaylist>) = mutex.withLock {
@@ -355,5 +426,11 @@ class PersistenceService(
         context.filesDir.listFiles()?.forEach { file ->
             if (file.name.endsWith(".tmp")) file.delete()
         }
+
+        // A user-requested reset is a fresh start even when PackageManager still
+        // reports that this package was upgraded in the past.
+        val resetSettings = AppSettings(sxmChannelGroups = emptySet())
+        settingsFile.writeText(json.encodeToString(resetSettings))
+        _settings.value = resetSettings
     }
 }

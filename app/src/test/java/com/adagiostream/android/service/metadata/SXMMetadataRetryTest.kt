@@ -50,7 +50,7 @@ class SXMMetadataRetryTest {
         }
         service.retrySleep = { delays.add(it); false }
 
-        service.matchChannels(channels(), emptyList())
+        service.matchChannels(channels(), setOf("SiriusXM"), emptyList())
         service.matchJob?.join()
 
         assertEquals(7, attempts)
@@ -80,12 +80,12 @@ class SXMMetadataRetryTest {
             }
         }
 
-        service.matchChannels(channels(), emptyList())
+        service.matchChannels(channels(), setOf("SiriusXM"), emptyList())
         val firstJob = service.matchJob
         // Prove the first loop is parked before superseding it.
         firstParked.await()
 
-        service.matchChannels(channels(), emptyList())
+        service.matchChannels(channels(), setOf("SiriusXM"), emptyList())
         service.matchJob?.join()
         assertEquals("newest attempt lands", "8206", service.stationIdForChannel("c1"))
 
@@ -112,18 +112,37 @@ class SXMMetadataRetryTest {
                 // A newer matchChannels lands mid-sleep — the sleeping loop
                 // must notice at the post-sleep generation check and exit
                 // without fetching again.
-                service.matchChannels(channels(), emptyList())
+                service.matchChannels(channels(), setOf("SiriusXM"), emptyList())
             }
             false
         }
 
-        service.matchChannels(channels(), emptyList())
+        service.matchChannels(channels(), setOf("SiriusXM"), emptyList())
         val firstJob = service.matchJob
         firstJob?.join() // fails once, sleeps, gets superseded mid-sleep, exits
         service.matchJob?.join() // the superseding loop fetches and builds
 
         assertEquals("stale loop must not fetch again after its sleep", 2, fetchCount)
         assertEquals("8206", service.stationIdForChannel("c1"))
+    }
+
+    @Test
+    fun `empty selection cancels a scheduled retry before another request`() = runTest {
+        val service = makeService(this)
+        var attempts = 0
+        service.stationListFetcher = { attempts++; null }
+        service.retrySleep = {
+            service.matchChannels(channels(), emptySet(), emptyList())
+            false
+        }
+
+        service.matchChannels(channels(), setOf("SiriusXM"), emptyList())
+        val retryingJob = service.matchJob
+        retryingJob?.join()
+
+        assertEquals(1, attempts)
+        assertFalse(service.hasMappedChannels())
+        assertNull(service.matchJob)
     }
 
     // MARK: - Late success re-attach
@@ -141,7 +160,7 @@ class SXMMetadataRetryTest {
             reattachedStationId = service.stationIdForChannel("c1")
         }
 
-        service.matchChannels(channels(), emptyList())
+        service.matchChannels(channels(), setOf("SiriusXM"), emptyList())
         // The loop task has not run yet: the map is still empty at the moment
         // the channel starts playing, so the poll entry point finds no mapping.
         assertNull("no mapping while the map is empty", service.stationIdForChannel("c1"))
@@ -160,7 +179,7 @@ class SXMMetadataRetryTest {
         service.stationListFetcher = { attempts++; null }
         service.retrySleep = { sleeps++; true } // report cancellation
 
-        service.matchChannels(channels(), emptyList())
+        service.matchChannels(channels(), setOf("SiriusXM"), emptyList())
         service.matchJob?.join()
 
         assertEquals("no further fetch attempts after cancellation", 1, attempts)
@@ -178,6 +197,7 @@ class SXMMetadataRetryTest {
 
         service.matchChannels(
             listOf(TestFixtures.makeChannel(id = "c9", name = "News", group = "General")),
+            setOf("SiriusXM"),
             emptyList(),
         )
         service.matchJob?.join()

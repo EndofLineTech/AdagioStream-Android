@@ -37,6 +37,9 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --no-daemon
 
+      - name: Compile instrumentation tests
+        run: ./gradlew assembleDebugAndroidTest --no-daemon
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

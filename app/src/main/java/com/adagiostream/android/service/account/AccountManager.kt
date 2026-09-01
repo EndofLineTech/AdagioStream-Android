@@ -9,6 +9,7 @@ import com.adagiostream.android.model.EPGEntry
 import com.adagiostream.android.model.LovedTrack
 import com.adagiostream.android.model.ChannelGroupingMode
 import com.adagiostream.android.model.SXMMetadataSource
+import com.adagiostream.android.model.SxmChannelGroupPolicy
 import com.adagiostream.android.model.SortMode
 import com.adagiostream.android.model.TrackMetadata
 import com.adagiostream.android.model.ESPNGameInfo
@@ -18,10 +19,14 @@ import com.adagiostream.android.service.parsing.EPGParser
 import com.adagiostream.android.service.parsing.M3UParser
 import com.adagiostream.android.service.parsing.XtreamCodesApi
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.persistence.SettingsLoadResult
+import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import com.adagiostream.android.util.DebugLogger
 import com.adagiostream.android.util.UrlSanitizer
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -29,9 +34,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -41,6 +51,7 @@ class AccountManager @Inject constructor(
     private val client: OkHttpClient,
     private val sxmMetadataService: SXMMetadataService,
     private val espnScoreService: ESPNScoreService,
+    private val customPlaylistManager: CustomPlaylistManager,
 ) : AccountRepository {
     companion object {
         /**
@@ -107,6 +118,27 @@ class AccountManager @Inject constructor(
     private val _feedMetadata = MutableStateFlow<Map<String, TrackMetadata>>(emptyMap())
     val feedMetadata: StateFlow<Map<String, TrackMetadata>> = _feedMetadata.asStateFlow()
     private var feedJob: Job? = null
+    private var sxmRuntimeGeneration = 0
+
+    private val _rawChannelGroupInventory =
+        MutableStateFlow<RawChannelGroupInventory>(RawChannelGroupInventory.Loading)
+    val rawChannelGroupInventory: StateFlow<RawChannelGroupInventory> =
+        _rawChannelGroupInventory.asStateFlow()
+
+    private val _sxmChannelGroups = MutableStateFlow<Set<String>?>(null)
+    val sxmChannelGroups: StateFlow<Set<String>?> = _sxmChannelGroups.asStateFlow()
+
+    private val _sxmSelectionSaveError = MutableStateFlow<String?>(null)
+    val sxmSelectionSaveError: StateFlow<String?> = _sxmSelectionSaveError.asStateFlow()
+
+    private var channelAccountCount = 0
+    private var channelLoadErrors: List<String> = emptyList()
+    private var rawProviderChannels: List<Channel> = emptyList()
+    private var providerInventoryLoaded = false
+    private var settingsReadyForMigration = false
+    private val channelLoadGeneration = AtomicLong(0)
+    private val sxmSelectionMutex = Mutex()
+    private var sxmMigrationJob: Job? = null
 
     private val _lovedTracks = MutableStateFlow<List<LovedTrack>>(emptyList())
     val lovedTracks: StateFlow<List<LovedTrack>> = _lovedTracks.asStateFlow()
@@ -143,12 +175,14 @@ class AccountManager @Inject constructor(
     val espnGames: StateFlow<Map<String, ESPNGameInfo>> = espnScoreService.gamesByChannel
 
     fun resetAll() {
+        customPlaylistManager.resetAll()
         _accounts.value = emptyList()
         _channels.value = emptyList()
         _groups.value = emptyList()
         _allGroupNames.value = emptySet()
         _lovedTracks.value = emptyList()
         _trackMetadata.value = emptyMap()
+        _feedMetadata.value = emptyMap()
         favoriteIds = mutableListOf()
         _favoriteKeys.value = emptySet()
         enabledGroups = null
@@ -158,7 +192,14 @@ class AccountManager @Inject constructor(
         sortMode = SortMode.ALPHABETICAL
         groupSortMode = SortMode.ALPHABETICAL
         groupingMode = ChannelGroupingMode.ALL_GROUPS
-        stopTrackMetadataPolling()
+        channelAccountCount = 0
+        channelLoadErrors = emptyList()
+        rawProviderChannels = emptyList()
+        providerInventoryLoaded = true
+        settingsReadyForMigration = true
+        _sxmChannelGroups.value = emptySet()
+        _rawChannelGroupInventory.value = RawChannelGroupInventory.NoAccounts
+        invalidateSxmRuntime(keepCurrentChannel = false)
     }
 
     private var hasSxmChannels = false
@@ -180,13 +221,19 @@ class AccountManager @Inject constructor(
             currentMetadataChannel?.let { startTrackMetadataPolling(it) }
         }
         scope.launch {
-            val settings = persistenceService.loadSettings()
+            val settingsResult = persistenceService.loadSettingsResult()
+            val settings = settingsResult.settings ?: AppSettings(sxmChannelGroups = null)
+            settingsReadyForMigration = settingsResult !is SettingsLoadResult.Failure
+            if (!settingsReadyForMigration) {
+                _sxmSelectionSaveError.value = "Settings could not be loaded. SiriusXM group migration is paused."
+            }
             sortPrefixes = settings.sortPrefixes
             sortMode = settings.sortMode
             groupSortMode = settings.groupSortMode
             groupingMode = settings.channelGroupingMode
             espnPollingIntervalSeconds = settings.espnPollingIntervalSeconds
             sxmPollIntervalSeconds = settings.sxmPollIntervalSeconds
+            _sxmChannelGroups.value = settings.sxmChannelGroups
             enabledGroups = settings.enabledGroups?.toMutableSet()
             _enabledGroupNames.value = enabledGroups?.toSet()
             favoriteGroupOrder = settings.favoriteGroupOrder.toMutableList()
@@ -198,6 +245,15 @@ class AccountManager @Inject constructor(
             loadAllChannels()
             _initialLoadComplete.complete(Unit)
         }
+        scope.launch {
+            combine(
+                customPlaylistManager.playlists,
+                customPlaylistManager.isLoaded,
+                customPlaylistManager.loadError,
+            ) { _, _, _ -> Unit }.collect {
+                refreshRawInventoryAndSxm()
+            }
+        }
     }
 
     private fun startFeedPollingIfNeeded() {
@@ -207,9 +263,11 @@ class AccountManager @Inject constructor(
             return
         }
         if (feedJob != null) return // already polling
+        val generation = sxmRuntimeGeneration
         feedJob = scope.launch {
             while (true) {
                 val feed = sxmMetadataService.getFeed()
+                if (generation != sxmRuntimeGeneration) return@launch
                 if (feed.isNotEmpty()) {
                     _feedMetadata.value = feed
                     DebugLogger.log("Feed loaded: ${feed.size} channels with track data", DebugLogger.Category.SXM)
@@ -319,60 +377,76 @@ class AccountManager @Inject constructor(
     }
 
     suspend fun loadAllChannels() {
+        val generation = channelLoadGeneration.incrementAndGet()
         _isLoading.value = true
         _error.value = null
+        _rawChannelGroupInventory.value = RawChannelGroupInventory.Loading
+        providerInventoryLoaded = false
+        sxmMigrationJob?.cancel()
+        invalidateSxmRuntime(keepCurrentChannel = true)
+        sxmMetadataService.matchChannels(emptyList(), _sxmChannelGroups.value.orEmpty(), sortPrefixes)
 
         try {
-            val allChannels = mutableListOf<Channel>()
+            val visibleChannels = mutableListOf<Channel>()
+            val inventoryChannels = mutableListOf<Channel>()
             val loadErrors = mutableListOf<String>()
-            for (account in _accounts.value.filter { it.isEnabled }) {
+            val channelAccounts = _accounts.value.filter {
+                it.type is AccountType.M3U || it.type is AccountType.XtreamCodes
+            }
+            for (account in channelAccounts) {
                 try {
                     val channels = when (account.type) {
                         is AccountType.M3U -> m3uParser.parse(account.type.url)
                         is AccountType.XtreamCodes -> xtreamApi.getChannels(account.type)
-                        // Subsonic/Navidrome and Audiobookshelf accounts are media-library
-                        // providers — they produce no IPTV channels. Library browsing is
-                        // handled separately.
-                        is AccountType.Subsonic -> emptyList()
-                        is AccountType.Audiobookshelf -> emptyList()
+                        else -> emptyList()
                     }
                     val strip = (account.type as? AccountType.XtreamCodes)?.stripStreamIDs == true
-                    allChannels.addAll(channels.map {
+                    val accountChannels = channels.map {
                         it.copy(
                             id = "${account.id}:${it.id}",
                             accountName = account.name,
                             name = if (strip) it.name.replace(Regex("""^\d+\s*[|:\-.]+\s*"""), "") else it.name,
                         )
-                    })
+                    }
+                    inventoryChannels.addAll(accountChannels)
+                    if (account.isEnabled) visibleChannels.addAll(accountChannels)
                 } catch (e: Exception) {
                     loadErrors.add("Failed to load ${account.name}: ${UrlSanitizer.redact(e.message ?: "Unknown error")}")
                 }
             }
+            if (generation != channelLoadGeneration.get()) return
             // Only surface errors if no channels loaded at all
-            if (allChannels.isEmpty() && loadErrors.isNotEmpty()) {
+            if (visibleChannels.isEmpty() && loadErrors.isNotEmpty()) {
                 _error.value = loadErrors.first()
             }
 
-            val withFavorites = allChannels.map { channel ->
+            val withFavorites = visibleChannels.map { channel ->
                 val favKey = favoriteKey(channel)
                 channel.copy(isFavorite = favKey in favoriteIds)
             }
 
             _channels.value = withFavorites
+            rawProviderChannels = inventoryChannels
             rebuildGroups()
-            loadEPG()
-            // Async with retry (beads_adagio-59p.3.4): hasSxmChannels and feed
-            // polling update via onMappingBuilt when the matching table lands.
-            sxmMetadataService.matchChannels(withFavorites, sortPrefixes)
+            channelAccountCount = channelAccounts.size
+            channelLoadErrors = loadErrors.toList()
+            providerInventoryLoaded = true
+            refreshRawInventoryAndSxm(generation)
+            loadEPG(generation)
+            if (generation != channelLoadGeneration.get()) return
             espnScoreService.epgDataProvider = { _epgEntries.value }
             espnScoreService.matchChannels(withFavorites, sortPrefixes)
             if (espnPollingIntervalSeconds > 0) {
                 espnScoreService.setPollingEnabled(true)
             }
         } catch (e: Exception) {
+            if (generation != channelLoadGeneration.get()) return
             _error.value = UrlSanitizer.redact(e.message ?: "Unknown error")
+            channelLoadErrors = listOf(_error.value ?: "Channel inventory failed")
+            providerInventoryLoaded = true
+            refreshRawInventoryAndSxm(generation)
         } finally {
-            _isLoading.value = false
+            if (generation == channelLoadGeneration.get()) _isLoading.value = false
         }
     }
 
@@ -414,6 +488,7 @@ class AccountManager @Inject constructor(
     fun updateSortPrefixes(prefixes: List<String>) {
         sortPrefixes = prefixes
         rebuildGroups()
+        rematchSxmChannels()
     }
 
     fun updateSortMode(mode: SortMode) {
@@ -479,13 +554,18 @@ class AccountManager @Inject constructor(
     }
 
     private suspend fun saveGroupSettings() {
-        val settings = persistenceService.loadSettings()
-        persistenceService.saveSettings(
-            settings.copy(
-                enabledGroups = enabledGroups?.toSet(),
-                favoriteGroupOrder = favoriteGroupOrder.toList(),
-            )
-        )
+        try {
+            persistenceService.updateSettings { settings ->
+                settings.copy(
+                    enabledGroups = enabledGroups?.toSet(),
+                    favoriteGroupOrder = favoriteGroupOrder.toList(),
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            _error.value = "Could not save channel group settings."
+        }
     }
 
     suspend fun loadXtreamEPGForChannel(channel: Channel) {
@@ -508,16 +588,18 @@ class AccountManager @Inject constructor(
         }
     }
 
-    private suspend fun loadEPG() {
+    private suspend fun loadEPG(generation: Long) {
         val allEntries = mutableMapOf<String, List<EPGEntry>>()
 
         for (account in _accounts.value) {
+            if (generation != channelLoadGeneration.get()) return
             when (val type = account.type) {
                 is AccountType.M3U -> {
                     val epgUrl = type.epgUrl
                     if (!epgUrl.isNullOrBlank()) {
                         try {
                             val entries = epgParser.parse(epgUrl)
+                            if (generation != channelLoadGeneration.get()) return
                             allEntries.putAll(entries)
                         } catch (_: Exception) {
                             // EPG loading is best-effort
@@ -530,6 +612,7 @@ class AccountManager @Inject constructor(
                         val baseUrl = type.host.trimEnd('/')
                         val xmltvUrl = "$baseUrl/xmltv.php?username=${type.username}&password=${type.password}"
                         val entries = epgParser.parse(xmltvUrl)
+                        if (generation != channelLoadGeneration.get()) return
                         allEntries.putAll(entries)
                         DebugLogger.log(
                             "Loaded ${entries.size} EPG channels from XC provider ${account.name}",
@@ -545,7 +628,9 @@ class AccountManager @Inject constructor(
             }
         }
 
-        _epgEntries.value = allEntries
+        if (generation == channelLoadGeneration.get()) {
+            _epgEntries.value = allEntries
+        }
     }
 
     fun isTrackLoved(artist: String, title: String): Boolean {
@@ -586,19 +671,30 @@ class AccountManager @Inject constructor(
 
     fun startTrackMetadataPolling(channel: Channel) {
         trackMetadataJob?.cancel()
+        // Keep the tuned channel even while ineligible so selecting its raw
+        // group can attach metadata immediately without a retune.
+        currentMetadataChannel = channel
+        val selectedGroups = _sxmChannelGroups.value.orEmpty()
+        if (channel.group !in selectedGroups) {
+            _trackMetadata.value = _trackMetadata.value - channel.name
+            return
+        }
         // Remember the channel even when no mapping exists yet — a late
         // station-list success re-attaches metadata for it via onMappingBuilt
         // (beads_adagio-59p.3.4).
-        currentMetadataChannel = channel
         val stationId = sxmMetadataService.stationIdForChannel(channel.id)
         if (stationId == null) {
             DebugLogger.log("No SXM station mapping for channel: '${channel.name}' (id=${channel.id})", DebugLogger.Category.SXM)
             return
         }
         DebugLogger.log("Starting SXM metadata polling for '${channel.name}' → station='$stationId'", DebugLogger.Category.SXM)
+        val generation = sxmRuntimeGeneration
         trackMetadataJob = scope.launch {
             while (true) {
                 sxmMetadataService.getRecentTrack(stationId).onSuccess { track ->
+                    if (generation != sxmRuntimeGeneration || channel.group !in _sxmChannelGroups.value.orEmpty()) {
+                        return@onSuccess
+                    }
                     when {
                         track == null -> {
                             // Non-displayable cut / empty response — the source
@@ -651,14 +747,68 @@ class AccountManager @Inject constructor(
      * kept across the switch for exactly that.
      */
     fun sxmSourceChanged(newSource: SXMMetadataSource) {
-        trackMetadataJob?.cancel()
-        trackMetadataJob = null
-        feedJob?.cancel()
-        feedJob = null
-        hasSxmChannels = false
-        _trackMetadata.value = emptyMap()
-        _feedMetadata.value = emptyMap()
+        sxmRuntimeGeneration += 1
+        invalidateSxmRuntime(keepCurrentChannel = true, bumpGeneration = false)
         sxmMetadataService.sourceChanged(newSource)
+    }
+
+    suspend fun updateSxmChannelGroups(groupNames: Set<String>): Result<Unit> {
+        return sxmSelectionMutex.withLock {
+            applyAndSaveSxmChannelGroups(groupNames)
+        }
+    }
+
+    suspend fun toggleSxmChannelGroup(groupName: String): Result<Unit> = sxmSelectionMutex.withLock {
+        val current = _sxmChannelGroups.value.orEmpty()
+        applyAndSaveSxmChannelGroups(
+            if (groupName in current) current - groupName else current + groupName,
+        )
+    }
+
+    fun requestToggleSxmChannelGroup(groupName: String) {
+        scope.launch { toggleSxmChannelGroup(groupName) }
+    }
+
+    private suspend fun applyAndSaveSxmChannelGroups(groupNames: Set<String>): Result<Unit> {
+        val previous = _sxmChannelGroups.value
+        _sxmSelectionSaveError.value = null
+        _sxmChannelGroups.value = groupNames
+        rematchSxmChannels()
+        return try {
+            persistenceService.updateSettings { it.copy(sxmChannelGroups = groupNames) }
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            _sxmChannelGroups.value = previous
+            _sxmSelectionSaveError.value = "Could not save selection. Your previous selection was restored."
+            rematchSxmChannels()
+            Result.failure(error)
+        }
+    }
+
+    fun clearSxmSelectionSaveError() {
+        _sxmSelectionSaveError.value = null
+    }
+
+    fun retrySxmSelectionMigration() {
+        _sxmSelectionSaveError.value = null
+        scope.launch {
+            val settingsResult = persistenceService.loadSettingsResult()
+            if (settingsResult is SettingsLoadResult.Failure) {
+                settingsReadyForMigration = false
+                _sxmSelectionSaveError.value = "Settings could not be loaded. SiriusXM group migration is paused."
+                return@launch
+            }
+            settingsReadyForMigration = true
+            _sxmChannelGroups.value = settingsResult.settings?.sxmChannelGroups
+            refreshRawInventoryAndSxm()
+        }
+    }
+
+    suspend fun retrySxmChannelGroupInventory() {
+        customPlaylistManager.retryLoad()
+        loadAllChannels()
     }
 
     /**
@@ -684,7 +834,6 @@ class AccountManager @Inject constructor(
             }
         }
 
-        // Track all raw group names for group management
         _allGroupNames.value = allGrouped.keys
 
         // Filter by enabled groups
@@ -724,6 +873,77 @@ class AccountManager @Inject constructor(
                     sorted
                 }
             }
+    }
+
+    private fun customChannels(): List<Channel> = rawCustomChannels(customPlaylistManager.playlists.value)
+
+    private fun refreshRawInventoryAndSxm(generation: Long = channelLoadGeneration.get()) {
+        if (generation != channelLoadGeneration.get()) return
+        if (!providerInventoryLoaded || !customPlaylistManager.isLoaded.value) {
+            _rawChannelGroupInventory.value = RawChannelGroupInventory.Loading
+            rematchSxmChannels()
+            return
+        }
+        val customPlaylists = customPlaylistManager.playlists.value
+        val counts = rawChannelGroupCounts(rawProviderChannels, customPlaylists)
+        val inventoryErrors = channelLoadErrors + listOfNotNull(customPlaylistManager.loadError.value)
+        val inventory = when {
+            inventoryErrors.isNotEmpty() -> RawChannelGroupInventory.PartialFailure(
+                groupCounts = counts,
+                message = inventoryErrors.joinToString("\n"),
+            )
+            channelAccountCount == 0 && counts.isEmpty() -> RawChannelGroupInventory.NoAccounts
+            else -> RawChannelGroupInventory.Complete(counts)
+        }
+        _rawChannelGroupInventory.value = inventory
+
+        if (inventory is RawChannelGroupInventory.Complete &&
+            _sxmChannelGroups.value == null &&
+            settingsReadyForMigration &&
+            sxmMigrationJob?.isActive != true
+        ) {
+            val migrated = SxmChannelGroupPolicy.legacySelection(inventory.groupCounts.keys)
+            sxmMigrationJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                sxmSelectionMutex.withLock {
+                    if (generation != channelLoadGeneration.get() || _sxmChannelGroups.value != null) return@withLock
+                    try {
+                        persistenceService.updateSettings { it.copy(sxmChannelGroups = migrated) }
+                        if (generation != channelLoadGeneration.get()) return@withLock
+                        _sxmChannelGroups.value = migrated
+                        rematchSxmChannels()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        _sxmSelectionSaveError.value = "Could not save the migrated SiriusXM group selection."
+                    }
+                }
+            }
+        }
+        rematchSxmChannels()
+    }
+
+    private fun rematchSxmChannels() {
+        invalidateSxmRuntime(keepCurrentChannel = true)
+        sxmMetadataService.matchChannels(
+            channels = _channels.value + customChannels(),
+            selectedGroups = _sxmChannelGroups.value.orEmpty(),
+            sortPrefixes = sortPrefixes,
+        )
+    }
+
+    private fun invalidateSxmRuntime(
+        keepCurrentChannel: Boolean,
+        bumpGeneration: Boolean = true,
+    ) {
+        if (bumpGeneration) sxmRuntimeGeneration += 1
+        trackMetadataJob?.cancel()
+        trackMetadataJob = null
+        feedJob?.cancel()
+        feedJob = null
+        hasSxmChannels = false
+        _trackMetadata.value = emptyMap()
+        _feedMetadata.value = emptyMap()
+        if (!keepCurrentChannel) currentMetadataChannel = null
     }
 
     private fun strippedName(name: String): String {

@@ -8,6 +8,7 @@ import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.util.UrlSanitizer
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -133,9 +134,7 @@ class SetupViewModel @Inject constructor(
 
     fun skip() {
         viewModelScope.launch {
-            val settings = persistenceService.loadSettings()
-            persistenceService.saveSettings(settings.copy(setupCompleted = true))
-            _setupComplete.value = true
+            completeSetup()
         }
     }
 
@@ -180,10 +179,10 @@ class SetupViewModel @Inject constructor(
                     _currentStep.value = SetupStep.GROUP_SELECTION
                 } else {
                     // No groups found, skip to finish
-                    val settings = persistenceService.loadSettings()
-                    persistenceService.saveSettings(settings.copy(setupCompleted = true))
-                    _setupComplete.value = true
+                    completeSetup()
                 }
+            } catch (error: CancellationException) {
+                throw error
             } catch (e: Exception) {
                 _errorMessage.value = UrlSanitizer.redact(e.message ?: "Failed to save account")
             } finally {
@@ -206,9 +205,18 @@ class SetupViewModel @Inject constructor(
 
     fun finishSetup() {
         viewModelScope.launch {
-            val settings = persistenceService.loadSettings()
-            persistenceService.saveSettings(settings.copy(setupCompleted = true))
+            completeSetup()
+        }
+    }
+
+    private suspend fun completeSetup() {
+        try {
+            persistenceService.updateSettings { it.copy(setupCompleted = true) }
             _setupComplete.value = true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            _errorMessage.value = "Could not save setup completion. The existing settings file was not changed."
         }
     }
 }
