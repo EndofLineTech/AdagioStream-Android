@@ -7,6 +7,7 @@ import com.adagiostream.android.model.TextSizeMode
 import com.adagiostream.android.service.account.AccountManager
 import com.adagiostream.android.service.metadata.ESPNScoreService
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.service.persistence.SettingsLoadException
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.testutil.MainDispatcherRule
 import io.mockk.coEvery
@@ -14,6 +15,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -23,6 +25,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -118,6 +121,40 @@ class SettingsViewModelTest {
         vm.updateAppearanceMode(AppearanceMode.LIGHT)
         advanceUntilIdle()
         assertTrue(updatedSettings.any { it.appearanceMode == AppearanceMode.LIGHT })
+    }
+
+    @Test
+    fun `non-SXM save failure is exposed and can be retried`() = runTest {
+        coEvery { persistenceService.updateSettings(any()) } throws
+            SettingsLoadException(IllegalArgumentException("corrupt settings"))
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.updateAppearanceMode(AppearanceMode.DARK)
+        advanceUntilIdle()
+
+        assertEquals("Could not save settings. The existing settings file was not changed.", vm.settingsSaveError.value)
+
+        coEvery { persistenceService.updateSettings(any()) } coAnswers {
+            firstArg<(AppSettings) -> AppSettings>().invoke(AppSettings()).also(updatedSettings::add)
+        }
+        vm.retrySettingsSave()
+        advanceUntilIdle()
+
+        assertNull(vm.settingsSaveError.value)
+        assertTrue(updatedSettings.any { it.appearanceMode == AppearanceMode.DARK })
+    }
+
+    @Test
+    fun `settings save cancellation is not converted to a save error`() = runTest {
+        coEvery { persistenceService.updateSettings(any()) } throws CancellationException("screen stopped")
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.updateAppearanceMode(AppearanceMode.DARK)
+        advanceUntilIdle()
+
+        assertNull(vm.settingsSaveError.value)
     }
 
     // --- Offline Mode (baw.12) ---

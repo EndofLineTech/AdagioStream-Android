@@ -24,6 +24,7 @@ import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.VLCPlayerWrapper
 import com.adagiostream.android.util.DebugLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +56,9 @@ class SettingsViewModel @Inject constructor(
         it.copy(bufferDurationSeconds = it.bufferDurationSeconds.coerceIn(5, 15))
     })
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
+
+    private val _settingsSaveError = MutableStateFlow<String?>(null)
+    val settingsSaveError: StateFlow<String?> = _settingsSaveError.asStateFlow()
 
     val accountCount: StateFlow<Int> = accountManager.accounts
         .map { it.size }
@@ -112,6 +116,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _settings.value = persistenceService.loadSettings()
         }
+    }
+
+    fun retrySettingsSave() {
+        save()
+    }
+
+    fun clearSettingsSaveError() {
+        _settingsSaveError.value = null
     }
 
     fun updateBufferDuration(seconds: Int) {
@@ -426,12 +438,19 @@ class SettingsViewModel @Inject constructor(
             // is a snapshot from construction time, so whole-object saving it
             // would clobber playback state persisted since. Preserve the
             // coordinator-owned fields from disk; save everything else from here.
-            persistenceService.updateSettings { persisted ->
-                _settings.value.copy(
-                    shuffleEnabled = persisted.shuffleEnabled,
-                    repeatMode = persisted.repeatMode,
-                    sxmChannelGroups = persisted.sxmChannelGroups,
-                )
+            try {
+                persistenceService.updateSettings { persisted ->
+                    _settings.value.copy(
+                        shuffleEnabled = persisted.shuffleEnabled,
+                        repeatMode = persisted.repeatMode,
+                        sxmChannelGroups = persisted.sxmChannelGroups,
+                    )
+                }
+                _settingsSaveError.value = null
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                _settingsSaveError.value = "Could not save settings. The existing settings file was not changed."
             }
         }
     }

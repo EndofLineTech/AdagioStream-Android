@@ -7,6 +7,7 @@ import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.player.AudiobookFilePlayer
 import com.adagiostream.android.service.player.PlaybackSource
 import com.adagiostream.android.util.DebugLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -757,7 +758,13 @@ class AudiobookPlaybackCoordinator(
     private fun persistSpeed(value: Float) {
         val ps = persistenceService ?: return
         scope.launch {
-            ps.updateSettings { it.copy(audiobookSpeed = value) }
+            try {
+                ps.updateSettings { it.copy(audiobookSpeed = value) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                DebugLogger.log("Could not persist audiobook speed", DebugLogger.Category.PLAYER)
+            }
         }
     }
 

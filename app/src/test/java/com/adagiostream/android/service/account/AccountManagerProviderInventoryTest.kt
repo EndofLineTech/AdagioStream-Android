@@ -9,6 +9,7 @@ import com.adagiostream.android.service.persistence.PersistenceService
 import com.adagiostream.android.service.persistence.SettingsLoadResult
 import com.adagiostream.android.service.playlist.CustomPlaylistManager
 import com.adagiostream.android.testutil.MainDispatcherRule
+import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -32,12 +33,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
 class AccountManagerProviderInventoryTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
@@ -80,12 +84,23 @@ class AccountManagerProviderInventoryTest {
         https://stream.example/live
     """.trimIndent()
 
-    private fun account(id: String, path: String, enabled: Boolean = true) = Account(
+    private fun account(id: String, path: String, enabled: Boolean = true, epgPath: String? = null) = Account(
         id = id,
         name = id,
-        type = AccountType.M3U(server.url(path).toString()),
+        type = AccountType.M3U(
+            url = server.url(path).toString(),
+            epgUrl = epgPath?.let { server.url(it).toString() },
+        ),
         isEnabled = enabled,
     )
+
+    private fun epg(title: String) = """
+        <tv>
+          <programme channel="channel" start="20250101120000 +0000" stop="20250101130000 +0000">
+            <title>$title</title>
+          </programme>
+        </tv>
+    """.trimIndent()
 
     private fun manager(accounts: List<Account>): AccountManager {
         coEvery { persistence.loadAccounts() } returns accounts
@@ -188,6 +203,56 @@ class AccountManagerProviderInventoryTest {
 
         assertTrue(manager.rawChannelGroupInventory.value is RawChannelGroupInventory.PartialFailure)
         assertNull(manager.sxmChannelGroups.value)
+    }
+
+    @Test
+    fun `stale EPG response cannot replace newer EPG or run downstream publications`() = runTest {
+        storedSettings = AppSettings(sxmChannelGroups = emptySet())
+        val epgRequest = AtomicInteger()
+        val oldEpgStarted = CountDownLatch(1)
+        val releaseOldEpg = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                "/provider.m3u" -> response(m3u("Channels"))
+                "/guide.xml" -> when (epgRequest.incrementAndGet()) {
+                    1 -> response(epg("Initial"))
+                    2 -> {
+                        oldEpgStarted.countDown()
+                        releaseOldEpg.await(5, TimeUnit.SECONDS)
+                        response(epg("Stale"))
+                    }
+                    else -> response(epg("Newer"))
+                }
+                else -> MockResponse.Builder().code(404).build()
+            }
+        }
+        val manager = manager(listOf(account("provider", "/provider.m3u", epgPath = "/guide.xml")))
+        manager.awaitInitialLoad()
+        assertEquals("Initial", manager.epgEntries.value.getValue("channel").single().title)
+
+        val old = async { manager.loadAllChannels() }
+        var oldStarted = false
+        repeat(500) {
+            if (!oldStarted) {
+                runCurrent()
+                oldStarted = oldEpgStarted.await(10, TimeUnit.MILLISECONDS)
+            }
+        }
+        assertTrue(oldStarted)
+        val newer = async { manager.loadAllChannels() }
+        newer.await()
+        assertEquals("Newer", manager.epgEntries.value.getValue("channel").single().title)
+        verify { espn.matchChannels(any(), any()) }
+
+        clearMocks(espn, metadata, answers = false, recordedCalls = true)
+        releaseOldEpg.countDown()
+        old.await()
+        runCurrent()
+
+        assertEquals("Newer", manager.epgEntries.value.getValue("channel").single().title)
+        verify(exactly = 0) { espn.matchChannels(any(), any()) }
+        verify(exactly = 0) { metadata.matchChannels(any(), any(), any()) }
+        io.mockk.coVerify(exactly = 0) { persistence.updateSettings(any()) }
     }
 
     private fun response(body: String) = MockResponse.Builder().code(200).body(body).build()

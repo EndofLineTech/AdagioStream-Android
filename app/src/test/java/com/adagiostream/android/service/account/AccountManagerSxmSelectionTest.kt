@@ -163,6 +163,19 @@ class AccountManagerSxmSelectionTest {
     }
 
     @Test
+    fun `immediate toggle save failure is contained and restores the rendered selection`() = runTest {
+        val manager = manager(setOf("Old"))
+        manager.awaitInitialLoad()
+        coEvery { persistence.updateSettings(any()) } throws java.io.IOException("disk full")
+
+        manager.requestToggleSxmChannelGroup("New")
+        runCurrent()
+
+        assertEquals(setOf("Old"), manager.sxmChannelGroups.value)
+        assertNotNull(manager.sxmSelectionSaveError.value)
+    }
+
+    @Test
     fun `selecting the tuned channel group attaches metadata without a retune`() = runTest {
         val manager = manager(emptySet())
         manager.awaitInitialLoad()

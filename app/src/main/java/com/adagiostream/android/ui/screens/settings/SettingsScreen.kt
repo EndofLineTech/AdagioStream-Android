@@ -91,6 +91,7 @@ fun SettingsScreen(
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val favoriteChannels by viewModel.favoriteChannels.collectAsStateWithLifecycle()
     val sxmChannelGroups by viewModel.sxmChannelGroups.collectAsStateWithLifecycle()
+    val settingsSaveError by viewModel.settingsSaveError.collectAsStateWithLifecycle()
     var showClearFavoritesDialog by remember { mutableStateOf(false) }
     var showDeleteStep1 by remember { mutableStateOf(false) }
     var showDeleteStep2 by remember { mutableStateOf(false) }
@@ -126,6 +127,15 @@ fun SettingsScreen(
             text = "Settings",
             style = MaterialTheme.typography.headlineMedium,
         )
+
+        settingsSaveError?.let { message ->
+            Spacer(modifier = Modifier.height(12.dp))
+            SettingsSaveErrorCard(
+                message = message,
+                onRetry = viewModel::retrySettingsSave,
+                onDismiss = viewModel::clearSettingsSaveError,
+            )
+        }
 
         // ── Accounts & Channels ──────────────────────────────
 
@@ -503,32 +513,7 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         if (onNavigateToSxmChannelGroups != null) {
-            Card(
-                onClick = onNavigateToSxmChannelGroups,
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("SiriusXM Channel Groups", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            sxmSelectionSummary(sxmChannelGroups),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "Edit SiriusXM Channel Groups",
-                    )
-                }
-            }
+            SxmChannelGroupsSettingsCard(sxmChannelGroups, onNavigateToSxmChannelGroups)
             FooterText("Choose which raw channel groups can use SiriusXM now-playing data.")
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -992,6 +977,22 @@ internal fun SxmChannelGroupsSettingsCard(selection: Set<String>?, onClick: () -
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "Edit SiriusXM Channel Groups",
             )
+        }
+    }
+}
+
+@Composable
+private fun SettingsSaveErrorCard(message: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Text(message, color = MaterialTheme.colorScheme.onErrorContainer)
+            Row(modifier = Modifier.align(Alignment.End)) {
+                TextButton(onClick = onDismiss) { Text("Dismiss") }
+                TextButton(onClick = onRetry) { Text("Retry") }
+            }
         }
     }
 }

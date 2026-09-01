@@ -94,5 +94,9 @@ class CustomPlaylistSxmIntegrationTest {
             manager.sxmChannelGroups.value,
         ) as SxmGroupEditorState.Groups
         assertEquals(listOf("Custom SXM"), afterDelete.unavailable.map { it.name })
+
+        val afterDeleteReload = CustomPlaylistManager(persistence)
+        runCurrent()
+        assertTrue(afterDeleteReload.playlists.value.single().groups.isEmpty())
     }
 }

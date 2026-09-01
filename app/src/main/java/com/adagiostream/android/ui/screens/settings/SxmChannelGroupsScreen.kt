@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adagiostream.android.service.account.RawChannelGroupInventory
+import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
 
 internal data class SxmGroupOption(
@@ -131,21 +132,43 @@ fun SxmChannelGroupsScreen(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val inventory by viewModel.rawChannelGroupInventory.collectAsStateWithLifecycle()
-    val selection by viewModel.sxmChannelGroups.collectAsStateWithLifecycle()
-    val saveError by viewModel.sxmSelectionSaveError.collectAsStateWithLifecycle()
-    var query by rememberSaveable { mutableStateOf("") }
-    val state = buildSxmGroupEditorState(inventory, selection, query, saveError)
-
-    SxmChannelGroupsContent(
-        state = state,
-        query = query,
-        migrationPending = selection == null,
-        onQueryChange = { query = it },
+    SxmChannelGroupsRoute(
+        inventory = viewModel.rawChannelGroupInventory,
+        selection = viewModel.sxmChannelGroups,
+        saveError = viewModel.sxmSelectionSaveError,
         onToggle = viewModel::toggleSxmChannelGroup,
         onRetryInventory = viewModel::retrySxmChannelGroupInventory,
         onRetryMigration = viewModel::retrySxmSelectionMigration,
         onDismissSaveError = viewModel::clearSxmSelectionSaveError,
+        onBack = onBack,
+    )
+}
+
+@Composable
+internal fun SxmChannelGroupsRoute(
+    inventory: StateFlow<RawChannelGroupInventory>,
+    selection: StateFlow<Set<String>?>,
+    saveError: StateFlow<String?>,
+    onToggle: (String) -> Unit = {},
+    onRetryInventory: () -> Unit = {},
+    onRetryMigration: () -> Unit = {},
+    onDismissSaveError: () -> Unit = {},
+    onBack: () -> Unit = {},
+) {
+    val currentInventory by inventory.collectAsStateWithLifecycle()
+    val currentSelection by selection.collectAsStateWithLifecycle()
+    val currentSaveError by saveError.collectAsStateWithLifecycle()
+    var query by rememberSaveable { mutableStateOf("") }
+
+    SxmChannelGroupsContent(
+        state = buildSxmGroupEditorState(currentInventory, currentSelection, query, currentSaveError),
+        query = query,
+        migrationPending = currentSelection == null,
+        onQueryChange = { query = it },
+        onToggle = onToggle,
+        onRetryInventory = onRetryInventory,
+        onRetryMigration = onRetryMigration,
+        onDismissSaveError = onDismissSaveError,
         onBack = onBack,
     )
 }

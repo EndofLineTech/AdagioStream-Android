@@ -432,7 +432,7 @@ class AccountManager @Inject constructor(
             channelLoadErrors = loadErrors.toList()
             providerInventoryLoaded = true
             refreshRawInventoryAndSxm(generation)
-            loadEPG()
+            loadEPG(generation)
             if (generation != channelLoadGeneration.get()) return
             espnScoreService.epgDataProvider = { _epgEntries.value }
             espnScoreService.matchChannels(withFavorites, sortPrefixes)
@@ -554,11 +554,17 @@ class AccountManager @Inject constructor(
     }
 
     private suspend fun saveGroupSettings() {
-        persistenceService.updateSettings { settings ->
-            settings.copy(
-                enabledGroups = enabledGroups?.toSet(),
-                favoriteGroupOrder = favoriteGroupOrder.toList(),
-            )
+        try {
+            persistenceService.updateSettings { settings ->
+                settings.copy(
+                    enabledGroups = enabledGroups?.toSet(),
+                    favoriteGroupOrder = favoriteGroupOrder.toList(),
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            _error.value = "Could not save channel group settings."
         }
     }
 
@@ -582,16 +588,18 @@ class AccountManager @Inject constructor(
         }
     }
 
-    private suspend fun loadEPG() {
+    private suspend fun loadEPG(generation: Long) {
         val allEntries = mutableMapOf<String, List<EPGEntry>>()
 
         for (account in _accounts.value) {
+            if (generation != channelLoadGeneration.get()) return
             when (val type = account.type) {
                 is AccountType.M3U -> {
                     val epgUrl = type.epgUrl
                     if (!epgUrl.isNullOrBlank()) {
                         try {
                             val entries = epgParser.parse(epgUrl)
+                            if (generation != channelLoadGeneration.get()) return
                             allEntries.putAll(entries)
                         } catch (_: Exception) {
                             // EPG loading is best-effort
@@ -604,6 +612,7 @@ class AccountManager @Inject constructor(
                         val baseUrl = type.host.trimEnd('/')
                         val xmltvUrl = "$baseUrl/xmltv.php?username=${type.username}&password=${type.password}"
                         val entries = epgParser.parse(xmltvUrl)
+                        if (generation != channelLoadGeneration.get()) return
                         allEntries.putAll(entries)
                         DebugLogger.log(
                             "Loaded ${entries.size} EPG channels from XC provider ${account.name}",
@@ -619,7 +628,9 @@ class AccountManager @Inject constructor(
             }
         }
 
-        _epgEntries.value = allEntries
+        if (generation == channelLoadGeneration.get()) {
+            _epgEntries.value = allEntries
+        }
     }
 
     fun isTrackLoved(artist: String, title: String): Boolean {

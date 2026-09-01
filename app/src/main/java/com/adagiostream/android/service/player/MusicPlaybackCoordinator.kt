@@ -5,6 +5,8 @@ import com.adagiostream.android.service.download.LocalFirstResolver
 import com.adagiostream.android.service.navidrome.NavidromeApi
 import com.adagiostream.android.service.navidrome.Track
 import com.adagiostream.android.service.persistence.PersistenceService
+import com.adagiostream.android.util.DebugLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -201,8 +203,14 @@ class MusicPlaybackCoordinator @Inject constructor(
     private fun persistPlaybackSettings() {
         val ps = persistenceService ?: return
         scope.launch {
-            ps.updateSettings { current ->
-                current.copy(shuffleEnabled = queue.shuffleEnabled, repeatMode = queue.repeatMode)
+            try {
+                ps.updateSettings { current ->
+                    current.copy(shuffleEnabled = queue.shuffleEnabled, repeatMode = queue.repeatMode)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                DebugLogger.log("Could not persist shuffle/repeat settings", DebugLogger.Category.PLAYER)
             }
         }
     }
